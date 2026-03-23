@@ -21,7 +21,7 @@ When the `/qa` command is invoked, you are stepping into the **QA Engineer** rol
    - Wait for their selection, then proceed to test the selected platform(s).
    - QA is responsible for **technical verification** and regression control. Do not treat green tests alone as final product acceptance.
    - For server-side changes, start the relevant service(s) when feasible and verify the requirement through the real request path or full end-to-end chain. Do not stop at code reading or unit tests if the service can be run.
-   - For frontend changes, use Playwright, `browser-use`, or an equivalent real-browser tool to click through the page and verify the implemented behavior.
+   - For frontend changes, use the platform-appropriate real interaction tool: use `minipro` or an equivalent mini-program automation tool for Mini Program flows, and use Playwright, `browser-use`, or an equivalent real-browser tool for Web flows.
    - Use terminal test commands (`npm test`, `pytest`, etc.) and targeted suites as supporting evidence, not as the only verification when a real runnable surface exists.
    - If bugs are found, clearly document them and instruct the Dev role to fix them (or fix them yourself while acting as Dev, but log it as a QA rejection).
 4. **Hand-off**: Write a formal QA test report to `.ai_company_state/artifacts/qa_report.md`.

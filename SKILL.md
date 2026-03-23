@@ -33,11 +33,12 @@ If the request targets code in the current workspace, continue after the workflo
 - inspect the actual repository, implement the requirement, and verify the real code path
 - run real QA as technical verification:
   - for server-side changes, start the relevant service(s) when feasible and verify the requirement through the real request path or full end-to-end chain
-  - for frontend changes, use Playwright, `browser-use`, or an equivalent real-browser tool to interact with the page
+  - for frontend changes, use the platform-appropriate real interaction tool: use `minipro` or an equivalent mini-program automation tool for Mini Program flows, and use Playwright, `browser-use`, or an equivalent real-browser tool for Web flows
   - treat tests and suites as supporting evidence, not the entire verification story when a runnable surface exists
 - run real Acceptance as product-level validation:
   - ignore implementation details and judge only the product behavior
-  - operate the final user-facing surface with Playwright, `browser-use`, or the closest real-user interaction method, and compare the result against the original pain point, user scenario, and expected user-visible behavior
+  - operate the final user-facing surface with `minipro` or an equivalent mini-program automation tool for Mini Program flows, and Playwright, `browser-use`, or the closest real-user interaction method for Web flows
+  - compare the result against the original pain point, user scenario, and expected user-visible behavior
 - if product-level evidence is blocked by missing credentials, external systems, or unavailable platforms, report the block and do not claim real acceptance
 
 Then summarize:
