@@ -26,11 +26,22 @@ For agent-friendly requests, do not ask the user to reformat the request into a 
 python3 -m ai_company agent-run --message "<the user's original message>" --print-review
 ```
 
+Treat the returned workflow `acceptance_status` as workflow metadata only. The default local runtime uses a deterministic backend, so its QA and Acceptance outputs do not count as real repository verification.
+
+If the request targets code in the current workspace, continue after the workflow run instead of stopping:
+- create an isolated branch/worktree before editing when the current worktree is dirty or the user explicitly asked for a new branch
+- inspect the actual repository, implement the requirement, and verify the real code path
+- run real QA as technical verification with concrete commands or browser checks that match the changed surface
+- run real Acceptance as product-level validation against the original pain point, user scenario, and expected user-visible behavior
+- if product-level evidence is blocked by missing credentials, external systems, or unavailable platforms, report the block and do not claim real acceptance
+
 Then summarize:
 - the generated `session_id`
-- the `acceptance_status`
+- the workflow `acceptance_status`
 - the `review.md` path
 - any downstream findings and learned memory updates
+- the real QA commands and results
+- the real product-level Acceptance decision and any remaining gaps
 
 ## Procedure:
 You will sequentially act out the roles of Product -> Dev -> QA -> Ops -> Acceptance without stopping for user input between stages (unless explicitly blocked/failed).
