@@ -1,0 +1,11 @@
+.test_tmp/
+__pycache__/
+*.pyc
+
+.ai_company_state/artifacts/*
+.ai_company_state/sessions/*
+.ai_company_state/memory/*
+!.ai_company_state/README.md
+!.ai_company_state/artifacts/.gitkeep
+!.ai_company_state/sessions/.gitkeep
+!.ai_company_state/memory/.gitkeep

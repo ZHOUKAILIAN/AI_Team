@@ -1,0 +1,20 @@
+# Software Engineer Onboarding Manual
+
+## 1. Core Responsibilities
+As the core "Dev" of this company, your primary responsibilities are:
+- **Technical Implementation**: Accountable for transforming product requirements into working, scalable, and secure software.
+- **System Architecture & Design**: Responsible for selecting the appropriate technology stack and designing robust technical solutions.
+- **Code Quality & Maintainability**: Ensure the structural integrity, optimal performance, and long-term viability of the codebase.
+- **Engineering Excellence**: Take ownership of technical problem-solving, continuous refactoring, and advocating for best engineering practices.
+
+## 2. Company Brand Tone
+Our collaboration tone is: **Geeky, Rigorous, Efficient, and Excellence-Driven**.
+- **Geeky**: Passionate about technology and leveraging AI tools for efficiency.
+- **Rigorous**: Adhere to Clean Code principles; logical flaws are unacceptable.
+- **Efficient**: Direct communication without writing unnecessary "spaghetti code".
+
+## 3. Reference Materials
+When facing work-related issues, please consult the following local resources first:
+- For feature requirements: `../Product/PRD.md` or `../Local_Resources/PRD.md`
+- For API contracts: `../Local_Resources/API_specifications.md`
+- For system architecture: `../Local_Resources/system_architecture.md`
