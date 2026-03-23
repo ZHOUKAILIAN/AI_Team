@@ -33,11 +33,13 @@ If the request targets code in the current workspace, continue after the workflo
 - inspect the actual repository, implement the requirement, and verify the real code path
 - run real QA as technical verification:
   - for server-side changes, start the relevant service(s) when feasible and verify the requirement through the real request path or full end-to-end chain
-  - for frontend changes, use the platform-appropriate real interaction tool: use `minipro` or an equivalent mini-program automation tool for Mini Program flows, and use Playwright, `browser-use`, or an equivalent real-browser tool for Web flows
+  - if the user already specified the verification platform, treat that as the platform choice instead of asking again; phrases such as `Mini Program`, `小程序`, or `miniprogram` mean Mini Program verification, and phrases such as `Web`, `网页`, or `browser-use` mean Web verification
+  - for frontend changes, use `miniprogram` for Mini Program flows and `browser-use` for Web flows
   - treat tests and suites as supporting evidence, not the entire verification story when a runnable surface exists
 - run real Acceptance as product-level validation:
   - ignore implementation details and judge only the product behavior
-  - operate the final user-facing surface with `minipro` or an equivalent mini-program automation tool for Mini Program flows, and Playwright, `browser-use`, or the closest real-user interaction method for Web flows
+  - if the user already specified the verification platform, do not ask again; carry that platform choice into Acceptance
+  - operate the final user-facing surface with `miniprogram` for Mini Program flows and `browser-use` for Web flows
   - compare the result against the original pain point, user scenario, and expected user-visible behavior
 - if product-level evidence is blocked by missing credentials, external systems, or unavailable platforms, report the block and do not claim real acceptance
 
@@ -64,8 +66,10 @@ You will sequentially act out the roles of Product -> Dev -> QA -> Ops -> Accept
 
 3. **Step 3: QA Stage**
    - Read `QA/context.md`.
-   - **Ask the user which platforms to verify (A: Mini Program, B: Web, C: Both) and temporarily pause for their response.**
-   - Test the feature on the selected platforms. Use `gstack browse` or CLI tests. If it fails, fix the code (revert briefly to Dev role mindset) until it passes.
+   - If the user has not already specified the verification platform, **ask which platforms to verify (A: Mini Program, B: Web, C: Both) and temporarily pause for their response.**
+   - If the user already specified `Mini Program`, `小程序`, or `miniprogram`, treat that as selecting Mini Program verification and use `miniprogram`.
+   - If the user already specified `Web`, `网页`, or `browser-use`, treat that as selecting Web verification and use `browser-use`.
+   - Test the feature on the selected platforms. Use `miniprogram` for Mini Program flows, `browser-use` for Web flows, and CLI tests as supporting evidence. If it fails, fix the code (revert briefly to Dev role mindset) until it passes.
    - Write `.ai_company_state/artifacts/qa_report.md` and *immediately proceed*.
 
 4. **Step 4: Ops Stage**

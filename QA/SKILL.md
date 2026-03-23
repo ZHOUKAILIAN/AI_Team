@@ -14,14 +14,15 @@ When the `/qa` command is invoked, you are stepping into the **QA Engineer** rol
    - Read the PRD from `.ai_company_state/artifacts/prd.md` to understand the *expected* behavior.
    - Read `.ai_company_state/artifacts/dev_notes.md` to understand the *implemented* areas.
 3. **Execute**: 
-   - Before testing, **ask the user (CEO) which platforms to verify by providing options**: 
+   - If the user already specified the verification platform, treat that as the platform choice instead of asking again. Phrases such as `Mini Program`, `小程序`, or `miniprogram` mean Mini Program verification, and phrases such as `Web`, `网页`, or `browser-use` mean Web verification.
+   - Otherwise, **ask the user (CEO) which platforms to verify by providing options**: 
      - A) Mini Program (小程序)
      - B) Web (网页)
      - C) Both (都要)
    - Wait for their selection, then proceed to test the selected platform(s).
    - QA is responsible for **technical verification** and regression control. Do not treat green tests alone as final product acceptance.
    - For server-side changes, start the relevant service(s) when feasible and verify the requirement through the real request path or full end-to-end chain. Do not stop at code reading or unit tests if the service can be run.
-   - For frontend changes, use the platform-appropriate real interaction tool: use `minipro` or an equivalent mini-program automation tool for Mini Program flows, and use Playwright, `browser-use`, or an equivalent real-browser tool for Web flows.
+   - For frontend changes, use `miniprogram` for Mini Program flows and `browser-use` for Web flows.
    - Use terminal test commands (`npm test`, `pytest`, etc.) and targeted suites as supporting evidence, not as the only verification when a real runnable surface exists.
    - If bugs are found, clearly document them and instruct the Dev role to fix them (or fix them yourself while acting as Dev, but log it as a QA rejection).
 4. **Hand-off**: Write a formal QA test report to `.ai_company_state/artifacts/qa_report.md`.

@@ -25,6 +25,9 @@ class SkillPackageTests(unittest.TestCase):
         self.assertIn("name: ai-company-workflow", content)
         self.assertIn("/company-run", content)
         self.assertIn("company-run.sh", content)
+        self.assertIn("miniprogram", content)
+        self.assertIn("browser-use", content)
+        self.assertIn("already specified the verification platform", content)
 
     def test_installable_skill_front_matter_is_valid_yaml(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]

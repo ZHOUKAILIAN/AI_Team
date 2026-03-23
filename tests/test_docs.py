@@ -21,6 +21,24 @@ class DocsTests(unittest.TestCase):
         self.assertIn("python3 -m ai_company agent-run", skill)
         self.assertIn("/company-run", skill)
 
+    def test_skill_documents_platform_verification_rules(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        root_skill = (repo_root / "SKILL.md").read_text()
+        qa_skill = (repo_root / "QA" / "SKILL.md").read_text()
+        acceptance_skill = (repo_root / "Acceptance" / "SKILL.md").read_text()
+
+        self.assertIn("miniprogram", root_skill)
+        self.assertIn("browser-use", root_skill)
+        self.assertIn("already specified the verification platform", root_skill)
+        self.assertNotIn("gstack browse", root_skill)
+        self.assertNotIn("`minipro`", root_skill)
+        self.assertIn("already specified the verification platform", qa_skill)
+        self.assertIn("miniprogram", qa_skill)
+        self.assertIn("browser-use", qa_skill)
+        self.assertIn("already specified the verification platform", acceptance_skill)
+        self.assertIn("miniprogram", acceptance_skill)
+        self.assertIn("browser-use", acceptance_skill)
+
     def test_readme_documents_installable_skill_flow(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
         readme = (repo_root / "README_zh.md").read_text()

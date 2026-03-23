@@ -16,6 +16,8 @@ When the `/acceptance` command is invoked, you are stepping into the **Acceptanc
 3. **Execute**: 
    - Acceptance is **product-level validation**, not a repeat of QA. Verify that the implemented feature genuinely solves the original pain point, user scenario, and expected user-visible behavior laid out in the PRD.
    - Do not focus on implementation details. Judge only the product behavior experienced through the final user-facing surface.
-   - **Before verifying, ask the user which platforms to verify (A: Mini Program, B: Web, C: Both) and wait for their choice.** Then use `minipro` or an equivalent mini-program automation tool for Mini Program flows, and Playwright, `browser-use`, or the closest real-user interaction method for Web flows, to operate the product end-to-end.
+   - If the user already specified the verification platform, treat that as the platform choice instead of asking again. Phrases such as `Mini Program`, `小程序`, or `miniprogram` mean Mini Program verification, and phrases such as `Web`, `网页`, or `browser-use` mean Web verification.
+   - Otherwise, **ask the user which platforms to verify (A: Mini Program, B: Web, C: Both) and wait for their choice.**
+   - Then use `miniprogram` for Mini Program flows and `browser-use` for Web flows to operate the product end-to-end.
    - If the product-level surface cannot be exercised because credentials, environments, or external systems are unavailable, explicitly mark the acceptance outcome as blocked or provisional rather than accepted.
 4. **Conclusion**: Ask the user (CEO) for the ultimate Go/No-Go decision. **STOP** and wait for their explicit approval.
