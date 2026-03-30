@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .backend import DeterministicBackend, WorkflowBackend
-from .models import Finding, WorkflowResult
+from .models import Finding, WorkflowResult, WorkflowSummary
 from .review import build_session_review
 from .roles import load_role_profiles
 from .state import StateStore
@@ -32,6 +32,15 @@ class WorkflowOrchestrator:
         stage_records = []
         findings: list[Finding] = []
         acceptance_status = "pending"
+        summary = WorkflowSummary(
+            session_id=session.session_id,
+            current_state="In Progress",
+            current_stage="Intake",
+            artifact_paths={
+                "request": str(session.artifact_dir / "request.md"),
+                "workflow_summary": str(self.state_store.workflow_summary_path(session.session_id)),
+            },
+        )
 
         for stage in self.stage_order:
             role = roles[stage]
@@ -43,7 +52,19 @@ class WorkflowOrchestrator:
                 findings=findings,
             )
             stage_artifacts[stage] = output.artifact_content
-            stage_records.append(self.state_store.record_stage(session, output))
+            stage_record = self.state_store.record_stage(session, output)
+            stage_records.append(stage_record)
+            summary.current_stage = stage
+            summary.artifact_paths[stage.lower()] = str(stage_record.artifact_path)
+            if stage == "Product":
+                summary.prd_status = "completed"
+            elif stage == "Dev":
+                summary.dev_status = "completed"
+            elif stage == "QA":
+                summary.qa_status = "completed"
+            elif stage == "Acceptance" and output.acceptance_status:
+                summary.acceptance_status = output.acceptance_status
+            self.state_store.save_workflow_summary(session, summary)
 
             for finding in output.findings:
                 self.state_store.apply_learning(finding)
@@ -54,6 +75,9 @@ class WorkflowOrchestrator:
 
         if acceptance_status == "pending":
             acceptance_status = "accepted" if not findings else "rejected"
+        summary.current_state = "Completed"
+        summary.acceptance_status = acceptance_status
+        self.state_store.save_workflow_summary(session, summary)
 
         review = build_session_review(
             stage_artifacts=stage_artifacts,
