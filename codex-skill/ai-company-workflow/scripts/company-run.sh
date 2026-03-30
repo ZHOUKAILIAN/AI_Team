@@ -20,4 +20,4 @@ else
 fi
 
 cd "${RUNTIME_DIR}"
-python3 -m ai_company agent-run --message "${RAW_MESSAGE}" --print-review
+python3 -m ai_company start-session --message "${RAW_MESSAGE}"

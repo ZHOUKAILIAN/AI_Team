@@ -14,6 +14,38 @@ class SkillPackageTests(unittest.TestCase):
             raise AssertionError(f"{path} is missing YAML front matter")
         return f"---{parts[1]}---\n"
 
+    def test_root_skill_describes_single_session_state_machine(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        root_skill = repo_root / "SKILL.md"
+
+        self.assertTrue(root_skill.exists())
+        content = root_skill.read_text()
+        self.assertIn("Intake", content)
+        self.assertIn("ProductDraft", content)
+        self.assertIn("WaitForCEOApproval", content)
+        self.assertIn("Dev", content)
+        self.assertIn("QA", content)
+        self.assertIn("Acceptance", content)
+        self.assertIn("WaitForHumanDecision", content)
+        self.assertIn("prd.md", content)
+        self.assertIn("implementation.md", content)
+        self.assertIn("qa_report.md", content)
+        self.assertIn("acceptance_report.md", content)
+        self.assertIn("workflow_summary.md", content)
+        self.assertIn("QA must independently rerun verification", content)
+        self.assertIn("missing evidence", content)
+        self.assertIn("blocked", content)
+        self.assertIn("Acceptance recommends", content)
+        self.assertIn("human decides", content)
+        self.assertIn(
+            'python3 -m ai_company start-session --message "<the user\'s original message>"',
+            content,
+        )
+        self.assertIn(
+            "deterministic runtime output is workflow metadata only, not real QA/Acceptance evidence",
+            content,
+        )
+
     def test_installable_skill_exists_and_declares_trigger(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
         skill_path = repo_root / "codex-skill" / "ai-company-workflow" / "SKILL.md"
@@ -25,9 +57,31 @@ class SkillPackageTests(unittest.TestCase):
         self.assertIn("name: ai-company-workflow", content)
         self.assertIn("/company-run", content)
         self.assertIn("company-run.sh", content)
-        self.assertIn("miniprogram", content)
-        self.assertIn("browser-use", content)
-        self.assertIn("already specified the verification platform", content)
+        self.assertIn("Intake", content)
+        self.assertIn("ProductDraft", content)
+        self.assertIn("WaitForCEOApproval", content)
+        self.assertIn("Dev", content)
+        self.assertIn("QA", content)
+        self.assertIn("Acceptance", content)
+        self.assertIn("WaitForHumanDecision", content)
+        self.assertIn("prd.md", content)
+        self.assertIn("implementation.md", content)
+        self.assertIn("qa_report.md", content)
+        self.assertIn("acceptance_report.md", content)
+        self.assertIn("workflow_summary.md", content)
+        self.assertIn("QA must independently rerun verification", content)
+        self.assertIn("missing evidence", content)
+        self.assertIn("blocked", content)
+        self.assertIn("Acceptance recommends", content)
+        self.assertIn("human decides", content)
+        self.assertIn(
+            'python3 -m ai_company start-session --message "<the user\'s original message>"',
+            content,
+        )
+        self.assertIn(
+            "deterministic runtime output is workflow metadata only, not real QA/Acceptance evidence",
+            content,
+        )
 
     def test_installable_skill_front_matter_is_valid_yaml(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
@@ -137,7 +191,9 @@ class SkillPackageTests(unittest.TestCase):
 
             self.assertEqual(run_result.returncode, 0)
             self.assertIn("session_id:", run_result.stdout)
-            self.assertIn("acceptance_status:", run_result.stdout)
+            self.assertIn("artifact_dir:", run_result.stdout)
+            self.assertIn("summary_path:", run_result.stdout)
+            self.assertNotIn("acceptance_status:", run_result.stdout)
 
 
 if __name__ == "__main__":
