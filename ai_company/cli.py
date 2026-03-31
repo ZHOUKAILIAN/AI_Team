@@ -20,7 +20,10 @@ def main(argv: list[str] | None = None) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ai_company",
-        description="AI_Team single-session workflow CLI. Use start-session to bootstrap real session scaffolds.",
+        description=(
+            "AI_Team single-session workflow CLI. Prefer start-session for the real skill-driven workflow; "
+            "run/agent-run are deterministic demo commands."
+        ),
     )
     parser.add_argument("--repo-root", type=Path, default=Path("."))
     parser.add_argument("--state-root", type=Path)
@@ -31,8 +34,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     run_parser = subparsers.add_parser(
         "run",
-        help="Demo command: execute the deterministic workflow session from an explicit request.",
-        description="Demo command: execute the deterministic workflow session from an explicit request.",
+        help=(
+            "Demo command: execute the deterministic workflow session from an explicit request "
+            "(real workflow entrypoint: start-session)."
+        ),
+        description=(
+            "Demo command: execute the deterministic workflow session from an explicit request. "
+            "For the real skill-driven workflow, use start-session."
+        ),
     )
     run_parser.add_argument("--request", required=True, help="Raw feature or process request.")
     run_parser.add_argument(
@@ -44,16 +53,28 @@ def build_parser() -> argparse.ArgumentParser:
 
     start_session_parser = subparsers.add_parser(
         "start-session",
-        help="Create a session scaffold for the single-session AI_Team workflow.",
-        description="Create a session scaffold for the single-session AI_Team workflow.",
+        help=(
+            "Create a session scaffold for the single-session AI_Team workflow. "
+            "Preferred entrypoint for the real skill-driven workflow."
+        ),
+        description=(
+            "Create a session scaffold for the single-session AI_Team workflow. "
+            "Preferred entrypoint for the real skill-driven workflow."
+        ),
     )
     start_session_parser.add_argument("--message", required=True, help="Raw user message for session intake.")
     start_session_parser.set_defaults(handler=_handle_start_session)
 
     agent_run_parser = subparsers.add_parser(
         "agent-run",
-        help="Demo command: execute the deterministic workflow session from a raw user message.",
-        description="Demo command: execute the deterministic workflow session from a raw user message.",
+        help=(
+            "Demo command: execute the deterministic workflow session from a raw user message "
+            "(real workflow entrypoint: start-session)."
+        ),
+        description=(
+            "Demo command: execute the deterministic workflow session from a raw user message. "
+            "For the real skill-driven workflow, use start-session."
+        ),
     )
     agent_run_parser.add_argument("--message", required=True, help="Raw user message for the agent to process.")
     agent_run_parser.add_argument(

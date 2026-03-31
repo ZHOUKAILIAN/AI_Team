@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from difflib import unified_diff
 
-from .models import Finding
+from .models import Finding, WorkflowSummary
 
 
 def build_session_review(
@@ -10,6 +10,7 @@ def build_session_review(
     stage_artifacts: dict[str, str],
     findings: list[Finding | dict[str, str]],
     acceptance_status: str = "pending",
+    workflow_summary: WorkflowSummary | None = None,
 ) -> str:
     normalized_findings = [_normalize_finding(item) for item in findings]
     lines = [
@@ -17,9 +18,11 @@ def build_session_review(
         "",
         f"acceptance_status: {acceptance_status}",
         "",
-        "## Findings",
-        "",
     ]
+    if workflow_summary is not None:
+        lines.extend(_build_workflow_status_section(workflow_summary))
+
+    lines.extend(["## Findings", ""])
 
     if normalized_findings:
         for finding in normalized_findings:
@@ -73,3 +76,19 @@ def _normalize_finding(item: Finding | dict[str, str]) -> Finding:
     if isinstance(item, Finding):
         return item
     return Finding.from_dict(item)
+
+
+def _build_workflow_status_section(workflow_summary: WorkflowSummary) -> list[str]:
+    return [
+        "## Workflow Status",
+        "",
+        f"current_state: {workflow_summary.current_state}",
+        f"current_stage: {workflow_summary.current_stage}",
+        f"prd_status: {workflow_summary.prd_status}",
+        f"dev_status: {workflow_summary.dev_status}",
+        f"qa_status: {workflow_summary.qa_status}",
+        f"acceptance_status: {workflow_summary.acceptance_status}",
+        f"human_decision: {workflow_summary.human_decision}",
+        f"qa_round: {workflow_summary.qa_round}",
+        "",
+    ]
