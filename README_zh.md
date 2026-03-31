@@ -56,7 +56,10 @@
 - 缺少证据必须 blocked。
 
 每次会话必须产出的契约文档：
+- `prd.md`
 - `implementation.md`
+- `qa_report.md`
+- `acceptance_report.md`
 - `workflow_summary.md`
 
 agent-friendly 请求的契约入口命令：
@@ -144,10 +147,10 @@ python3 -m ai_company start-session --message "<你的原话>"
 - `/company-run 做一个支持下游纠偏和自学习的 AI 公司流程`
 - `执行这个需求：做一个支持下游纠偏和自学习的 AI 公司流程`
 
-这个 skill 的职责是触发和路由，真正执行仍然会落到仓库里的：
+这个 skill 的职责是触发和路由，真正执行会走：
 
 ```bash
-python3 -m ai_company agent-run --message "<你的原话>" --print-review
+python3 -m ai_company start-session --message "<你的原话>"
 ```
 
 ### 一键全局安装
@@ -187,7 +190,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/ZHOUKAILIAN/AI_Team/main/scr
 1. `Product` 把原始需求转成 PRD，并显式写出验收标准。
 2. `Dev` 基于 PRD 产出技术方案。
 3. `QA` 检查交接质量，发现问题时输出结构化 finding。
-4. `Acceptance` 以 finding 作为最终闸门，决定 `accepted` 或 `rejected`。
+4. `Acceptance` 基于 finding 产出最终建议，由人类做 Go/No-Go 决策。
 5. 主控 orchestrator 把 finding 定向回写到目标角色的运行时记忆层。
 6. 下一轮加载角色时，会自动把这些学习记录叠加进有效 context / skill / memory，形成持续增强。
 

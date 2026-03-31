@@ -56,7 +56,10 @@ Role boundaries:
 - missing evidence forces blocked.
 
 Contract artifacts (required per session):
+- `prd.md`
 - `implementation.md`
+- `qa_report.md`
+- `acceptance_report.md`
 - `workflow_summary.md`
 
 Contract entry command for agent-friendly requests:
@@ -145,10 +148,10 @@ After that, you can tell Codex:
 - `/company-run build a self-improving AI company loop`
 - `执行这个需求：做一个支持下游纠偏和自学习的 AI 公司流程`
 
-The installed skill is the trigger/router layer. The actual execution still runs through:
+The installed skill is the trigger/router layer. The actual execution goes through:
 
 ```bash
-python3 -m ai_company agent-run --message "<your original message>" --print-review
+python3 -m ai_company start-session --message "<your original message>"
 ```
 
 ### One-Command Global Install
@@ -188,7 +191,7 @@ The installed skill will prefer this helper:
 1. `Product` turns the raw request into a PRD with explicit acceptance criteria.
 2. `Dev` converts the PRD into a technical plan.
 3. `QA` checks the handoff quality and emits structured findings when something is missing.
-4. `Acceptance` uses those findings as the final gate and decides `accepted` or `rejected`.
+4. `Acceptance` uses those findings to produce the final recommendation for the human Go/No-Go decision.
 5. The orchestrator writes the findings back into the target role's runtime learning overlay.
 6. The next run automatically loads those learned overlays into the role's effective context, skill, and memory.
 
