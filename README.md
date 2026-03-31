@@ -274,5 +274,17 @@ The installed skill will prefer this helper:
 - Its `acceptance_status` values are recommendation-only (`recommended_go`, `recommended_no_go`, or `blocked`) and the workflow summary ends at `WaitForHumanDecision`, not final release approval.
 - If you want `Dev` to call a real LLM to modify code, or `QA` to run a browser/test suite, you can replace the backend without rewriting the orchestrator, state store, or learning loop.
 
+## Documentation & SOP
+
+### Standard Operating Procedure
+- **[文档驱动 AI 团队开发 SOP](docs/SOP_简洁版.md)**: Chinese end-to-end operating guide for doc-driven requirement intake, execution, and acceptance.
+
+### Integration with ai-doc-driven-dev
+The SOP describes a recommended two-phase workflow:
+1. **Phase 1**: Use `ai-doc-driven-dev` to initialize structured documentation.
+2. **Phase 2**: Use `AI_Team` to execute the documented requirement with multi-role AI collaboration.
+
+This creates a complete loop: **Documentation -> Execution -> Validation -> Learning**
+
 ---
 *Created for efficient autonomous software building using an Agentic AI collaborative model.*

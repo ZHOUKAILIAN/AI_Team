@@ -273,5 +273,17 @@ bash <(curl -fsSL https://raw.githubusercontent.com/ZHOUKAILIAN/AI_Team/main/scr
 - 它输出的 `acceptance_status` 只是建议态（`recommended_go`、`recommended_no_go`、`blocked`），workflow summary 最终会停在 `WaitForHumanDecision`，不是最终发布批准。
 - 如果要让 `Dev` 阶段真的调用 LLM 去改代码、让 `QA` 跑真实浏览器或测试套件，可以在此 runtime 之上替换 backend，而不需要重写主控、状态存储和学习闭环。
 
+## 文档与 SOP
+
+### 标准操作流程
+- **[文档驱动 AI 团队开发 SOP](docs/SOP_简洁版.md)**: 面向中文使用者的文档驱动需求整理、执行与验收指南。
+
+### 与 ai-doc-driven-dev 集成
+SOP 描述了推荐的两阶段工作流：
+1. **阶段一**：使用 `ai-doc-driven-dev` 初始化结构化文档。
+2. **阶段二**：使用 `AI_Team` 通过多角色 AI 协作执行已经文档化的需求。
+
+这形成了一个完整闭环：**文档化 -> 执行 -> 验证 -> 学习**
+
 ---
 *致力于通过智能体（Agentic AI）协作模式构建高效自主化运转的软件体系。*
