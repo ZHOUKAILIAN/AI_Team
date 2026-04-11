@@ -11,6 +11,44 @@ def local_temp_dir() -> Path:
 
 
 class StateTests(unittest.TestCase):
+    def test_state_store_persists_acceptance_contract_and_review_templates(self) -> None:
+        from ai_company.models import AcceptanceContract
+        from ai_company.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            root = Path(temp_dir)
+            store = StateStore(root)
+            session = store.create_session(
+                "review a page",
+                contract=AcceptanceContract(
+                    review_method="figma-restoration-review",
+                    boundary="page_root",
+                    recursive=True,
+                    tolerance_px=0.5,
+                    required_dimensions=["Structure", "Geometry", "Style", "Content", "State"],
+                    required_artifacts=["deviation_checklist.md", "review_completion.json"],
+                    required_evidence=["runtime_screenshot", "overlay_diff", "page_root_recursive_audit"],
+                    native_node_policy="miniprogram",
+                    allow_host_environment_changes=False,
+                    read_only_review=True,
+                    acceptance_criteria=[
+                        "page-root recursive audit",
+                        "geometry deviation <= 0.5px",
+                    ],
+                ),
+            )
+
+            contract_path = root / "artifacts" / session.session_id / "acceptance_contract.json"
+            review_completion_path = root / "artifacts" / session.session_id / "review_completion.json"
+            deviation_checklist_path = root / "artifacts" / session.session_id / "deviation_checklist.md"
+
+            self.assertTrue(contract_path.exists())
+            self.assertTrue(review_completion_path.exists())
+            self.assertTrue(deviation_checklist_path.exists())
+            self.assertIn('"review_method": "figma-restoration-review"', contract_path.read_text())
+            self.assertIn('"completed": false', review_completion_path.read_text())
+            self.assertIn("Pending review execution", deviation_checklist_path.read_text())
+
     def test_state_store_initializes_session_and_artifacts(self) -> None:
         from ai_company.state import StateStore
 
@@ -58,6 +96,85 @@ class StateTests(unittest.TestCase):
             )
 
             self.assertFalse((root / "memory" / ".." / ".." / "outside").exists())
+
+    def test_apply_learning_writes_standardized_overlay_sections(self) -> None:
+        from ai_company.models import Finding
+        from ai_company.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            root = Path(temp_dir)
+            store = StateStore(root)
+            store.apply_learning(
+                Finding(
+                    source_stage="Acceptance",
+                    target_stage="Dev",
+                    issue="Acceptance found a missing empty-state flow.",
+                    severity="high",
+                    lesson="Preserve product-visible empty states in regression coverage.",
+                    proposed_context_update="Review user-visible empty states before closing implementation.",
+                    proposed_skill_update="Require user-visible empty-state evidence before reporting completion.",
+                )
+            )
+
+            lessons = (root / "memory" / "Dev" / "lessons.md").read_text()
+            context_patch = (root / "memory" / "Dev" / "context_patch.md").read_text()
+            skill_patch = (root / "memory" / "Dev" / "skill_patch.md").read_text()
+
+            self.assertIn("- source: Acceptance", lessons)
+            self.assertIn("- severity: high", lessons)
+            self.assertIn("- issue: Acceptance found a missing empty-state flow.", lessons)
+            self.assertIn("Constraint:", context_patch)
+            self.assertIn("Completion signal:", context_patch)
+            self.assertIn("Goal:", skill_patch)
+            self.assertIn("Completion signal:", skill_patch)
+
+    def test_record_stage_preserves_round_archives_and_latest_artifact(self) -> None:
+        from ai_company.models import SessionRecord, StageOutput
+        from ai_company.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            root = Path(temp_dir)
+            store = StateStore(root)
+            session = SessionRecord(
+                session_id="demo-session",
+                request="demo",
+                created_at="2026-04-10T00:00:00Z",
+                session_dir=root / "sessions" / "demo-session",
+                artifact_dir=root / "artifacts" / "demo-session",
+            )
+            session.session_dir.mkdir(parents=True, exist_ok=True)
+            (session.session_dir / "stages").mkdir(parents=True, exist_ok=True)
+            session.artifact_dir.mkdir(parents=True, exist_ok=True)
+
+            round_one = store.record_stage(
+                session,
+                StageOutput(
+                    stage="QA",
+                    artifact_name="qa_report.md",
+                    artifact_content="round one",
+                    journal="journal one",
+                ),
+                round_index=1,
+            )
+            round_two = store.record_stage(
+                session,
+                StageOutput(
+                    stage="QA",
+                    artifact_name="qa_report.md",
+                    artifact_content="round two",
+                    journal="journal two",
+                    supplemental_artifacts={"review_completion.json": '{"completed": true}'},
+                ),
+                round_index=2,
+            )
+
+            self.assertTrue(round_one.archive_path.exists())
+            self.assertTrue(round_two.archive_path.exists())
+            self.assertNotEqual(round_one.archive_path, round_two.archive_path)
+            self.assertEqual((session.artifact_dir / "qa_report.md").read_text(), "round two")
+            self.assertEqual((session.artifact_dir / "review_completion.json").read_text(), '{"completed": true}')
+            self.assertIn("review_completion.json", round_two.supplemental_artifact_paths)
+            self.assertEqual(round_two.round_index, 2)
 
     def test_load_role_profiles_reads_context_and_memory(self) -> None:
         from ai_company.roles import load_role_profiles

@@ -20,7 +20,11 @@ class SkillPackageTests(unittest.TestCase):
         testcase.assertIn("inspect and implement in the real repository", content)
         testcase.assertIn("execute real verification against the runnable path when feasible", content)
         testcase.assertIn("collect concrete evidence for QA and Acceptance decisions", content)
+        testcase.assertIn("route actionable", content)
         testcase.assertIn("if evidence is missing, report blocked instead of accepted", content)
+        testcase.assertIn("acceptance_contract.json", content)
+        testcase.assertIn("review_completion.json", content)
+        testcase.assertIn("explicit user approval", content)
 
     def test_root_skill_describes_single_session_state_machine(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
@@ -49,6 +53,14 @@ class SkillPackageTests(unittest.TestCase):
         self.assertIn("blocked", content)
         self.assertIn("Acceptance recommends", content)
         self.assertIn("human decides", content)
+        self.assertIn("record-feedback", content)
+        self.assertIn("completion signals", content)
+        self.assertIn("runtime_screenshot", content)
+        self.assertIn("overlay_diff", content)
+        self.assertIn("page_root_recursive_audit", content)
+        self.assertIn("acceptance_contract.json", content)
+        self.assertIn("review_completion.json", content)
+        self.assertIn("explicit user approval", content)
         self.assertIn(
             'python3 -m ai_company start-session --message "<the user\'s original message>"',
             content,
@@ -90,6 +102,14 @@ class SkillPackageTests(unittest.TestCase):
         self.assertIn("blocked", content)
         self.assertIn("Acceptance recommends", content)
         self.assertIn("human decides", content)
+        self.assertIn("record-feedback", content)
+        self.assertIn("completion signal", content)
+        self.assertIn("runtime_screenshot", content)
+        self.assertIn("overlay_diff", content)
+        self.assertIn("page_root_recursive_audit", content)
+        self.assertIn("acceptance_contract.json", content)
+        self.assertIn("review_completion.json", content)
+        self.assertIn("explicit user approval", content)
         self.assertIn(
             'python3 -m ai_company start-session --message "<the user\'s original message>"',
             content,

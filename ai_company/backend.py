@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import ClassVar, Protocol
 
+from .acceptance_policy import match_visual_evidence_profile
 from .models import Finding, RoleProfile, StageOutput
 from .state import artifact_name_for_stage
 
@@ -21,6 +22,7 @@ class WorkflowBackend(Protocol):
 
 @dataclass
 class StaticBackend:
+    supports_rework_routing: ClassVar[bool] = False
     stage_payloads: dict[str, dict[str, object]]
 
     @classmethod
@@ -37,7 +39,7 @@ class StaticBackend:
         normalized_report = acceptance_report.lower()
         if "blocked" in normalized_report:
             acceptance_status = "blocked"
-        elif "no-go" in normalized_report or "reject" in normalized_report:
+        elif "no-go" in normalized_report or "recommended_no_go" in normalized_report or "reject" in normalized_report:
             acceptance_status = "recommended_no_go"
         elif findings:
             acceptance_status = "blocked"
@@ -82,17 +84,26 @@ class StaticBackend:
         findings: list[Finding],
     ) -> StageOutput:
         payload = self.stage_payloads[stage]
+        stage_findings = [Finding.from_dict(item) for item in payload.get("findings", [])]
+        if stage == "Acceptance" and not stage_findings:
+            stage_findings = _synthesize_acceptance_findings(
+                acceptance_report=str(payload["artifact_content"]),
+                acceptance_status=payload.get("acceptance_status"),
+                existing_findings=findings,
+            )
         return StageOutput(
             stage=stage,
             artifact_name=artifact_name_for_stage(stage),
             artifact_content=str(payload["artifact_content"]),
             journal=str(payload["journal"]),
-            findings=[Finding.from_dict(item) for item in payload.get("findings", [])],
+            findings=stage_findings,
             acceptance_status=payload.get("acceptance_status"),
         )
 
 
 class DeterministicBackend:
+    supports_rework_routing = False
+
     def run_stage(
         self,
         *,
@@ -258,6 +269,9 @@ class DeterministicBackend:
                 issue="Deterministic demo runtime did not execute real independent verification commands.",
                 severity="high",
                 evidence="demo_only_runtime",
+                evidence_kind="qa_review",
+                required_evidence=["qa_command_rerun"],
+                completion_signal="Attach QA-owned rerun evidence showing the critical commands were independently executed.",
             )
         )
 
@@ -333,6 +347,11 @@ class DeterministicBackend:
             artifact_name=artifact_name_for_stage("Acceptance"),
             artifact_content=artifact_content,
             journal=journal,
+            findings=_synthesize_acceptance_findings(
+                acceptance_report=artifact_content,
+                acceptance_status=acceptance_status,
+                existing_findings=findings,
+            ),
             acceptance_status=acceptance_status,
         )
 
@@ -364,3 +383,73 @@ def _format_findings(findings: list[Finding]) -> str:
             f"{finding.issue}"
         )
     return "\n".join(lines)
+
+
+def _synthesize_acceptance_findings(
+    *,
+    acceptance_report: str,
+    acceptance_status: str | None,
+    existing_findings: list[Finding],
+) -> list[Finding]:
+    if acceptance_status not in {"recommended_no_go", "blocked"}:
+        return []
+    if existing_findings:
+        return []
+
+    normalized = acceptance_report.strip()
+    lowered = normalized.lower()
+    if any(
+        phrase in lowered
+        for phrase in ("credential", "credentials", "environment unavailable", "external system unavailable")
+    ):
+        return []
+
+    target_stage = "Product" if any(
+        phrase in lowered
+        for phrase in ("acceptance criteria", "scope", "requirement", "prd", "user scenario", "business intent")
+    ) else "Dev"
+    profile = match_visual_evidence_profile(normalized)
+    required_evidence = list(profile.get("required_evidence", [])) if profile else []
+    completion_signal = str(profile.get("completion_signal", "")) if profile else ""
+
+    context_update = (
+        "Clarify acceptance criteria and user scenarios before implementation begins."
+        if target_stage == "Product"
+        else "Review user-visible behavior against the PRD before closing implementation."
+    )
+    skill_update = (
+        "Produce measurable acceptance criteria and scenario coverage before handoff."
+        if target_stage == "Product"
+        else "Require product-level evidence for the user-visible behavior before reporting completion."
+    )
+    lesson = (
+        "Make acceptance expectations explicit before implementation starts."
+        if target_stage == "Product"
+        else "Preserve product-visible outcomes until acceptance evidence is complete."
+    )
+
+    return [
+        Finding(
+            source_stage="Acceptance",
+            target_stage=target_stage,
+            issue=_acceptance_issue_summary(normalized),
+            severity="high",
+            lesson=lesson,
+            proposed_context_update=context_update,
+            proposed_skill_update=skill_update,
+            evidence=normalized,
+            evidence_kind="acceptance_report",
+            required_evidence=required_evidence,
+            completion_signal=completion_signal,
+        )
+    ]
+
+
+def _acceptance_issue_summary(report: str) -> str:
+    lowered = report.lower()
+    if "because" in lowered:
+        _, suffix = report.split("because", 1)
+        return suffix.strip().rstrip(".")
+
+    lines = [line.strip() for line in report.splitlines() if line.strip()]
+    return lines[0] if lines else "Acceptance reported an actionable product-level issue."

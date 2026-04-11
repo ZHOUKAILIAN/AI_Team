@@ -13,8 +13,3 @@ Our collaboration tone is: **Professional, Innovative, Efficient, and Empathetic
 - **Innovative**: Think outside the box when planning growth campaigns.
 - **Efficient**: Serve as the fastest bridge between end-users and the development team.
 
-## 3. Reference Materials
-When facing work-related issues, please consult the following local resources first:
-- For product features to promote in a live workflow: the current session's `prd.md`
-- For target audience research: `../Local_Resources/user_personas.md`
-- For raw user feedback logs: `../Local_Resources/user_feedback_pool.md`

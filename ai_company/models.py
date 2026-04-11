@@ -24,6 +24,9 @@ class Finding:
     proposed_context_update: str = ""
     proposed_skill_update: str = ""
     evidence: str = ""
+    evidence_kind: str = ""
+    required_evidence: list[str] = field(default_factory=list)
+    completion_signal: str = ""
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "Finding":
@@ -36,10 +39,64 @@ class Finding:
             proposed_context_update=payload.get("proposed_context_update", ""),
             proposed_skill_update=payload.get("proposed_skill_update", ""),
             evidence=payload.get("evidence", ""),
+            evidence_kind=payload.get("evidence_kind", ""),
+            required_evidence=list(payload.get("required_evidence", [])),
+            completion_signal=payload.get("completion_signal", ""),
         )
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@model_dataclass
+class AcceptanceContract:
+    review_method: str = ""
+    boundary: str = ""
+    recursive: bool = False
+    tolerance_px: float | None = None
+    required_dimensions: list[str] = field(default_factory=list)
+    required_artifacts: list[str] = field(default_factory=list)
+    required_evidence: list[str] = field(default_factory=list)
+    native_node_policy: str = ""
+    allow_host_environment_changes: bool = False
+    read_only_review: bool = False
+    acceptance_criteria: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "AcceptanceContract":
+        return cls(
+            review_method=payload.get("review_method", ""),
+            boundary=payload.get("boundary", ""),
+            recursive=bool(payload.get("recursive", False)),
+            tolerance_px=payload.get("tolerance_px"),
+            required_dimensions=list(payload.get("required_dimensions", [])),
+            required_artifacts=list(payload.get("required_artifacts", [])),
+            required_evidence=list(payload.get("required_evidence", [])),
+            native_node_policy=payload.get("native_node_policy", ""),
+            allow_host_environment_changes=bool(payload.get("allow_host_environment_changes", False)),
+            read_only_review=bool(payload.get("read_only_review", False)),
+            acceptance_criteria=list(payload.get("acceptance_criteria", [])),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    def has_constraints(self) -> bool:
+        return any(
+            (
+                self.review_method,
+                self.boundary,
+                self.recursive,
+                self.tolerance_px is not None,
+                self.required_dimensions,
+                self.required_artifacts,
+                self.required_evidence,
+                self.native_node_policy,
+                not self.allow_host_environment_changes,
+                self.read_only_review,
+                self.acceptance_criteria,
+            )
+        )
 
 
 @model_dataclass
@@ -92,6 +149,26 @@ class SessionRecord:
 
 
 @model_dataclass
+class FeedbackRecord:
+    session_id: str
+    source_stage: str
+    target_stage: str
+    issue: str
+    severity: str
+    created_at: str
+    lesson: str = ""
+    proposed_context_update: str = ""
+    proposed_skill_update: str = ""
+    evidence: str = ""
+    evidence_kind: str = ""
+    required_evidence: list[str] = field(default_factory=list)
+    completion_signal: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@model_dataclass
 class WorkflowSummary:
     session_id: str
     runtime_mode: str
@@ -131,6 +208,8 @@ class StageOutput:
     journal: str
     findings: list[Finding] = field(default_factory=list)
     acceptance_status: str | None = None
+    supplemental_artifacts: dict[str, str] = field(default_factory=dict)
+    blocked_reason: str = ""
 
 
 @model_dataclass
@@ -141,16 +220,24 @@ class StageRecord:
     journal_path: Path
     findings_path: Path
     acceptance_status: str | None = None
+    round_index: int = 1
+    archive_path: Path | None = None
+    supplemental_artifact_paths: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "stage": self.stage,
             "artifact_name": self.artifact_name,
             "artifact_path": str(self.artifact_path),
             "journal_path": str(self.journal_path),
             "findings_path": str(self.findings_path),
             "acceptance_status": self.acceptance_status,
+            "round_index": self.round_index,
+            "supplemental_artifact_paths": dict(self.supplemental_artifact_paths),
         }
+        if self.archive_path is not None:
+            payload["archive_path"] = str(self.archive_path)
+        return payload
 
 
 @model_dataclass

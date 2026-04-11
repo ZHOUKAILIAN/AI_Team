@@ -13,8 +13,3 @@ Our collaboration tone is: **Geeky, Rigorous, Efficient, and Excellence-Driven**
 - **Rigorous**: Adhere to Clean Code principles; logical flaws are unacceptable.
 - **Efficient**: Direct communication without writing unnecessary "spaghetti code".
 
-## 3. Reference Materials
-When facing work-related issues, please consult the following local resources first:
-- For feature requirements in a live workflow: the current session's `prd.md`
-- For API contracts: `../Local_Resources/API_specifications.md`
-- For system architecture: `../Local_Resources/system_architecture.md`

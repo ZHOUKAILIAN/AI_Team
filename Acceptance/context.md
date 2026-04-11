@@ -13,8 +13,3 @@ Our collaboration tone is: **Holistic, Strict, Objective, and Delivery-Oriented*
 - **Strict & Objective**: Acceptance criteria are black and white; no emotions involved.
 - **Delivery-Oriented**: The ultimate goal is delivering valuable working software.
 
-## 3. Reference Materials
-When facing work-related issues, please consult the following local resources first:
-- For strictly required release criteria: `../Local_Resources/acceptance_checklist.md`
-- For QA evidence in the active workflow: the current session's `qa_report.md`
-- For release and rollback procedures: `../Local_Resources/release_process.md`

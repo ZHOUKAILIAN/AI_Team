@@ -31,6 +31,12 @@ def build_session_review(
             )
             if finding.lesson:
                 lines.append(f"lesson: {finding.lesson}")
+            if finding.evidence_kind:
+                lines.append(f"evidence_kind: {finding.evidence_kind}")
+            if finding.required_evidence:
+                lines.append(f"required_evidence: {', '.join(finding.required_evidence)}")
+            if finding.completion_signal:
+                lines.append(f"completion_signal: {finding.completion_signal}")
             if finding.proposed_context_update:
                 lines.append(f"proposed_context_update: {finding.proposed_context_update}")
             if finding.proposed_skill_update:

@@ -5,7 +5,15 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .models import Finding, SessionRecord, StageOutput, StageRecord, WorkflowSummary
+from .models import (
+    AcceptanceContract,
+    FeedbackRecord,
+    Finding,
+    SessionRecord,
+    StageOutput,
+    StageRecord,
+    WorkflowSummary,
+)
 from .workflow_summary import render_workflow_summary
 
 VALID_ROLE_NAMES = {"Product", "Dev", "QA", "Acceptance", "Ops"}
@@ -28,6 +36,7 @@ class StateStore:
         self,
         request: str,
         raw_message: str | None = None,
+        contract: AcceptanceContract | None = None,
         *,
         runtime_mode: str = "session_bootstrap",
     ) -> SessionRecord:
@@ -60,6 +69,11 @@ class StateStore:
                 "## Raw Intake Message\n\n"
                 f"{raw_message}\n"
             )
+        artifact_paths = {
+            "request": str(request_path),
+            "workflow_summary": str(self.workflow_summary_path(session.session_id)),
+        }
+        artifact_paths.update(self._write_acceptance_contract_artifacts(session, contract))
         self.save_workflow_summary(
             session,
             WorkflowSummary(
@@ -67,25 +81,43 @@ class StateStore:
                 runtime_mode=runtime_mode,
                 current_state="Intake",
                 current_stage="Intake",
-                artifact_paths={
-                    "request": str(request_path),
-                    "workflow_summary": str(self.workflow_summary_path(session.session_id)),
-                },
+                artifact_paths=artifact_paths,
             ),
         )
+        session_path = session_dir / "session.json"
+        payload = json.loads(session_path.read_text())
+        if contract is not None and contract.has_constraints():
+            payload["acceptance_contract"] = contract.to_dict()
+        self._write_json(session_path, payload)
         return session
 
-    def record_stage(self, session: SessionRecord, output: StageOutput) -> StageRecord:
+    def record_stage(
+        self,
+        session: SessionRecord,
+        output: StageOutput,
+        *,
+        round_index: int = 1,
+    ) -> StageRecord:
         stage_slug = output.stage.lower()
         stages_dir = session.session_dir / "stages"
         artifact_path = session.artifact_dir / output.artifact_name
-        journal_path = stages_dir / f"{stage_slug}_journal.md"
-        findings_path = stages_dir / f"{stage_slug}_findings.json"
-        metadata_path = stages_dir / f"{stage_slug}.json"
+        archive_path = stages_dir / f"{stage_slug}_round_{round_index}_{output.artifact_name}"
+        journal_path = stages_dir / f"{stage_slug}_round_{round_index}_journal.md"
+        findings_path = stages_dir / f"{stage_slug}_round_{round_index}_findings.json"
+        metadata_path = stages_dir / f"{stage_slug}_round_{round_index}.json"
+        supplemental_artifact_paths: dict[str, str] = {}
 
         artifact_path.write_text(output.artifact_content)
+        archive_path.write_text(output.artifact_content)
         journal_path.write_text(output.journal)
         self._write_json(findings_path, [finding.to_dict() for finding in output.findings])
+        for artifact_name, artifact_content in output.supplemental_artifacts.items():
+            safe_name = Path(artifact_name).name
+            supplemental_path = session.artifact_dir / safe_name
+            supplemental_archive = stages_dir / f"{stage_slug}_round_{round_index}_{safe_name}"
+            supplemental_path.write_text(artifact_content)
+            supplemental_archive.write_text(artifact_content)
+            supplemental_artifact_paths[safe_name] = str(supplemental_path)
 
         stage_record = StageRecord(
             stage=output.stage,
@@ -94,6 +126,9 @@ class StateStore:
             journal_path=journal_path,
             findings_path=findings_path,
             acceptance_status=output.acceptance_status,
+            round_index=round_index,
+            archive_path=archive_path,
+            supplemental_artifact_paths=supplemental_artifact_paths,
         )
         self._write_json(metadata_path, stage_record.to_dict())
         return stage_record
@@ -119,12 +154,50 @@ class StateStore:
         findings: list[Finding],
         acceptance_status: str,
     ) -> None:
-        payload = session.to_dict()
+        session_path = session.session_dir / "session.json"
+        payload = json.loads(session_path.read_text()) if session_path.exists() else session.to_dict()
+        payload.update(session.to_dict())
         payload["acceptance_status"] = acceptance_status
         payload["updated_at"] = datetime.now(timezone.utc).isoformat()
         payload["stage_records"] = [record.to_dict() for record in stage_records]
         payload["findings"] = [finding.to_dict() for finding in findings]
-        self._write_json(session.session_dir / "session.json", payload)
+        self._write_json(session_path, payload)
+
+    def record_feedback(self, session_id: str, finding: Finding) -> Path:
+        session_dir = self.root / "sessions" / session_id
+        session_path = session_dir / "session.json"
+        if not session_path.exists():
+            raise FileNotFoundError(f"Session not found: {session_id}")
+
+        payload = json.loads(session_path.read_text())
+        recorded_at = self._timestamp()
+        feedback_record = FeedbackRecord(
+            session_id=session_id,
+            source_stage=finding.source_stage,
+            target_stage=finding.target_stage,
+            issue=finding.issue,
+            severity=finding.severity,
+            created_at=recorded_at,
+            lesson=finding.lesson,
+            proposed_context_update=finding.proposed_context_update,
+            proposed_skill_update=finding.proposed_skill_update,
+            evidence=finding.evidence,
+            evidence_kind=finding.evidence_kind,
+            required_evidence=list(finding.required_evidence),
+            completion_signal=finding.completion_signal,
+        )
+        feedback_dir = session_dir / "feedback"
+        feedback_dir.mkdir(parents=True, exist_ok=True)
+        feedback_path = feedback_dir / f"{recorded_at.replace(':', '-')}.json"
+        self._write_json(feedback_path, feedback_record.to_dict())
+
+        payload.setdefault("feedback_records", [])
+        payload["feedback_records"].append(str(feedback_path))
+        payload["updated_at"] = recorded_at
+        self._write_json(session_path, payload)
+
+        self.apply_learning(finding)
+        return feedback_path
 
     def apply_learning(self, finding: Finding) -> None:
         if finding.target_stage not in VALID_ROLE_NAMES:
@@ -140,7 +213,7 @@ class StateStore:
                 (
                     f"## {self._timestamp()}\n"
                     f"- issue: {finding.issue}\n"
-                    f"- source_stage: {finding.source_stage}\n"
+                    f"- source: {finding.source_stage}\n"
                     f"- severity: {finding.severity}\n"
                     f"- lesson: {finding.lesson}\n"
                 ),
@@ -153,7 +226,8 @@ class StateStore:
                 "Context Patches",
                 (
                     f"## {self._timestamp()}\n"
-                    f"{finding.proposed_context_update}\n"
+                    f"Constraint: {finding.proposed_context_update}\n"
+                    f"Completion signal: {_completion_signal_for_finding(finding)}\n"
                 ),
                 finding.proposed_context_update,
             )
@@ -164,7 +238,8 @@ class StateStore:
                 "Skill Patches",
                 (
                     f"## {self._timestamp()}\n"
-                    f"{finding.proposed_skill_update}\n"
+                    f"Goal: {finding.proposed_skill_update}\n"
+                    f"Completion signal: {_completion_signal_for_finding(finding)}\n"
                 ),
                 finding.proposed_skill_update,
             )
@@ -205,6 +280,18 @@ class StateStore:
     def _write_json(self, path: Path, payload: object) -> None:
         path.write_text(json.dumps(payload, indent=2))
 
+    def session_contract_artifact_paths(self, session: SessionRecord) -> dict[str, str]:
+        paths: dict[str, str] = {}
+        for key, filename in (
+            ("acceptance_contract", "acceptance_contract.json"),
+            ("review_completion", "review_completion.json"),
+            ("deviation_checklist", "deviation_checklist.md"),
+        ):
+            path = session.artifact_dir / filename
+            if path.exists():
+                paths[key] = str(path)
+        return paths
+
     def _next_session_id(self, request: str) -> str:
         base = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')}-{_slugify(request)}"
         candidate = base
@@ -215,6 +302,48 @@ class StateStore:
             candidate = f"{base}-{suffix}"
 
         return candidate
+
+    def _write_acceptance_contract_artifacts(
+        self,
+        session: SessionRecord,
+        contract: AcceptanceContract | None,
+    ) -> dict[str, str]:
+        if contract is None or not contract.has_constraints():
+            return {}
+
+        artifact_paths: dict[str, str] = {}
+        contract_path = session.artifact_dir / "acceptance_contract.json"
+        self._write_json(contract_path, contract.to_dict())
+        artifact_paths["acceptance_contract"] = str(contract_path)
+
+        if contract.review_method:
+            review_completion_path = session.artifact_dir / "review_completion.json"
+            self._write_json(
+                review_completion_path,
+                {
+                    "review_method": contract.review_method,
+                    "boundary": contract.boundary,
+                    "recursive": contract.recursive,
+                    "tolerance_px": contract.tolerance_px,
+                    "required_dimensions": contract.required_dimensions,
+                    "required_artifacts": contract.required_artifacts,
+                    "required_evidence": contract.required_evidence,
+                    "acceptance_criteria": contract.acceptance_criteria,
+                    "criteria_covered": [],
+                    "dimensions_evaluated": [],
+                    "evidence_provided": [],
+                    "produced_artifacts": [],
+                    "unresolved_items": ["Pending review execution."],
+                    "completed": False,
+                },
+            )
+            artifact_paths["review_completion"] = str(review_completion_path)
+
+            deviation_checklist_path = session.artifact_dir / "deviation_checklist.md"
+            deviation_checklist_path.write_text("# Deviation Checklist\n\nPending review execution.\n")
+            artifact_paths["deviation_checklist"] = str(deviation_checklist_path)
+
+        return artifact_paths
 
 
 def artifact_name_for_stage(stage: str) -> str:
@@ -230,3 +359,18 @@ def artifact_name_for_stage(stage: str) -> str:
 def _slugify(text: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9]+", "-", text.strip().lower()).strip("-")
     return cleaned[:40] or "session"
+
+
+def _completion_signal_for_finding(finding: Finding) -> str:
+    if finding.completion_signal:
+        return finding.completion_signal
+    if finding.required_evidence:
+        return (
+            "Attach "
+            + ", ".join(finding.required_evidence)
+            + f" evidence showing '{finding.issue}' is closed on the target surface."
+        )
+    return (
+        "The next handoff includes explicit evidence that "
+        f"'{finding.issue}' is addressed on the user-visible or verification surface."
+    )

@@ -133,6 +133,95 @@ class CliTests(unittest.TestCase):
             result.stdout,
         )
 
+    def test_record_feedback_persists_learning_and_feedback_metadata(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "start-session",
+                    "--message",
+                    "执行这个需求：做一个支持反馈回流的流程",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(bootstrap.returncode, 0)
+            output_lines = [line for line in bootstrap.stdout.splitlines() if ":" in line]
+            session_id = dict(line.split(": ", 1) for line in output_lines)["session_id"]
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "record-feedback",
+                    "--session-id",
+                    session_id,
+                    "--source-stage",
+                    "Acceptance",
+                    "--target-stage",
+                    "Dev",
+                    "--issue",
+                    "User reported an unhandled empty state.",
+                    "--lesson",
+                    "Cover empty states in product-level validation.",
+                    "--context-update",
+                    "Review empty-state behavior before handoff.",
+                    "--skill-update",
+                    "Require visible empty-state evidence before reporting success.",
+                    "--severity",
+                    "high",
+                    "--evidence-kind",
+                    "human_feedback",
+                    "--required-evidence",
+                    "runtime_screenshot",
+                    "--required-evidence",
+                    "overlay_diff",
+                    "--completion-signal",
+                    "Attach runtime_screenshot and overlay_diff evidence before closing the issue.",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("recorded_feedback:", result.stdout)
+
+            feedback_lines = [line for line in result.stdout.splitlines() if ":" in line]
+            feedback_path = Path(dict(line.split(": ", 1) for line in feedback_lines)["recorded_feedback"])
+            lessons_path = Path(temp_dir) / "memory" / "Dev" / "lessons.md"
+            session_json_path = Path(temp_dir) / "sessions" / session_id / "session.json"
+
+            self.assertTrue(feedback_path.exists())
+            self.assertTrue(lessons_path.exists())
+            self.assertTrue(session_json_path.exists())
+            self.assertIn("User reported an unhandled empty state.", lessons_path.read_text())
+            feedback_payload = json.loads(feedback_path.read_text())
+            self.assertEqual(feedback_payload["evidence_kind"], "human_feedback")
+            self.assertEqual(
+                feedback_payload["required_evidence"],
+                ["runtime_screenshot", "overlay_diff"],
+            )
+            self.assertIn("Attach runtime_screenshot and overlay_diff evidence", feedback_payload["completion_signal"])
+            session_payload = json.loads(session_json_path.read_text())
+            self.assertIn("feedback_records", session_payload)
+            self.assertEqual(len(session_payload["feedback_records"]), 1)
+
     def test_codex_init_reports_project_scoped_codex_setup(self) -> None:
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             repo_root = Path(temp_dir) / "repo"

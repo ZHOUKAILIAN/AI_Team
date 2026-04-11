@@ -105,14 +105,15 @@ $ai-team-run
 - Dev 负责实现，并把自己的自验证与命令证据写进 `implementation.md`。
 - QA 必须独立重跑关键验证，并把结果写进 `qa_report.md`。
 - 如果 QA 失败，会自动回到 Dev 修复后再重测。
-- Acceptance 只输出 AI 验收建议，写入 `acceptance_report.md`。
+- Acceptance 只输出 AI 验收建议，写入 `acceptance_report.md`；如果是可执行的 `recommended_no_go` / `blocked`，也可以把结构化 finding 定向回 Product 或 Dev。
+- 人类反馈也可以通过 `record-feedback` 进入同一条学习闭环。
 - 最终 Go/No-Go 仍然由人来决定。
 
 ## 🧾 会不会记录，记录放哪里
 会，这套流程会把每次 session 的记录都落到本地。
 
 主要存储位置：
-- `.ai_company_state/artifacts/<session_id>/`：本轮必须交接的产物，比如 `prd.md`、`implementation.md`、`qa_report.md`、`acceptance_report.md`、`workflow_summary.md`
+- `.ai_company_state/artifacts/<session_id>/`：本轮必须交接的产物，比如 `prd.md`、`implementation.md`、`qa_report.md`、`acceptance_report.md`、`workflow_summary.md`；如果声明了 review contract，还会包含 `acceptance_contract.json`、`review_completion.json` 这类机器可读审查产物
 - `.ai_company_state/sessions/<session_id>/`：每个阶段的 journal、findings、元数据，以及 `review.md`
 - `.ai_company_state/memory/<Role>/`：从下游 finding 回写的 lessons 和 patch
 
@@ -127,13 +128,14 @@ $ai-team-run
 - **全程留痕**：每个阶段都会生成 artifact、journal、findings，并写入 session。
 - **可审计 diff**：每次运行都会生成 `review.md`，自动附带阶段产物之间的 diff。
 - **学习闭环**：如果下游阶段发现问题，会把 lesson、context patch、skill patch 回写到 `.ai_company_state/memory/<Role>/`，下一轮执行时自动叠加到对应 agent 的有效上下文中。
+- **标准化学习叠加层**：学习记录会保存可复用规则和明确的 completion signal，而不是模糊摘要。
 
 ### 目录说明
 - `Product/`、`Dev/`、`QA/`、`Acceptance/`、`Ops/`：角色的种子身份定义，包含 `context.md`、`memory.md`、`SKILL.md`
 - `.codex/agents/`：通过 `./scripts/company-init.sh` 按需生成的项目本地 Codex 子代理，覆盖 `Product`、`Dev`、`QA`、`Acceptance`
 - `.agents/skills/ai-team-run/`：通过 `./scripts/company-init.sh` 按需生成的项目本地执行 skill
 - `.ai_company_state/sessions/<session_id>/`：一次完整运行的全过程日志
-- `.ai_company_state/artifacts/<session_id>/`：阶段产物，如 `prd.md`、`implementation.md`、`qa_report.md`、`acceptance_report.md`、`workflow_summary.md`
+- `.ai_company_state/artifacts/<session_id>/`：阶段产物，如 `prd.md`、`implementation.md`、`qa_report.md`、`acceptance_report.md`、`workflow_summary.md`、`acceptance_contract.json`，以及 `review_completion.json` 这类 review artifacts
 - `.ai_company_state/memory/<Role>/`：运行时学习叠加层，保存 `lessons.md`、`context_patch.md`、`skill_patch.md`
 
 ### 命令
@@ -162,6 +164,20 @@ python3 -m ai_company run --request "实现一个可以持续自学习的 AI 公
 ```bash
 python3 -m ai_company review
 ```
+
+把人工反馈记成结构化 learning finding：
+
+```bash
+python3 -m ai_company record-feedback --session-id <session_id> --source-stage Acceptance --target-stage Dev --issue "<问题>" --lesson "<经验>" --context-update "<约束>" --skill-update "<目标>"
+```
+
+如果是 page-root 视觉还原或 `<= 0.5px` 的 Figma 验收，必备证据集是 `runtime_screenshot`、`overlay_diff`、`page_root_recursive_audit`。
+
+机器可读的 native-node policy 在 `ai_company/acceptance_policy.json`；它会把 `wechat_native_capsule` 这类宿主原生节点排除出业务 diff，只要求检查 safe-area avoidance。
+
+如果某个 session 声明了 review contract，`start-session` 会落盘 `acceptance_contract.json` 并预生成 `review_completion.json`。只有当 `review_completion.json` 明确声明审查完成，且必需 artifact / evidence 全部覆盖后，Acceptance 才能结束这一轮。
+
+宿主工具和本机环境变更默认一律拦截。如果 QA 或 Acceptance 需要重启外部工具、修改本机配置，流程必须先停下来等待用户显式批准。
 
 ### 项目级 Codex 集成
 这个仓库支持官方 project-scoped Codex 集成，但隐藏文件改为本地按需生成，不再直接跟踪进 git：
@@ -264,9 +280,11 @@ bash <(curl -fsSL https://raw.githubusercontent.com/ZHOUKAILIAN/AI_Team/main/scr
 1. `Product` 把原始需求转成 PRD，并显式写出验收标准。
 2. `Dev` 基于 PRD 落实现，并把自验证与命令证据写入 `implementation.md`。
 3. `QA` 独立重跑关键验证，发现问题时输出结构化 finding。
-4. `Acceptance` 基于这些证据给出 AI 验收建议，最终 Go/No-Go 仍由人类决定。
-5. 主控 orchestrator 把 finding 定向回写到目标角色的运行时记忆层。
-6. 下一轮加载角色时，会自动把这些学习记录叠加进有效 context / skill / memory，形成持续增强。
+4. `Acceptance` 基于这些证据给出 AI 验收建议；如果是可执行的 no-go，也可以继续产出新的 finding 回流给 `Product` 或 `Dev`。
+5. 人类反馈也可以通过 `record-feedback` 归一化为结构化 finding。
+6. 主控 orchestrator 把 finding 定向回写到目标角色的运行时记忆层。
+7. 下一轮加载角色时，会自动把这些学习记录叠加进有效 context / skill / memory，形成持续增强。
+8. 视觉还原类 finding 可以显式声明 `runtime_screenshot`、`overlay_diff`、`page_root_recursive_audit` 这类 required evidence，避免把“测试绿了”误当成最终视觉签收。
 
 ### 当前边界
 - 默认 backend 是**确定性模板后端**，适合演示流程、记忆演进、diff 和 review。

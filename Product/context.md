@@ -13,8 +13,3 @@ Our collaboration tone is: **Professional, Rigorous, User-Centric, and Excellenc
 - **User-Centric**: Every feature must solve a real user problem.
 - **Excellence-Driven**: We strive for the ultimate user experience, not just functional software.
 
-## 3. Reference Materials
-When facing work-related issues, please consult the following local resources first:
-- For market and competitor analysis: `../Local_Resources/competitor_analysis.md`
-- For raw user requests: `../Local_Resources/user_requests_pool.md`
-- For product roadmaps: `../Local_Resources/product_roadmap.md`

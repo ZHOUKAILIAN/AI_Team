@@ -4,7 +4,8 @@ import argparse
 from pathlib import Path
 
 from .backend import DeterministicBackend
-from .intake import extract_request_from_message
+from .intake import extract_request_from_message, parse_intake_message
+from .models import Finding
 from .orchestrator import WorkflowOrchestrator
 from .project_scaffold import scaffold_project_codex_files
 from .state import StateStore
@@ -95,6 +96,33 @@ def build_parser() -> argparse.ArgumentParser:
     )
     agent_run_parser.set_defaults(handler=_handle_agent_run)
 
+    feedback_parser = subparsers.add_parser(
+        "record-feedback",
+        help="Record human feedback as a structured learning finding.",
+    )
+    feedback_parser.add_argument("--session-id", required=True, help="Existing workflow session ID.")
+    feedback_parser.add_argument("--source-stage", required=True, help="Stage where the feedback originated.")
+    feedback_parser.add_argument("--target-stage", required=True, help="Role that should learn from the feedback.")
+    feedback_parser.add_argument("--issue", required=True, help="Issue summary.")
+    feedback_parser.add_argument("--severity", default="medium", help="Feedback severity.")
+    feedback_parser.add_argument("--lesson", default="", help="Reusable lesson to store.")
+    feedback_parser.add_argument("--context-update", default="", help="Context rule to store.")
+    feedback_parser.add_argument("--skill-update", default="", help="Skill rule to store.")
+    feedback_parser.add_argument("--evidence", default="", help="Optional evidence summary.")
+    feedback_parser.add_argument("--evidence-kind", default="", help="Evidence source classification.")
+    feedback_parser.add_argument(
+        "--required-evidence",
+        action="append",
+        default=[],
+        help="Evidence that must exist before the issue can be closed. Repeat to provide multiple values.",
+    )
+    feedback_parser.add_argument(
+        "--completion-signal",
+        default="",
+        help="Explicit closure signal for the learning overlay.",
+    )
+    feedback_parser.set_defaults(handler=_handle_record_feedback)
+
     review_parser = subparsers.add_parser("review", help="Print the latest or a selected review.")
     review_parser.add_argument("--session-id", help="Specific session ID to inspect.")
     review_parser.set_defaults(handler=_handle_review)
@@ -127,34 +155,42 @@ def _handle_codex_init(args: argparse.Namespace) -> int:
 
 
 def _handle_run(args: argparse.Namespace) -> int:
+    intake = parse_intake_message(args.request)
     return _execute_workflow(
         repo_root=args.repo_root,
         state_root=args.state_root,
-        request=args.request,
+        request=intake.request,
+        contract=intake.contract,
         print_review=args.print_review,
     )
 
 
 def _handle_agent_run(args: argparse.Namespace) -> int:
-    request = extract_request_from_message(args.message)
-    if not request:
+    intake = parse_intake_message(args.message)
+    if not intake.request:
         raise SystemExit("Unable to extract a workflow request from --message.")
 
     return _execute_workflow(
         repo_root=args.repo_root,
         state_root=args.state_root,
-        request=request,
+        request=intake.request,
+        contract=intake.contract,
         print_review=args.print_review,
     )
 
 
 def _handle_start_session(args: argparse.Namespace) -> int:
-    request = extract_request_from_message(args.message) or args.message.strip()
-    if not request:
+    intake = parse_intake_message(args.message)
+    if not intake.request:
         raise SystemExit("Unable to extract a workflow request from --message.")
 
     store = StateStore(args.state_root)
-    session = store.create_session(request, raw_message=args.message, runtime_mode="session_bootstrap")
+    session = store.create_session(
+        intake.request,
+        raw_message=args.message,
+        contract=intake.contract,
+        runtime_mode="session_bootstrap",
+    )
     summary_path = store.workflow_summary_path(session.session_id)
 
     print(f"session_id: {session.session_id}")
@@ -163,11 +199,32 @@ def _handle_start_session(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_record_feedback(args: argparse.Namespace) -> int:
+    store = StateStore(args.state_root)
+    finding = Finding(
+        source_stage=args.source_stage,
+        target_stage=args.target_stage,
+        issue=args.issue,
+        severity=args.severity,
+        lesson=args.lesson,
+        proposed_context_update=args.context_update,
+        proposed_skill_update=args.skill_update,
+        evidence=args.evidence,
+        evidence_kind=args.evidence_kind,
+        required_evidence=list(args.required_evidence),
+        completion_signal=args.completion_signal,
+    )
+    feedback_path = store.record_feedback(args.session_id, finding)
+    print(f"recorded_feedback: {feedback_path}")
+    return 0
+
+
 def _execute_workflow(
     *,
     repo_root: Path,
     state_root: Path,
     request: str,
+    contract,
     print_review: bool,
 ) -> int:
     store = StateStore(state_root)
@@ -176,7 +233,7 @@ def _execute_workflow(
         state_store=store,
         backend=DeterministicBackend(),
     )
-    result = orchestrator.run(request=request)
+    result = orchestrator.run(request=request, contract=contract)
     print(f"session_id: {result.session_id}")
     print(f"acceptance_status: {result.acceptance_status}")
     print(f"review_path: {result.review_path}")

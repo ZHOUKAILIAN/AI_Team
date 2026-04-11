@@ -1,0 +1,28 @@
+{
+  "evidence_profiles": {
+    "page_root_visual_parity": {
+      "matchers": [
+        "page-root",
+        "page root",
+        "figma parity",
+        "0.5px",
+        "overlay diff",
+        "runtime screenshot"
+      ],
+      "required_evidence": [
+        "runtime_screenshot",
+        "overlay_diff",
+        "page_root_recursive_audit"
+      ],
+      "completion_signal": "Attach runtime_screenshot, overlay_diff, and page_root_recursive_audit evidence showing every visible descendant is within the configured tolerance (for example <= 0.5px)."
+    }
+  },
+  "native_node_exclusions": [
+    {
+      "platform": "miniprogram",
+      "node_type": "wechat_native_capsule",
+      "rule": "exclude_from_business_diff",
+      "verification_focus": "safe_area_avoidance"
+    }
+  ]
+}
