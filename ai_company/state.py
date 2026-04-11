@@ -10,6 +10,7 @@ from .models import (
     FeedbackRecord,
     Finding,
     SessionRecord,
+    StageResultEnvelope,
     StageOutput,
     StageRecord,
     WorkflowSummary,
@@ -146,6 +147,105 @@ class StateStore:
         summary_path.write_text(render_workflow_summary(summary))
         return summary_path
 
+    def load_session(self, session_id: str) -> SessionRecord:
+        session_path = self.root / "sessions" / session_id / "session.json"
+        if not session_path.exists():
+            raise FileNotFoundError(f"Session not found: {session_id}")
+        payload = json.loads(session_path.read_text())
+        return SessionRecord(
+            session_id=payload["session_id"],
+            request=payload["request"],
+            created_at=payload["created_at"],
+            session_dir=Path(payload["session_dir"]),
+            artifact_dir=Path(payload["artifact_dir"]),
+            raw_message=payload.get("raw_message"),
+        )
+
+    def load_workflow_summary(self, session_id: str) -> WorkflowSummary:
+        summary_path = self.workflow_summary_path(session_id)
+        if not summary_path.exists():
+            raise FileNotFoundError(f"Workflow summary not found for session {session_id}.")
+
+        payload: dict[str, str] = {}
+        artifact_paths: dict[str, str] = {}
+        in_artifacts = False
+        for raw_line in summary_path.read_text().splitlines():
+            if raw_line.strip() == "## Artifact Paths":
+                in_artifacts = True
+                continue
+            if not raw_line.startswith("- "):
+                continue
+            key, _, value = raw_line[2:].partition(": ")
+            if in_artifacts:
+                artifact_paths[key] = value
+            else:
+                payload[key] = value
+
+        return WorkflowSummary(
+            session_id=payload.get("session_id", session_id),
+            runtime_mode=payload.get("runtime_mode", "session_bootstrap"),
+            current_state=payload.get("current_state", "Intake"),
+            current_stage=payload.get("current_stage", "Intake"),
+            prd_status=payload.get("prd_status", "pending"),
+            dev_status=payload.get("dev_status", "pending"),
+            qa_status=payload.get("qa_status", "pending"),
+            acceptance_status=payload.get("acceptance_status", "pending"),
+            human_decision=payload.get("human_decision", "pending"),
+            qa_round=int(payload.get("qa_round", "0") or 0),
+            blocked_reason=payload.get("blocked_reason", ""),
+            artifact_paths=artifact_paths,
+        )
+
+    def record_stage_result(self, session_id: str, result: StageResultEnvelope) -> StageRecord:
+        session = self.load_session(session_id)
+        round_index = self._next_round_index(session, result.stage)
+        output = StageOutput(
+            stage=result.stage,
+            artifact_name=result.artifact_name,
+            artifact_content=result.artifact_content,
+            journal=result.journal,
+            findings=list(result.findings),
+            acceptance_status=result.acceptance_status or None,
+            supplemental_artifacts=dict(result.supplemental_artifacts),
+            blocked_reason=result.blocked_reason,
+        )
+        stage_record = self.record_stage(session, output, round_index=round_index)
+        self.append_stage_record(
+            session=session,
+            stage_record=stage_record,
+            findings=result.findings,
+            acceptance_status=result.acceptance_status or self._current_acceptance_status(session),
+        )
+        return stage_record
+
+    def append_stage_record(
+        self,
+        *,
+        session: SessionRecord,
+        stage_record: StageRecord,
+        findings: list[Finding],
+        acceptance_status: str,
+    ) -> None:
+        session_path = session.session_dir / "session.json"
+        payload = json.loads(session_path.read_text()) if session_path.exists() else session.to_dict()
+        existing_records = list(payload.get("stage_records", []))
+        existing_findings = list(payload.get("findings", []))
+        existing_records.append(stage_record.to_dict())
+        existing_findings.extend(finding.to_dict() for finding in findings)
+        payload["stage_records"] = existing_records
+        payload["findings"] = existing_findings
+        payload["acceptance_status"] = acceptance_status
+        payload["updated_at"] = self._timestamp()
+        self._write_json(session_path, payload)
+
+    def set_human_decision(self, session_id: str, decision: str) -> None:
+        session = self.load_session(session_id)
+        session_path = session.session_dir / "session.json"
+        payload = json.loads(session_path.read_text())
+        payload["human_decision"] = decision
+        payload["updated_at"] = self._timestamp()
+        self._write_json(session_path, payload)
+
     def update_session(
         self,
         session: SessionRecord,
@@ -279,6 +379,21 @@ class StateStore:
 
     def _write_json(self, path: Path, payload: object) -> None:
         path.write_text(json.dumps(payload, indent=2))
+
+    def _next_round_index(self, session: SessionRecord, stage: str) -> int:
+        session_path = session.session_dir / "session.json"
+        if not session_path.exists():
+            return 1
+        payload = json.loads(session_path.read_text())
+        records = payload.get("stage_records", [])
+        return 1 + sum(1 for item in records if item.get("stage") == stage)
+
+    def _current_acceptance_status(self, session: SessionRecord) -> str:
+        session_path = session.session_dir / "session.json"
+        if not session_path.exists():
+            return "pending"
+        payload = json.loads(session_path.read_text())
+        return payload.get("acceptance_status", "pending")
 
     def session_contract_artifact_paths(self, session: SessionRecord) -> dict[str, str]:
         paths: dict[str, str] = {}

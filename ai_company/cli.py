@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from .backend import DeterministicBackend
-from .intake import extract_request_from_message, parse_intake_message
-from .models import Finding
+from .harness_paths import default_state_root
+from .intake import parse_intake_message
+from .models import Finding, StageResultEnvelope, WorkflowSummary
 from .orchestrator import WorkflowOrchestrator
 from .project_scaffold import scaffold_project_codex_files
+from .stage_contracts import build_stage_contract
+from .stage_machine import StageMachine
 from .state import StateStore
 
 
@@ -15,7 +19,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     args.repo_root = args.repo_root.resolve()
-    args.state_root = (args.state_root or (args.repo_root / ".ai_company_state")).resolve()
+    args.state_root = (
+        args.state_root.resolve()
+        if args.state_root is not None
+        else default_state_root(repo_root=args.repo_root).resolve()
+    )
     return args.handler(args)
 
 
@@ -76,6 +84,45 @@ def build_parser() -> argparse.ArgumentParser:
     )
     start_session_parser.add_argument("--message", required=True, help="Raw user message for session intake.")
     start_session_parser.set_defaults(handler=_handle_start_session)
+
+    current_stage_parser = subparsers.add_parser(
+        "current-stage",
+        help="Print the current workflow stage and summary state for a session.",
+    )
+    current_stage_parser.add_argument("--session-id", help="Specific session ID to inspect.")
+    current_stage_parser.set_defaults(handler=_handle_current_stage)
+
+    resume_parser = subparsers.add_parser(
+        "resume",
+        help="Print the current stage summary so the operator can resume execution.",
+    )
+    resume_parser.add_argument("--session-id", help="Specific session ID to inspect.")
+    resume_parser.set_defaults(handler=_handle_current_stage)
+
+    build_contract_parser = subparsers.add_parser(
+        "build-stage-contract",
+        help="Build a machine-readable contract for the requested stage.",
+    )
+    build_contract_parser.add_argument("--session-id", required=True, help="Existing workflow session ID.")
+    build_contract_parser.add_argument("--stage", required=True, help="Stage name to compile.")
+    build_contract_parser.set_defaults(handler=_handle_build_stage_contract)
+
+    submit_result_parser = subparsers.add_parser(
+        "submit-stage-result",
+        help="Persist a structured stage-result bundle and advance the workflow state.",
+    )
+    submit_result_parser.add_argument("--session-id", required=True, help="Existing workflow session ID.")
+    submit_result_parser.add_argument("--bundle", type=Path, required=True, help="Path to stage result bundle JSON.")
+    submit_result_parser.set_defaults(handler=_handle_submit_stage_result)
+
+    human_decision_parser = subparsers.add_parser(
+        "record-human-decision",
+        help="Record a human workflow decision for a wait state.",
+    )
+    human_decision_parser.add_argument("--session-id", required=True, help="Existing workflow session ID.")
+    human_decision_parser.add_argument("--decision", required=True, help="One of go, no-go, rework.")
+    human_decision_parser.add_argument("--target-stage", help="Required for rework decisions from acceptance.")
+    human_decision_parser.set_defaults(handler=_handle_record_human_decision)
 
     agent_run_parser = subparsers.add_parser(
         "agent-run",
@@ -199,6 +246,66 @@ def _handle_start_session(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_current_stage(args: argparse.Namespace) -> int:
+    store = StateStore(args.state_root)
+    session_id = args.session_id or store.latest_session_id()
+    if not session_id:
+        raise SystemExit("No workflow session exists yet.")
+
+    summary = store.load_workflow_summary(session_id)
+    _print_summary(summary)
+    return 0
+
+
+def _handle_build_stage_contract(args: argparse.Namespace) -> int:
+    store = StateStore(args.state_root)
+    contract = build_stage_contract(
+        repo_root=args.repo_root,
+        state_store=store,
+        session_id=args.session_id,
+        stage=args.stage,
+    )
+    print(json.dumps(contract.to_dict(), indent=2))
+    return 0
+
+
+def _handle_submit_stage_result(args: argparse.Namespace) -> int:
+    payload = json.loads(args.bundle.read_text())
+    result = StageResultEnvelope.from_dict(payload)
+    if result.session_id != args.session_id:
+        raise SystemExit("Bundle session_id does not match --session-id.")
+
+    store = StateStore(args.state_root)
+    stage_record = store.record_stage_result(args.session_id, result)
+    session = store.load_session(args.session_id)
+    summary = store.load_workflow_summary(args.session_id)
+    updated_summary = StageMachine().advance(summary=summary, stage_result=result)
+    updated_summary.artifact_paths[result.stage.lower()] = str(stage_record.artifact_path)
+    updated_summary.artifact_paths.update(stage_record.supplemental_artifact_paths)
+    store.save_workflow_summary(session, updated_summary)
+    for finding in result.findings:
+        store.apply_learning(finding)
+
+    print(f"stored_bundle: {args.bundle}")
+    _print_summary(updated_summary)
+    return 0
+
+
+def _handle_record_human_decision(args: argparse.Namespace) -> int:
+    store = StateStore(args.state_root)
+    session = store.load_session(args.session_id)
+    summary = store.load_workflow_summary(args.session_id)
+    updated_summary = StageMachine().apply_human_decision(
+        summary=summary,
+        decision=args.decision,
+        target_stage=args.target_stage,
+    )
+    store.save_workflow_summary(session, updated_summary)
+    store.set_human_decision(args.session_id, updated_summary.human_decision)
+    _print_summary(updated_summary)
+    return 0
+
+
 def _handle_record_feedback(args: argparse.Namespace) -> int:
     store = StateStore(args.state_root)
     finding = Finding(
@@ -248,3 +355,11 @@ def _handle_review(args: argparse.Namespace) -> int:
     store = StateStore(args.state_root)
     print(store.read_review(session_id=args.session_id))
     return 0
+
+
+def _print_summary(summary: WorkflowSummary) -> None:
+    print(f"session_id: {summary.session_id}")
+    print(f"current_state: {summary.current_state}")
+    print(f"current_stage: {summary.current_stage}")
+    print(f"acceptance_status: {summary.acceptance_status}")
+    print(f"human_decision: {summary.human_decision}")

@@ -201,6 +201,82 @@ class WorkflowSummary:
 
 
 @model_dataclass
+class StageContract:
+    session_id: str
+    stage: str
+    goal: str
+    input_artifacts: dict[str, str] = field(default_factory=dict)
+    required_outputs: list[str] = field(default_factory=list)
+    forbidden_actions: list[str] = field(default_factory=list)
+    evidence_requirements: list[str] = field(default_factory=list)
+    role_context: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "stage": self.stage,
+            "goal": self.goal,
+            "input_artifacts": dict(self.input_artifacts),
+            "required_outputs": list(self.required_outputs),
+            "forbidden_actions": list(self.forbidden_actions),
+            "evidence_requirements": list(self.evidence_requirements),
+            "role_context": self.role_context,
+        }
+
+
+@model_dataclass
+class StageResultEnvelope:
+    session_id: str
+    stage: str
+    status: str
+    artifact_name: str
+    artifact_content: str
+    journal: str = ""
+    findings: list[Finding] = field(default_factory=list)
+    evidence: list[str] = field(default_factory=list)
+    suggested_next_owner: str = ""
+    summary: str = ""
+    acceptance_status: str = ""
+    blocked_reason: str = ""
+    supplemental_artifacts: dict[str, str] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "StageResultEnvelope":
+        return cls(
+            session_id=payload.get("session_id", ""),
+            stage=payload.get("stage", ""),
+            status=payload.get("status", ""),
+            artifact_name=payload.get("artifact_name", ""),
+            artifact_content=payload.get("artifact_content", ""),
+            journal=payload.get("journal", ""),
+            findings=[Finding.from_dict(item) for item in payload.get("findings", [])],
+            evidence=list(payload.get("evidence", [])),
+            suggested_next_owner=payload.get("suggested_next_owner", ""),
+            summary=payload.get("summary", ""),
+            acceptance_status=payload.get("acceptance_status", ""),
+            blocked_reason=payload.get("blocked_reason", ""),
+            supplemental_artifacts=dict(payload.get("supplemental_artifacts", {})),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "stage": self.stage,
+            "status": self.status,
+            "artifact_name": self.artifact_name,
+            "artifact_content": self.artifact_content,
+            "journal": self.journal,
+            "findings": [finding.to_dict() for finding in self.findings],
+            "evidence": list(self.evidence),
+            "suggested_next_owner": self.suggested_next_owner,
+            "summary": self.summary,
+            "acceptance_status": self.acceptance_status,
+            "blocked_reason": self.blocked_reason,
+            "supplemental_artifacts": dict(self.supplemental_artifacts),
+        }
+
+
+@model_dataclass
 class StageOutput:
     stage: str
     artifact_name: str

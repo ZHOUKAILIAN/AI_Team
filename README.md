@@ -63,43 +63,62 @@ Contract artifacts (required per session):
 - `workflow_summary.md`
 
 Recommended entrypoints for normal use:
-- one-time local setup: `./scripts/company-init.sh`
-- normal workflow entrypoint: `$ai-team-run`
+- preferred Harness-First entrypoint: `python3 -m ai_company start-session --message "<your original message>"`
+- inspect the current supervisor state: `python3 -m ai_company current-stage --session-id <session_id>`
+- compile a stage contract: `python3 -m ai_company build-stage-contract --session-id <session_id> --stage <stage>`
+- optional compatibility bridge: `./scripts/company-init.sh` then `$ai-team-run`
 
-*Note: All execution states, session memories, and artifact hand-offs are stored locally in the `.ai_company_state/` directory to keep the workspace clean.*
+*Note: The default state root is now app-local and workspace-scoped: `$CODEX_HOME/ai-team/workspaces/<workspace_fingerprint>/` (falling back to `~/.codex/ai-team/workspaces/<workspace_fingerprint>/` when `CODEX_HOME` is not set). Use `--state-root` only when you explicitly want to override that default.*
 
 ## 🚀 Quick Start
-If you want to use the real AI_Team workflow in this repository, the recommended path is:
+If you want to use the current Harness-First prototype in this repository, the recommended path is:
 
-1. Open Codex at the project root of this repository.
+1. Open Codex or a shell at the project root of this repository.
 
-2. Generate the local hidden Codex files once for this clone:
+2. Start a workflow session from the original user request:
 
 ```bash
-./scripts/company-init.sh
+python3 -m ai_company start-session --message "执行这个需求：<your request>"
 ```
 
-3. Run a requirement through the workflow:
+3. Inspect the current stage summary:
 
-```text
-$ai-team-run
+```bash
+python3 -m ai_company current-stage
 ```
 
-Manual fallback from the project root:
+4. Build the machine-readable contract for the current worker stage:
+
+```bash
+python3 -m ai_company build-stage-contract --session-id <session_id> --stage Product
+```
+
+5. After the stage work is done, submit a result bundle back to the harness:
+
+```bash
+python3 -m ai_company submit-stage-result --session-id <session_id> --bundle /path/to/stage-result.json
+```
+
+6. When the workflow stops at a wait state, record the explicit human decision:
+
+```bash
+python3 -m ai_company record-human-decision --session-id <session_id> --decision go
+```
+
+Compatibility bridge from the project root:
 
 ```bash
 ./scripts/company-init.sh
 ./scripts/company-run.sh "执行这个需求：<your request>"
 ```
 
-`company-init.sh` generates the project-local `.codex/` and `.agents/` files on demand and keeps them out of git.
-
-For normal use, prefer the project-root helper plus the repo-local run skill instead of `python3 -m ai_company ...`.
+`company-init.sh` still generates project-local `.codex/` and `.agents/` files on demand and keeps them out of git, but in the Harness-First direction they are treated as a bridge layer rather than the workflow control plane.
 
 ## ✅ What This Workflow Can Do
 This workflow is designed to run one requirement through a real multi-role handoff instead of collapsing everything into Dev-only self-verification.
 
 It does all of the following:
+- The harness owns the current state, current stage, legal transitions, and wait states instead of leaving those decisions to free-form prompts.
 - Product writes `prd.md` with explicit acceptance criteria before Dev starts.
 - The workflow stops once for CEO approval after Product.
 - Dev implements and records its own self-verification plus command evidence in `implementation.md`.
@@ -107,39 +126,45 @@ It does all of the following:
 - QA can automatically send failures back to Dev for rework.
 - Acceptance writes `acceptance_report.md` as an AI recommendation only, and actionable `recommended_no_go` / `blocked` outcomes can be routed back to Product or Dev as structured findings.
 - Human feedback can be recorded into the same learning loop through `record-feedback`.
+- Each worker stage can now receive a machine-readable contract and submit a structured stage-result bundle back to the harness.
 - A human still makes the final Go/No-Go decision.
 
 ## 🧾 Recording And Storage
 Yes, the workflow records every session locally.
 
 Main storage locations:
-- `.ai_company_state/artifacts/<session_id>/`: required handoff artifacts such as `prd.md`, `implementation.md`, `qa_report.md`, `acceptance_report.md`, `workflow_summary.md`, plus machine-readable review artifacts like `acceptance_contract.json` and `review_completion.json` when the workflow declares a review contract
-- `.ai_company_state/sessions/<session_id>/`: per-stage journals, findings, metadata, and `review.md`
-- `.ai_company_state/memory/<Role>/`: learned lessons and patches written back from downstream findings
+- `$CODEX_HOME/ai-team/workspaces/<workspace_fingerprint>/artifacts/<session_id>/`: required handoff artifacts such as `prd.md`, `implementation.md`, `qa_report.md`, `acceptance_report.md`, `workflow_summary.md`, plus machine-readable review artifacts like `acceptance_contract.json` and `review_completion.json` when the workflow declares a review contract
+- `$CODEX_HOME/ai-team/workspaces/<workspace_fingerprint>/sessions/<session_id>/`: per-stage journals, findings, metadata, and `review.md`
+- `$CODEX_HOME/ai-team/workspaces/<workspace_fingerprint>/memory/<Role>/`: learned lessons and patches written back from downstream findings
 
 `workflow_summary.md` is the quickest single-file index for the current session state and artifact paths.
 
-## Local Runtime And Learning Loop
-This repository now includes a runnable local workflow engine. Its workflow metadata aligns with:
+If `CODEX_HOME` is not configured, the runtime falls back to `~/.codex/ai-team/workspaces/<workspace_fingerprint>/`.
+
+## Local Runtime, Harness, And Learning Loop
+This repository now includes a runnable local workflow engine. On this branch, the main direction is a Harness-First supervisor running under Codex app. Its workflow metadata aligns with:
 
 `Product -> CEO approval -> Dev <-> QA -> Acceptance -> human Go/No-Go`
 
-Compared with the original document-only workflow, the runtime adds three concrete capabilities:
+Compared with the original document-only workflow, the runtime adds several concrete capabilities:
+- **Harness-owned execution control**: the runtime owns `current_state`, `current_stage`, legal transitions, and human-decision wait states.
+- **App-local workspace isolation**: workflow state lives under the Codex app state root instead of a repo-local hidden folder.
+- **Machine-readable stage handoffs**: workers can read a compiled stage contract and submit a structured stage-result bundle.
 - **Full traceability**: every stage writes an artifact, journal, findings file, and session metadata.
 - **Auditable diffs**: every run generates a `review.md` file with diffs across stage artifacts.
-- **Self-improving loop**: downstream findings are written back into `.ai_company_state/memory/<Role>/` as lessons, context patches, and skill patches. Future runs automatically load those overlays into the effective role profile.
+- **Self-improving loop**: downstream findings are written back into the runtime memory overlay for each role as lessons, context patches, and skill patches. Future runs automatically load those overlays into the effective role profile.
 - **Standardized learning overlays**: learned entries store reusable rules and explicit completion signals instead of vague summaries.
 
 ### Directory Layout
 - `Product/`, `Dev/`, `QA/`, `Acceptance/`, `Ops/`: seed role definitions with `context.md`, `memory.md`, and `SKILL.md`
 - `.codex/agents/`: project-local Codex subagents for `Product`, `Dev`, `QA`, and `Acceptance`, generated by `./scripts/company-init.sh`
-- `.agents/skills/ai-team-run/`: project-local run skill generated by `./scripts/company-init.sh`
-- `.ai_company_state/sessions/<session_id>/`: per-run journals and review artifacts
-- `.ai_company_state/artifacts/<session_id>/`: stage deliverables such as `prd.md`, `implementation.md`, `qa_report.md`, `acceptance_report.md`, `workflow_summary.md`, `acceptance_contract.json`, and review artifacts like `review_completion.json`
-- `.ai_company_state/memory/<Role>/`: runtime learning overlays containing `lessons.md`, `context_patch.md`, and `skill_patch.md`
+- `.agents/skills/ai-team-run/`: project-local run skill generated by `./scripts/company-init.sh`; in the Harness-First direction it is a bridge, not the control plane
+- `$CODEX_HOME/ai-team/workspaces/<workspace_fingerprint>/sessions/<session_id>/`: per-run journals and review artifacts
+- `$CODEX_HOME/ai-team/workspaces/<workspace_fingerprint>/artifacts/<session_id>/`: stage deliverables such as `prd.md`, `implementation.md`, `qa_report.md`, `acceptance_report.md`, `workflow_summary.md`, `acceptance_contract.json`, and review artifacts like `review_completion.json`
+- `$CODEX_HOME/ai-team/workspaces/<workspace_fingerprint>/memory/<Role>/`: runtime learning overlays containing `lessons.md`, `context_patch.md`, and `skill_patch.md`
 
 ### Commands
-These are low-level maintainer commands. Normal use should open Codex at the project root, run `./scripts/company-init.sh` once per clone, then use `$ai-team-run`.
+The commands below are the current Harness-First maintainer surface. If you use the skill bridge, treat it as a launcher into this harness rather than as the workflow controller.
 
 Initialize the local state directories:
 
@@ -153,7 +178,37 @@ Initialize the local Codex workflow setup:
 python3 -m ai_company codex-init
 ```
 
-Run a full workflow loop (`run` and `agent-run` are deterministic/demo runtime commands):
+Start a workflow session from a raw user request:
+
+```bash
+python3 -m ai_company start-session --message "执行这个需求：<your request>"
+```
+
+Inspect the latest or a specific session stage:
+
+```bash
+python3 -m ai_company current-stage --session-id <session_id>
+```
+
+Build a machine-readable stage contract:
+
+```bash
+python3 -m ai_company build-stage-contract --session-id <session_id> --stage Product
+```
+
+Submit a structured stage-result bundle and let the harness advance the state machine:
+
+```bash
+python3 -m ai_company submit-stage-result --session-id <session_id> --bundle /path/to/stage-result.json
+```
+
+Record a human decision for a wait state:
+
+```bash
+python3 -m ai_company record-human-decision --session-id <session_id> --decision go
+```
+
+Run a full deterministic/demo workflow loop (`run` and `agent-run` are deterministic/demo runtime commands; they remain compatibility commands):
 
 ```bash
 python3 -m ai_company run --request "Build a self-improving AI company loop" --print-review
@@ -180,15 +235,16 @@ When a session declares a review contract, `start-session` persists `acceptance_
 Host-tool changes are blocked by default. If QA or Acceptance would need to restart external tools or mutate local configuration, the workflow must stop and wait for explicit user approval first.
 
 ### Project-Scoped Codex Setup
-This repository supports official project-scoped Codex integration, but the hidden files are generated locally on demand instead of being tracked in git:
+This repository still supports official project-scoped Codex integration. The hidden files are generated locally on demand, and in the Harness-First direction these generated files are an entry bridge, not the source of truth for workflow state:
 
 - `.codex/agents/*.toml`: local subagents for Product, Dev, QA, and Acceptance
 - `.agents/skills/ai-team-run/`: local execution skill
 
 Best practice:
 - open Codex at the project root
-- run `./scripts/company-init.sh` once per clone
-- use `$ai-team-run` for normal workflow execution
+- use the CLI harness as the authoritative control plane
+- if needed, run `./scripts/company-init.sh` once per clone to install the local bridge files
+- treat `$ai-team-run` as a trigger/router, not as the stage controller
 
 These generated files are ignored by git so a fresh clone stays clean until initialization happens.
 
@@ -219,7 +275,7 @@ Recommended trigger phrases for agents:
 
 If no trigger prefix matches, `agent-run` falls back to using the entire message as the request.
 
-For the authoritative workflow bootstrap path, use:
+For the authoritative Harness-First bootstrap path, use:
 
 ```bash
 python3 -m ai_company start-session --message "<your original message>"
@@ -242,7 +298,7 @@ After that, you can tell Codex:
 - `/company-run build a self-improving AI company loop`
 - `执行这个需求：做一个支持下游纠偏和自学习的 AI 公司流程`
 
-The installed global skill is the trigger/router layer. The user-facing entrypoint remains the skill itself, while the helper script handles bootstrap internally.
+The installed global skill is the trigger/router layer. The user-facing entrypoint remains the skill itself, and in the Harness-First direction the workflow state machine still belongs to `ai_company`, while the skill only handles discovery, bootstrap, and prompt bridging.
 
 ### One-Command Global Install
 For teammates on another machine, prefer the global installer. It does both:
@@ -288,8 +344,10 @@ The installed skill will prefer this helper:
 8. Visual parity findings can declare explicit required evidence such as `runtime_screenshot`, `overlay_diff`, and `page_root_recursive_audit`, so QA and Acceptance do not confuse green tests with final visual sign-off.
 
 ### Current Boundary
+- This branch implements the first Harness-First vertical slice: app-local state root, explicit stage machine, `current-stage`, `build-stage-contract`, `submit-stage-result`, and `record-human-decision`.
 - The default backend is a deterministic template backend. It is suitable for validating the orchestration model, memory evolution, diff audit, and review flow.
 - Its `acceptance_status` values are recommendation-only (`recommended_go`, `recommended_no_go`, or `blocked`) and the workflow summary ends at `WaitForHumanDecision`, not final release approval.
+- Worker execution is still submitted back through bundle files. Native plugin UX, automatic worker dispatch, and richer resume tooling are future steps.
 - If you want `Dev` to call a real LLM to modify code, or `QA` to run a browser/test suite, you can replace the backend without rewriting the orchestrator, state store, or learning loop.
 
 ## Documentation & SOP

@@ -2,6 +2,7 @@ import subprocess
 import sys
 import unittest
 import json
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -132,6 +133,224 @@ class CliTests(unittest.TestCase):
             "Create a session scaffold for the single-session AI_Team workflow.",
             result.stdout,
         )
+
+    def test_start_session_uses_app_local_state_root_by_default(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        raw_message = "执行这个需求：做一个 harness-first workflow"
+
+        with TemporaryDirectory(dir=local_temp_dir()) as codex_home:
+            env = os.environ.copy()
+            env["CODEX_HOME"] = codex_home
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "start-session",
+                    "--message",
+                    raw_message,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+
+            self.assertEqual(result.returncode, 0)
+            output_lines = [line for line in result.stdout.splitlines() if ":" in line]
+            artifact_dir = Path(dict(line.split(": ", 1) for line in output_lines)["artifact_dir"])
+            self.assertIn("ai-team/workspaces", artifact_dir.as_posix())
+            self.assertTrue(artifact_dir.exists())
+
+    def test_current_stage_prints_session_summary_fields(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        raw_message = "执行这个需求：做一个 harness-first workflow"
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "start-session",
+                    "--message",
+                    raw_message,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0)
+            output_lines = [line for line in bootstrap.stdout.splitlines() if ":" in line]
+            session_id = dict(line.split(": ", 1) for line in output_lines)["session_id"]
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "current-stage",
+                    "--session-id",
+                    session_id,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("current_state: Intake", result.stdout)
+            self.assertIn("current_stage: Intake", result.stdout)
+            self.assertIn("human_decision: pending", result.stdout)
+
+    def test_build_stage_contract_outputs_machine_readable_json(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        raw_message = "执行这个需求：做一个 harness-first workflow"
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "start-session",
+                    "--message",
+                    raw_message,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0)
+            output_lines = [line for line in bootstrap.stdout.splitlines() if ":" in line]
+            session_id = dict(line.split(": ", 1) for line in output_lines)["session_id"]
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "build-stage-contract",
+                    "--session-id",
+                    session_id,
+                    "--stage",
+                    "Product",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["stage"], "Product")
+            self.assertIn("prd.md", payload["required_outputs"])
+            self.assertIn("must_not_change_stage_order", payload["forbidden_actions"])
+
+    def test_record_human_decision_routes_wait_state_to_dev(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            start_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "start-session",
+                    "--message",
+                    "执行这个需求：做一个 harness-first workflow",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(start_result.returncode, 0)
+            output_lines = [line for line in start_result.stdout.splitlines() if ":" in line]
+            session_id = dict(line.split(": ", 1) for line in output_lines)["session_id"]
+
+            product_bundle = Path(temp_dir) / "product_bundle.json"
+            product_bundle.write_text(
+                json.dumps(
+                    {
+                        "session_id": session_id,
+                        "stage": "Product",
+                        "status": "completed",
+                        "artifact_name": "prd.md",
+                        "artifact_content": "# Product PRD\n\n## Acceptance Criteria\n- Verify the harness.\n",
+                        "journal": "# Product Journal\n",
+                        "findings": [],
+                        "evidence": [],
+                        "summary": "Drafted PRD",
+                    }
+                )
+            )
+
+            submit_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "submit-stage-result",
+                    "--session-id",
+                    session_id,
+                    "--bundle",
+                    str(product_bundle),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(submit_result.returncode, 0)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "record-human-decision",
+                    "--session-id",
+                    session_id,
+                    "--decision",
+                    "go",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("current_state: Dev", result.stdout)
+            self.assertIn("current_stage: Dev", result.stdout)
 
     def test_record_feedback_persists_learning_and_feedback_metadata(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
