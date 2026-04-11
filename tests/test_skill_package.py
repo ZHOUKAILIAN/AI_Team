@@ -25,6 +25,11 @@ class SkillPackageTests(unittest.TestCase):
         testcase.assertIn("acceptance_contract.json", content)
         testcase.assertIn("review_completion.json", content)
         testcase.assertIn("explicit user approval", content)
+        testcase.assertIn("Workflow Isolation Contract", content)
+        testcase.assertIn("Generic methodology skills may assist inside a stage", content)
+        testcase.assertIn("must not change the AI_Team stage order", content)
+        testcase.assertNotIn("1% rule", content)
+        testcase.assertNotIn("Skill Dispatch Protocol", content)
 
     def test_root_skill_describes_single_session_state_machine(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
@@ -61,10 +66,9 @@ class SkillPackageTests(unittest.TestCase):
         self.assertIn("acceptance_contract.json", content)
         self.assertIn("review_completion.json", content)
         self.assertIn("explicit user approval", content)
-        self.assertIn(
-            'python3 -m ai_company start-session --message "<the user\'s original message>"',
-            content,
-        )
+        self.assertIn("Available assets", content)
+        self.assertIn("scripts/", content)
+        self.assertIn("ai_company start-session", content)
         self.assertIn(
             "deterministic runtime output is workflow metadata only, not real QA/Acceptance evidence",
             content,
@@ -110,10 +114,9 @@ class SkillPackageTests(unittest.TestCase):
         self.assertIn("acceptance_contract.json", content)
         self.assertIn("review_completion.json", content)
         self.assertIn("explicit user approval", content)
-        self.assertIn(
-            'python3 -m ai_company start-session --message "<the user\'s original message>"',
-            content,
-        )
+        self.assertIn("Available assets", content)
+        self.assertIn("scripts/", content)
+        self.assertIn("ai_company start-session", content)
         self.assertIn(
             "deterministic runtime output is workflow metadata only, not real QA/Acceptance evidence",
             content,
@@ -140,6 +143,15 @@ class SkillPackageTests(unittest.TestCase):
         for line in follow_through_lines:
             self.assertIn(line, root_content)
             self.assertIn(line, packaged_content)
+
+    def test_generated_local_run_skill_uses_goal_oriented_contract_language(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        project_scaffold = (repo_root / "ai_company" / "project_scaffold.py").read_text()
+
+        self.assertIn("Workflow Isolation Contract", project_scaffold)
+        self.assertIn("Generic methodology skills may assist inside a stage", project_scaffold)
+        self.assertIn("must not change the AI_Team stage order", project_scaffold)
+        self.assertNotIn("## Bootstrap", project_scaffold)
 
     def test_codex_init_generates_project_local_agents_and_run_skill(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]

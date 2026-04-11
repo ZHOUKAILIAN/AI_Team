@@ -110,6 +110,9 @@ class DocsTests(unittest.TestCase):
 
         self.assertIn("start-session", root_skill)
         self.assertIn("Continue after session bootstrap", root_skill)
+        self.assertIn("Workflow Isolation Contract", root_skill)
+        self.assertIn("Generic methodology skills may assist inside a stage", root_skill)
+        self.assertIn("must not change the AI_Team stage order", root_skill)
         self.assertIn("workflow_summary.md", root_skill)
         self.assertIn("implementation.md", root_skill)
         self.assertIn("WaitForCEOApproval", root_skill)
@@ -145,9 +148,9 @@ class DocsTests(unittest.TestCase):
         self.assertIn("review_completion.json", acceptance_skill)
         self.assertIn("explicit user approval", acceptance_skill)
         self.assertIn("Acceptance or human-feedback rework round", dev_skill)
-        self.assertIn("./scripts/company-init.sh", packaged_skill)
-        self.assertIn("~/.codex/vendor/ai-team", packaged_skill)
-        self.assertIn("keeps them out of git", packaged_skill)
+        self.assertIn("Available assets", packaged_skill)
+        self.assertIn("scripts/", packaged_skill)
+        self.assertIn("ai_company start-session", packaged_skill)
         self.assertIn("record-feedback", root_skill)
         self.assertIn("completion signals", packaged_skill)
         self.assertIn("acceptance_contract.json", packaged_skill)
@@ -158,6 +161,30 @@ class DocsTests(unittest.TestCase):
         self.assertIn("page_root_recursive_audit", root_skill)
         self.assertIn("wechat_native_capsule", acceptance_skill)
         self.assertIn("native-node policy", acceptance_skill)
+
+    def test_skills_follow_skill_standard_shape(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        skill_paths = [
+            repo_root / "SKILL.md",
+            repo_root / "Product" / "SKILL.md",
+            repo_root / "Dev" / "SKILL.md",
+            repo_root / "QA" / "SKILL.md",
+            repo_root / "Acceptance" / "SKILL.md",
+            repo_root / "Ops" / "SKILL.md",
+            repo_root / "codex-skill" / "ai-company-workflow" / "SKILL.md",
+        ]
+
+        for path in skill_paths:
+            content = path.read_text()
+            with self.subTest(path=path):
+                self.assertIn("description: Use when", content)
+                self.assertNotIn("## Procedure", content)
+                self.assertNotIn("1% rule", content)
+                self.assertNotIn("Skill Dispatch Protocol", content)
+
+        dev_skill = (repo_root / "Dev" / "SKILL.md").read_text()
+        self.assertIn("Generic methodology skills are allowed inside Dev", dev_skill)
+        self.assertIn("must not replace QA", dev_skill)
 
 
 if __name__ == "__main__":

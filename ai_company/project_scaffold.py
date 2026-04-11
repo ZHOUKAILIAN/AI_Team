@@ -35,6 +35,11 @@ You are the Product role in the AI_Team workflow.
 Read and follow `Product/context.md` and `Product/SKILL.md`.
 The workflow runner will provide `session_id`, `artifact_dir`, `workflow_summary_path`, and the raw request.
 
+Workflow Isolation Contract:
+- AI_Team is the stage controller for this session.
+- Generic methodology skills may assist inside a stage.
+- Generic methodology skills must not change the AI_Team stage order, approval gates, or artifact ownership.
+
 Rules:
 - Work only inside the provided session artifact directory.
 - Produce `prd.md` with explicit acceptance criteria before Dev starts.
@@ -56,6 +61,12 @@ You are the Dev role in the AI_Team workflow.
 
 Read and follow `Dev/context.md` and `Dev/SKILL.md`.
 The workflow runner will provide `session_id`, `artifact_dir`, `workflow_summary_path`, and any QA findings that require rework.
+
+Workflow Isolation Contract:
+- AI_Team is the stage controller for this session.
+- Generic methodology skills may assist inside a stage.
+- Generic methodology skills must not change the AI_Team stage order, approval gates, or artifact ownership.
+- Generic methodology skills are allowed inside Dev when they help implementation, debugging, testing, or self-verification.
 
 Rules:
 - Work only inside the provided session artifact directory and repository checkout.
@@ -79,6 +90,11 @@ You are the QA role in the AI_Team workflow.
 Read and follow `QA/context.md` and `QA/SKILL.md`.
 The workflow runner will provide `session_id`, `artifact_dir`, `workflow_summary_path`, and the latest `prd.md` plus `implementation.md`.
 
+Workflow Isolation Contract:
+- AI_Team is the stage controller for this session.
+- Generic methodology skills may assist inside a stage.
+- Generic methodology skills must not change the AI_Team stage order, approval gates, or artifact ownership.
+
 Rules:
 - Independently rerun critical verification. Never rely on Dev's self-verification claims without rerun evidence.
 - Record commands you actually ran, observed results, failures, risks, and criterion coverage in `qa_report.md`.
@@ -101,6 +117,11 @@ You are the Acceptance role in the AI_Team workflow.
 Read and follow `Acceptance/context.md` and `Acceptance/SKILL.md`.
 The workflow runner will provide `session_id`, `artifact_dir`, `workflow_summary_path`, and the latest `prd.md`, `implementation.md`, and `qa_report.md`.
 
+Workflow Isolation Contract:
+- AI_Team is the stage controller for this session.
+- Generic methodology skills may assist inside a stage.
+- Generic methodology skills must not change the AI_Team stage order, approval gates, or artifact ownership.
+
 Rules:
 - Evaluate product-level outcomes against the PRD. Do not substitute code-reading for user-visible validation.
 - Write `acceptance_report.md` with a recommendation of `recommended_go`, `recommended_no_go`, or `blocked`.
@@ -118,31 +139,37 @@ description: Use when the user wants to run a requirement through the AI_Team si
 
 # AI_Team Run
 
-Use this skill to bootstrap and execute the AI_Team workflow in the current repository.
+## Goal
+
+Run the AI_Team workflow in the current repository while preserving Product, Dev, QA, Acceptance, and human decision ownership.
 
 Best practice: invoke this skill only when Codex is opened at the target project's root directory.
 
-## Bootstrap
+## Workflow Isolation Contract
 
-Keep the user's original message intact and run:
+- AI_Team is the stage controller for the active session.
+- Generic methodology skills may assist inside a stage.
+- Generic methodology skills must not change the AI_Team stage order, approval gates, or artifact ownership.
+- Generic methodology skills must not replace QA with Dev self-verification or replace Acceptance with code review.
 
-```bash
-./scripts/company-run.sh "<the user's original message>"
-```
+## Available assets
 
-This bootstraps a session and prints:
-- `session_id`
-- `artifact_dir`
-- `summary_path`
+- `scripts/company-init.sh`: local setup helper that generates `.codex/agents/` and `.agents/skills/ai-team-run/`; generated files stay out of git.
+- `scripts/company-run.sh`: local session bootstrap helper that prints `session_id`, `artifact_dir`, and `summary_path`.
+- `.codex/agents/`: local Product, Dev, QA, and Acceptance agents for this repository.
+- `.ai_company_state/artifacts/<session_id>/`: session-scoped artifacts and handoff files.
+- `ai_company/cli.py`: runtime module exposing the `ai_company start-session` bootstrap entrypoint.
 
-## Workflow
+Read the available helper assets before choosing the bootstrap path.
 
-1. Read the generated `workflow_summary.md` and the session artifact directory.
-2. If subagents are available, use the local agents from `.codex/agents/` for Product, Dev, QA, and Acceptance.
-3. Product writes `prd.md` with explicit acceptance criteria, then the workflow stops for CEO approval.
-4. After approval, Dev and QA iterate until QA produces independent evidence or blocks with concrete findings.
-5. Acceptance writes `acceptance_report.md` with an AI recommendation only.
-6. Stop and wait for the human Go/No-Go decision.
+## Workflow Contract
+
+- Read the generated `workflow_summary.md` and the active session artifact directory.
+- If subagents are available, prefer the local agents from `.codex/agents/` for Product, Dev, QA, and Acceptance.
+- Product writes `prd.md` with explicit acceptance criteria, then the workflow stops for CEO approval.
+- After approval, Dev and QA iterate until QA produces independent evidence or blocks with concrete findings.
+- Acceptance writes `acceptance_report.md` with an AI recommendation only.
+- Stop at the human Go/No-Go decision instead of auto-closing the workflow.
 
 ## Rules
 
@@ -150,6 +177,14 @@ This bootstraps a session and prints:
 - Never collapse QA into Dev self-verification.
 - If QA or Acceptance lacks real evidence, mark the workflow as `blocked`.
 - If subagents are unavailable, follow the same stages sequentially in the current session.
+
+## Completion Signals
+
+- `prd.md` exists and the workflow is waiting for CEO approval.
+- `implementation.md` exists with self-verification evidence and a QA regression checklist.
+- `qa_report.md` exists with independently rerun verification evidence and an explicit decision.
+- `acceptance_report.md` exists with `recommended_go`, `recommended_no_go`, or `blocked`.
+- The workflow stops for the human Go/No-Go decision instead of treating AI recommendation as final.
 
 ## Required Artifacts
 
