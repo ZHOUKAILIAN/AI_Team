@@ -203,6 +203,9 @@ class SkillPackageTests(unittest.TestCase):
             self.assertTrue((project_root / ".agents" / "skills" / "ai-team-run" / "SKILL.md").exists())
             self.assertFalse((project_root / ".codex" / "config.toml").exists())
             self.assertFalse((project_root / ".agents" / "skills" / "ai-team-init" / "SKILL.md").exists())
+            dev_agent_lines = (project_root / ".codex" / "agents" / "ai_team_dev.toml").read_text().splitlines()
+            self.assertIn('developer_instructions = """', dev_agent_lines)
+            self.assertNotIn('instructions = """', dev_agent_lines)
 
         self.assertTrue((repo_root / "scripts" / "company-init.sh").exists())
         self.assertTrue((repo_root / "scripts" / "company-run.sh").exists())

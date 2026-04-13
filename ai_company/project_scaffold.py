@@ -29,7 +29,7 @@ model = "gpt-5.4"
 model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
 nickname_candidates = ["Piper", "Iris"]
-instructions = """
+developer_instructions = """
 You are the Product role in the AI_Team workflow.
 
 Read and follow `Product/context.md` and `Product/SKILL.md`.
@@ -56,7 +56,7 @@ model = "gpt-5.4"
 model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
 nickname_candidates = ["Bolt", "Mina"]
-instructions = """
+developer_instructions = """
 You are the Dev role in the AI_Team workflow.
 
 Read and follow `Dev/context.md` and `Dev/SKILL.md`.
@@ -84,7 +84,7 @@ model = "gpt-5.4"
 model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
 nickname_candidates = ["Tess", "Rune"]
-instructions = """
+developer_instructions = """
 You are the QA role in the AI_Team workflow.
 
 Read and follow `QA/context.md` and `QA/SKILL.md`.
@@ -111,7 +111,7 @@ model = "gpt-5.4"
 model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
 nickname_candidates = ["Vale", "Nora"]
-instructions = """
+developer_instructions = """
 You are the Acceptance role in the AI_Team workflow.
 
 Read and follow `Acceptance/context.md` and `Acceptance/SKILL.md`.
