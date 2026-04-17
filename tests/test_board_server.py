@@ -45,6 +45,11 @@ class BoardServerTests(unittest.TestCase):
             self.assertIn("function sessionMatchesCurrentFilter", html)
             self.assertIn("function formatSessionMeta", html)
             self.assertIn("function formatRefreshTime", html)
+            self.assertIn("function renderArtifactSections", html)
+            self.assertIn("function artifactMetadataFor", html)
+            self.assertIn("产品方案 / PRD", html)
+            self.assertIn("运行时元数据", html)
+            self.assertIn("预览内容", html)
             self.assertIn("Last refreshed: ${escapeHtml(formatRefreshTime(board.generated_at))}", html)
             self.assertEqual(payload["stats"]["sessions"], 1)
 

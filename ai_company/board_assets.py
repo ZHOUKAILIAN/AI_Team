@@ -145,10 +145,58 @@ BOARD_HTML = """<!doctype html>
       display: block;
       margin-top: 4px;
     }
+    .artifact-section {
+      margin-top: 14px;
+    }
+    .artifact-section-label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      margin: 0 0 8px;
+      text-transform: uppercase;
+    }
+    .artifact-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .artifact-card {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px;
+      background: #fffdf8;
+    }
+    .artifact-card h4 {
+      margin: 0 0 6px;
+      font-size: 17px;
+    }
+    .artifact-description {
+      color: var(--muted);
+      margin: 0 0 10px;
+    }
+    .artifact-file {
+      color: var(--ink);
+      font-size: 13px;
+      margin: 8px 0 4px;
+    }
+    .artifact-path {
+      color: var(--muted);
+      display: block;
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .artifact-preview-title {
+      color: var(--muted);
+      margin: 16px 0 8px;
+    }
     @media (max-width: 860px) {
       .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       main { grid-template-columns: 1fr; }
       .timeline { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .artifact-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -273,16 +321,111 @@ BOARD_HTML = """<!doctype html>
         </div>
         <div class="card">
           <h3>Artifacts</h3>
-          ${Object.entries(session.artifact_paths || {}).map(([key, path]) => `<p><button class="link" onclick="loadArtifact('${encodeURIComponent(path)}')">${escapeHtml(key)}</button><br><small>${escapeHtml(path)}</small></p>`).join('') || '<p>No artifacts.</p>'}
-          <pre id="artifact-preview">Select an artifact to preview.</pre>
+          ${renderArtifactSections(session)}
+          <p id="artifact-preview-title" class="artifact-preview-title">选择一个产物预览</p>
+          <pre id="artifact-preview">点击“预览内容”查看文件内容。</pre>
         </div>
         <p class="subtitle">Last refreshed: ${escapeHtml(formatRefreshTime(board.generated_at))}</p>
       `;
     }
 
-    async function loadArtifact(path) {
+    async function loadArtifact(path, title) {
+      const decodedTitle = decodeURIComponent(title || '');
+      document.getElementById('artifact-preview-title').textContent = decodedTitle || '产物预览';
       const response = await fetch('/api/artifact?path=' + path);
       document.getElementById('artifact-preview').textContent = await response.text();
+    }
+
+    function renderArtifactSections(session) {
+      const artifacts = Object.entries(session.artifact_paths || {})
+        .map(([key, path]) => artifactMetadataFor(key, path));
+      if (!artifacts.length) return '<p>暂无产物。</p>';
+
+      const sections = [
+        { category: 'business', label: '业务产物' },
+        { category: 'runtime', label: '运行时元数据' },
+        { category: 'other', label: '其他产物' }
+      ];
+      return sections.map(section => {
+        const items = artifacts.filter(item => item.category === section.category);
+        if (!items.length) return '';
+        return `
+          <div class="artifact-section">
+            <p class="artifact-section-label">${section.label}</p>
+            <div class="artifact-grid">
+              ${items.map(renderArtifactCard).join('')}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderArtifactCard(item) {
+      return `
+        <div class="artifact-card">
+          <h4>${escapeHtml(item.title)}</h4>
+          <p class="artifact-description">${escapeHtml(item.description)}</p>
+          <button class="link" onclick="loadArtifact('${encodeURIComponent(item.path)}', '${encodeURIComponent(item.title)}')">预览内容</button>
+          <p class="artifact-file">文件：${escapeHtml(item.filename)}</p>
+          <small class="artifact-path" title="${escapeHtml(item.path)}">${escapeHtml(item.path)}</small>
+        </div>
+      `;
+    }
+
+    function artifactMetadataFor(key, path) {
+      const metadata = {
+        request: {
+          category: 'runtime',
+          title: '原始需求',
+          description: '启动这个 session 时记录的需求输入。'
+        },
+        workflow_summary: {
+          category: 'runtime',
+          title: '流程摘要',
+          description: '当前状态、阶段、人工决策和已记录产物。'
+        },
+        acceptance_contract: {
+          category: 'runtime',
+          title: '验收约束',
+          description: '这条需求的验收条件、证据要求和边界规则。'
+        },
+        product: {
+          category: 'business',
+          title: '产品方案 / PRD',
+          description: 'Product 阶段产出的需求方案和验收标准。'
+        },
+        dev: {
+          category: 'business',
+          title: '实现说明',
+          description: 'Dev 阶段产出的实现计划或交付说明。'
+        },
+        qa: {
+          category: 'business',
+          title: 'QA 验证结果',
+          description: 'QA 阶段产出的验证结论、风险和证据。'
+        },
+        acceptance: {
+          category: 'business',
+          title: '验收建议',
+          description: 'Acceptance 阶段产出的产品级验收建议。'
+        }
+      };
+      const known = metadata[key] || {
+        category: 'other',
+        title: key,
+        description: '这个 artifact 暂无内置说明，可预览内容查看。'
+      };
+      return {
+        ...known,
+        key,
+        path,
+        filename: filenameFromPath(path)
+      };
+    }
+
+    function filenameFromPath(path) {
+      const text = String(path || '');
+      return text.split('/').filter(Boolean).pop() || text;
     }
 
     function visibleSessions() {
