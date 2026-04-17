@@ -15,6 +15,7 @@ from .project_scaffold import scaffold_project_codex_files
 from .stage_contracts import build_stage_contract
 from .stage_machine import StageMachine
 from .state import StageRunStateError, StateStore
+from .workspace_metadata import refresh_workspace_metadata
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -26,6 +27,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.state_root is not None
         else default_state_root(repo_root=args.repo_root).resolve()
     )
+    if _should_refresh_workspace_metadata(args.command):
+        refresh_workspace_metadata(state_root=args.state_root, repo_root=args.repo_root)
     return args.handler(args)
 
 
@@ -575,3 +578,7 @@ def _expected_submission_stage(summary: WorkflowSummary) -> str | None:
     if summary.current_state == "Acceptance":
         return "Acceptance"
     return None
+
+
+def _should_refresh_workspace_metadata(command: str) -> bool:
+    return command not in {"board-snapshot", "serve-board"}
