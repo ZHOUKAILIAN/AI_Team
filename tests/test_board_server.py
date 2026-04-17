@@ -40,6 +40,12 @@ class BoardServerTests(unittest.TestCase):
 
             self.assertIn("AI_Team Read-Only Board", html)
             self.assertIn("fetch('/api/board')", html)
+            self.assertIn("let currentFilter = 'all';", html)
+            self.assertIn("function renderFilters", html)
+            self.assertIn("function sessionMatchesCurrentFilter", html)
+            self.assertIn("function formatSessionMeta", html)
+            self.assertIn("function formatRefreshTime", html)
+            self.assertIn("Last refreshed: ${escapeHtml(formatRefreshTime(board.generated_at))}", html)
             self.assertEqual(payload["stats"]["sessions"], 1)
 
     def test_board_server_rejects_artifact_paths_outside_state_roots(self) -> None:

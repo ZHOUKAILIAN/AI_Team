@@ -119,6 +119,32 @@ BOARD_HTML = """<!doctype html>
       font: inherit;
       text-decoration: underline;
     }
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 16px 16px 0;
+    }
+    .filter {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--ink);
+      cursor: pointer;
+      font: inherit;
+      font-size: 13px;
+      padding: 6px 10px;
+    }
+    .filter.active {
+      background: var(--ink);
+      border-color: var(--ink);
+      color: var(--paper);
+    }
+    .session-meta {
+      color: var(--muted);
+      display: block;
+      margin-top: 4px;
+    }
     @media (max-width: 860px) {
       .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       main { grid-template-columns: 1fr; }
@@ -133,13 +159,21 @@ BOARD_HTML = """<!doctype html>
   </header>
   <div id="stats" class="stats"></div>
   <main>
-    <aside><div id="tree" class="tree"></div></aside>
+    <aside><div id="filters" class="filters"></div><div id="tree" class="tree"></div></aside>
     <section><div id="detail" class="detail"></div></section>
   </main>
   <script>
     let board = null;
     let selectedSessionId = null;
+    let currentFilter = 'all';
     const stages = ['Product', 'WaitForCEOApproval', 'Dev', 'QA', 'Acceptance', 'WaitForHumanDecision', 'Done'];
+    const filterDefinitions = [
+      { key: 'all', label: 'All' },
+      { key: 'active', label: 'Active' },
+      { key: 'waiting_human', label: 'Waiting Human' },
+      { key: 'has_run', label: 'Has Run' },
+      { key: 'empty', label: 'Empty' }
+    ];
 
     async function loadBoard() {
       const response = await fetch('/api/board');
@@ -161,6 +195,7 @@ BOARD_HTML = """<!doctype html>
 
     function render() {
       renderStats();
+      renderFilters();
       renderTree();
       renderDetail();
     }
@@ -172,27 +207,47 @@ BOARD_HTML = """<!doctype html>
         .map(key => `<div class="stat"><b>${stats[key] || 0}</b><span>${key}</span></div>`).join('');
     }
 
+    function renderFilters() {
+      document.getElementById('filters').innerHTML = filterDefinitions.map(item => {
+        const count = countSessionsForFilter(item.key);
+        return `<button class="filter ${currentFilter === item.key ? 'active' : ''}" onclick="selectFilter('${item.key}')">${item.label} ${count}</button>`;
+      }).join('');
+    }
+
     function renderTree() {
-      const sessions = allSessions();
-      if (!selectedSessionId && sessions.length) selectedSessionId = sessions[0].session.session_id;
-      document.getElementById('tree').innerHTML = (board?.projects || []).map(project => `
-        <div class="project"><b>${escapeHtml(project.project_name)}</b><br><small>${escapeHtml(project.project_root || 'legacy workspace')}</small></div>
-        ${(project.worktrees || []).map(worktree => `
+      const visible = visibleSessions();
+      if (!visible.some(item => item.session.session_id === selectedSessionId)) {
+        selectedSessionId = visible.length ? visible[0].session.session_id : null;
+      }
+      const treeHtml = (board?.projects || []).map(project => {
+        const worktreeHtml = (project.worktrees || []).map(worktree => {
+          const sessions = (worktree.sessions || []).filter(sessionMatchesCurrentFilter);
+          if (!sessions.length) return '';
+          return `
           <div class="worktree"><b>${escapeHtml(worktree.branch || 'unknown branch')}</b><br><small>${escapeHtml(worktree.worktree_path || worktree.state_root)}</small></div>
-          ${(worktree.sessions || []).map(session => `
+          ${sessions.map(session => `
             <div class="session ${session.session_id === selectedSessionId ? 'active' : ''}" onclick="selectSession('${session.session_id}')">
               <b>${escapeHtml(shortText(session.request))}</b><br>
               <small>${escapeHtml(session.current_state)} / ${escapeHtml(session.active_run?.state || 'no run')}</small>
+              <small class="session-meta">${escapeHtml(formatSessionMeta(session))}</small>
             </div>
           `).join('')}
-        `).join('')}
-      `).join('');
+        `;
+        }).join('');
+        if (!worktreeHtml) return '';
+        return `
+          <div class="project"><b>${escapeHtml(project.project_name)}</b><br><small>${escapeHtml(project.project_root || 'legacy workspace')}</small></div>
+          ${worktreeHtml}
+        `;
+      }).join('');
+      document.getElementById('tree').innerHTML = treeHtml || `<div class="card">No sessions match ${escapeHtml(currentFilterLabel())}.</div>`;
     }
 
     function renderDetail() {
-      const match = allSessions().find(item => item.session.session_id === selectedSessionId) || allSessions()[0];
+      const sessions = visibleSessions();
+      const match = sessions.find(item => item.session.session_id === selectedSessionId) || sessions[0];
       if (!match) {
-        document.getElementById('detail').innerHTML = '<div class="card">No sessions found.</div>';
+        document.getElementById('detail').innerHTML = `<div class="card">No sessions match ${escapeHtml(currentFilterLabel())}.</div>`;
         return;
       }
       selectedSessionId = match.session.session_id;
@@ -200,7 +255,7 @@ BOARD_HTML = """<!doctype html>
       const run = session.active_run;
       document.getElementById('detail').innerHTML = `
         <h2>${escapeHtml(shortText(session.request, 90))}</h2>
-        <div class="subtitle">${escapeHtml(match.project.project_name)} / ${escapeHtml(match.worktree.branch || 'unknown branch')} / ${escapeHtml(session.session_id)}</div>
+        <div class="subtitle">${escapeHtml(match.project.project_name)} / ${escapeHtml(match.worktree.branch || 'unknown branch')} / ${escapeHtml(formatSessionMeta(session))}</div>
         <div class="timeline">${stages.map(stage => `<div class="stage ${session.current_state === stage || session.current_stage === stage ? 'current' : ''}">${stage}</div>`).join('')}</div>
         <div class="card">
           <h3>Workflow</h3>
@@ -221,7 +276,7 @@ BOARD_HTML = """<!doctype html>
           ${Object.entries(session.artifact_paths || {}).map(([key, path]) => `<p><button class="link" onclick="loadArtifact('${encodeURIComponent(path)}')">${escapeHtml(key)}</button><br><small>${escapeHtml(path)}</small></p>`).join('') || '<p>No artifacts.</p>'}
           <pre id="artifact-preview">Select an artifact to preview.</pre>
         </div>
-        <p class="subtitle">Last refreshed: ${escapeHtml(board.generated_at || '')}</p>
+        <p class="subtitle">Last refreshed: ${escapeHtml(formatRefreshTime(board.generated_at))}</p>
       `;
     }
 
@@ -230,14 +285,87 @@ BOARD_HTML = """<!doctype html>
       document.getElementById('artifact-preview').textContent = await response.text();
     }
 
+    function visibleSessions() {
+      return allSessions().filter(item => sessionMatchesCurrentFilter(item.session));
+    }
+
+    function sessionMatchesCurrentFilter(session) {
+      return sessionMatchesFilter(session, currentFilter);
+    }
+
+    function sessionMatchesFilter(session, filterKey) {
+      if (filterKey === 'empty') return isEmptySession(session);
+      if (filterKey === 'has_run') return Boolean(session.active_run);
+      if (filterKey === 'waiting_human') return session.workflow_status === 'waiting_human'
+        || session.current_state === 'WaitForCEOApproval'
+        || session.current_state === 'WaitForHumanDecision';
+      if (filterKey === 'active') return !isEmptySession(session) && session.current_state !== 'Done';
+      return true;
+    }
+
+    function isEmptySession(session) {
+      return session.current_state === 'Intake' && !session.active_run;
+    }
+
+    function countSessionsForFilter(filterKey) {
+      return allSessions().filter(item => sessionMatchesFilter(item.session, filterKey)).length;
+    }
+
+    function selectFilter(filterKey) {
+      currentFilter = filterKey;
+      render();
+    }
+
     function selectSession(sessionId) {
       selectedSessionId = sessionId;
       render();
     }
 
+    function currentFilterLabel() {
+      return filterDefinitions.find(item => item.key === currentFilter)?.label || 'All';
+    }
+
     function shortText(value, max = 44) {
       const text = value || '';
       return text.length > max ? text.slice(0, max - 3) + '...' : text;
+    }
+
+    function formatSessionMeta(session) {
+      const createdAt = formatSessionDateTime(session.created_at);
+      const id = shortSessionId(session.session_id);
+      return createdAt ? `${createdAt} / ${id}` : id;
+    }
+
+    function formatSessionDateTime(value) {
+      if (!value) return '';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value);
+      return new Intl.DateTimeFormat(undefined, {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      }).format(date);
+    }
+
+    function shortSessionId(value) {
+      const text = value || '';
+      return text.length > 20 ? text.slice(0, 20) + '...' : text;
+    }
+
+    function formatRefreshTime(value) {
+      if (!value) return '';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value);
+      return new Intl.DateTimeFormat(undefined, {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      }).format(date);
     }
 
     function escapeHtml(value) {
