@@ -6,6 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .backend import DeterministicBackend
+from .board import build_board_snapshot
 from .gatekeeper import evaluate_candidate
 from .harness_paths import default_state_root
 from .intake import parse_intake_message
@@ -198,6 +199,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Explicit closure signal for the learning overlay.",
     )
     feedback_parser.set_defaults(handler=_handle_record_feedback)
+
+    board_snapshot_parser = subparsers.add_parser(
+        "board-snapshot",
+        help="Print the read-only board snapshot as JSON.",
+    )
+    board_snapshot_parser.add_argument(
+        "--all-workspaces",
+        action="store_true",
+        help="Aggregate every workspace under CODEX_HOME.",
+    )
+    board_snapshot_parser.set_defaults(handler=_handle_board_snapshot)
 
     review_parser = subparsers.add_parser("review", help="Print the latest or a selected review.")
     review_parser.add_argument("--session-id", help="Specific session ID to inspect.")
@@ -526,6 +538,13 @@ def _handle_record_feedback(args: argparse.Namespace) -> int:
     )
     feedback_path = store.record_feedback(args.session_id, finding)
     print(f"recorded_feedback: {feedback_path}")
+    return 0
+
+
+def _handle_board_snapshot(args: argparse.Namespace) -> int:
+    if not args.all_workspaces:
+        raise SystemExit("board-snapshot currently requires --all-workspaces.")
+    print(json.dumps(build_board_snapshot(), indent=2))
     return 0
 
 
