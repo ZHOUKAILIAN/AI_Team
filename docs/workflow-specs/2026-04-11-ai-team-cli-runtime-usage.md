@@ -144,6 +144,18 @@ ai-team record-feedback --session-id <session_id> --source-stage Acceptance --ta
 ai-team review
 ```
 
+输出只读看板 JSON：
+
+```bash
+ai-team board-snapshot --all-workspaces
+```
+
+启动本地只读看板：
+
+```bash
+ai-team serve-board --all-workspaces --port 8765 --poll-interval 5
+```
+
 ## bundle 最小结构
 
 ```json
@@ -165,6 +177,22 @@ ai-team review
 ```
 
 `evidence` 必须是 machine-readable 对象。runtime 会按 contract 里的 `evidence_specs` 检查 `name`、`kind` 和必填字段，例如 `summary`。
+
+## 只读看板
+
+输出聚合 JSON：
+
+```bash
+ai-team board-snapshot --all-workspaces
+```
+
+启动本地看板：
+
+```bash
+ai-team serve-board --all-workspaces --port 8765 --poll-interval 5
+```
+
+看板按 `Project -> Worktree -> Session` 展示所有 workspace 的只读状态，每 5 秒轮询刷新。
 
 ## 当前建议
 

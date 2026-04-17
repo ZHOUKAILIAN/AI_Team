@@ -53,6 +53,18 @@ class CliTests(unittest.TestCase):
         self.assertIn("start-session", result.stdout)
         self.assertIn("codex-init", result.stdout)
 
+    def test_cli_help_lists_readonly_board_commands(self) -> None:
+        result = subprocess.run(
+            [sys.executable, "-m", "ai_company", "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("board-snapshot", result.stdout)
+        self.assertIn("serve-board", result.stdout)
+
     def test_agent_run_accepts_raw_user_message(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
 

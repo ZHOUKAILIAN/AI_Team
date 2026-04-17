@@ -78,6 +78,8 @@ ai-team
 - `ai-team verify-stage-result`
 - `ai-team record-human-decision`
 - `ai-team record-feedback`
+- `ai-team board-snapshot`
+- `ai-team serve-board`
 - `ai-team review`
 
 ### 2. Session Runtime
@@ -213,6 +215,20 @@ ai-team verify-stage-result --session-id <session_id>
 ```bash
 ai-team record-human-decision --session-id <session_id> --decision go
 ```
+
+输出只读看板 JSON：
+
+```bash
+ai-team board-snapshot --all-workspaces
+```
+
+启动本地只读看板：
+
+```bash
+ai-team serve-board --all-workspaces --port 8765 --poll-interval 5
+```
+
+只读看板只观察 runtime state，不提供 approve、verify、submit、rework 等写操作。
 
 在 `Codex App` 里运行时，推荐把这套系统理解成：
 

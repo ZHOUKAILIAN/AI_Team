@@ -34,6 +34,8 @@ start-session
 - `ai-team verify-stage-result`
 - `ai-team record-human-decision`
 - `ai-team record-feedback`
+- `ai-team board-snapshot`
+- `ai-team serve-board`
 
 ## 当前流程推进方式
 
@@ -151,6 +153,8 @@ Dev 正常完成后进入：
 - `stage_runs/*.json`
 - stage records
 - result bundle
+
+只读看板读取这些事实来源，但不写入任何 workflow state。
 
 而不是当前会话里“感觉已经做到哪一步了”。
 
