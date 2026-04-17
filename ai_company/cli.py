@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from .backend import DeterministicBackend
+from .gatekeeper import evaluate_candidate
 from .harness_paths import default_state_root
 from .intake import parse_intake_message
 from .models import Finding, StageResultEnvelope, WorkflowSummary
@@ -12,7 +14,7 @@ from .orchestrator import WorkflowOrchestrator
 from .project_scaffold import scaffold_project_codex_files
 from .stage_contracts import build_stage_contract
 from .stage_machine import StageMachine
-from .state import StateStore
+from .state import StageRunStateError, StateStore
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -99,6 +101,13 @@ def build_parser() -> argparse.ArgumentParser:
     resume_parser.add_argument("--session-id", help="Specific session ID to inspect.")
     resume_parser.set_defaults(handler=_handle_current_stage)
 
+    step_parser = subparsers.add_parser(
+        "step",
+        help="Print the next runtime action for the current workflow session.",
+    )
+    step_parser.add_argument("--session-id", help="Specific session ID to inspect.")
+    step_parser.set_defaults(handler=_handle_step)
+
     build_contract_parser = subparsers.add_parser(
         "build-stage-contract",
         help="Build a machine-readable contract for the requested stage.",
@@ -107,13 +116,30 @@ def build_parser() -> argparse.ArgumentParser:
     build_contract_parser.add_argument("--stage", required=True, help="Stage name to compile.")
     build_contract_parser.set_defaults(handler=_handle_build_stage_contract)
 
+    acquire_stage_run_parser = subparsers.add_parser(
+        "acquire-stage-run",
+        help="Acquire the active executable stage as a tracked stage run.",
+    )
+    acquire_stage_run_parser.add_argument("--session-id", required=True, help="Existing workflow session ID.")
+    acquire_stage_run_parser.add_argument("--stage", help="Override stage name; must match the active stage.")
+    acquire_stage_run_parser.add_argument("--worker", default="codex", help="Logical worker name for the run.")
+    acquire_stage_run_parser.set_defaults(handler=_handle_acquire_stage_run)
+
     submit_result_parser = subparsers.add_parser(
         "submit-stage-result",
-        help="Persist a structured stage-result bundle and advance the workflow state.",
+        help="Persist a structured stage-result bundle as a submitted candidate result.",
     )
     submit_result_parser.add_argument("--session-id", required=True, help="Existing workflow session ID.")
     submit_result_parser.add_argument("--bundle", type=Path, required=True, help="Path to stage result bundle JSON.")
     submit_result_parser.set_defaults(handler=_handle_submit_stage_result)
+
+    verify_result_parser = subparsers.add_parser(
+        "verify-stage-result",
+        help="Run gatekeeper verification for the submitted candidate result.",
+    )
+    verify_result_parser.add_argument("--session-id", required=True, help="Existing workflow session ID.")
+    verify_result_parser.add_argument("--run-id", help="Optional explicit stage run to verify.")
+    verify_result_parser.set_defaults(handler=_handle_verify_stage_result)
 
     human_decision_parser = subparsers.add_parser(
         "record-human-decision",
@@ -257,6 +283,58 @@ def _handle_current_stage(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_step(args: argparse.Namespace) -> int:
+    store = StateStore(args.state_root)
+    session_id = args.session_id or store.latest_session_id()
+    if not session_id:
+        raise SystemExit("No workflow session exists yet.")
+
+    summary = store.load_workflow_summary(session_id)
+    _print_summary(summary)
+
+    if summary.current_state in {"WaitForCEOApproval", "WaitForHumanDecision"}:
+        print("next_action: record-human-decision")
+        return 0
+
+    active_run = store.active_stage_run(session_id)
+    if active_run is not None:
+        print(f"run_id: {active_run.run_id}")
+        print(f"run_stage: {active_run.stage}")
+        print(f"run_state: {active_run.state}")
+        print(f"contract_id: {active_run.contract_id}")
+        if active_run.required_outputs:
+            print(f"required_outputs: {', '.join(active_run.required_outputs)}")
+        if active_run.required_evidence:
+            print(f"required_evidence: {', '.join(active_run.required_evidence)}")
+        if active_run.state == "RUNNING":
+            print("next_action: submit-stage-result")
+        elif active_run.state == "SUBMITTED":
+            print("next_action: verify-stage-result")
+        else:
+            print("next_action: wait")
+        return 0
+
+    expected_stage = _expected_submission_stage(summary)
+    if expected_stage is None:
+        print("next_action: none")
+        return 0
+
+    contract = build_stage_contract(
+        repo_root=args.repo_root,
+        state_store=store,
+        session_id=session_id,
+        stage=expected_stage,
+    )
+    print(f"next_stage: {expected_stage}")
+    print(f"contract_id: {contract.contract_id}")
+    if contract.required_outputs:
+        print(f"required_outputs: {', '.join(contract.required_outputs)}")
+    if contract.evidence_requirements:
+        print(f"required_evidence: {', '.join(contract.evidence_requirements)}")
+    print("next_action: acquire-stage-run")
+    return 0
+
+
 def _handle_build_stage_contract(args: argparse.Namespace) -> int:
     store = StateStore(args.state_root)
     contract = build_stage_contract(
@@ -266,6 +344,42 @@ def _handle_build_stage_contract(args: argparse.Namespace) -> int:
         stage=args.stage,
     )
     print(json.dumps(contract.to_dict(), indent=2))
+    return 0
+
+
+def _handle_acquire_stage_run(args: argparse.Namespace) -> int:
+    store = StateStore(args.state_root)
+    summary = store.load_workflow_summary(args.session_id)
+    expected_stage = _expected_submission_stage(summary)
+    if expected_stage is None:
+        raise SystemExit(f"Cannot acquire a stage run while workflow is waiting in {summary.current_state}.")
+
+    stage = args.stage or expected_stage
+    if stage != expected_stage:
+        raise SystemExit(f"Expected active stage {expected_stage}, but acquire requested {stage}.")
+
+    contract = build_stage_contract(
+        repo_root=args.repo_root,
+        state_store=store,
+        session_id=args.session_id,
+        stage=stage,
+    )
+    try:
+        run = store.create_stage_run(
+            session_id=args.session_id,
+            stage=stage,
+            contract_id=contract.contract_id,
+            required_outputs=list(contract.required_outputs),
+            required_evidence=list(contract.evidence_requirements),
+            worker=args.worker,
+        )
+    except StageRunStateError as exc:
+        raise SystemExit(str(exc))
+
+    print(f"run_id: {run.run_id}")
+    print(f"run_stage: {run.stage}")
+    print(f"run_state: {run.state}")
+    print(f"contract_id: {run.contract_id}")
     return 0
 
 
@@ -280,32 +394,101 @@ def _handle_submit_stage_result(args: argparse.Namespace) -> int:
     expected_stage = _expected_submission_stage(summary)
     if expected_stage is None:
         raise SystemExit(f"Cannot submit a stage result while workflow is waiting in {summary.current_state}.")
-    if result.stage != expected_stage:
-        raise SystemExit(f"Expected stage {expected_stage}, but bundle declared {result.stage}.")
+    active_run = store.active_stage_run(args.session_id, stage=expected_stage)
+    if active_run is None:
+        raise SystemExit(f"No active stage run for {expected_stage}. Acquire the stage run first.")
+    if result.stage != active_run.stage:
+        raise SystemExit(f"Expected active stage {active_run.stage}, but bundle declared {result.stage}.")
+    if not result.contract_id:
+        raise SystemExit("Bundle is missing contract_id.")
 
-    expected_contract = build_stage_contract(
+    try:
+        submitted = store.submit_stage_run_result(active_run.run_id, result)
+    except StageRunStateError as exc:
+        raise SystemExit(str(exc))
+
+    print(f"stored_bundle: {args.bundle}")
+    print(f"run_id: {submitted.run_id}")
+    print(f"run_state: {submitted.state}")
+    _print_summary(summary)
+    return 0
+
+
+def _handle_verify_stage_result(args: argparse.Namespace) -> int:
+    store = StateStore(args.state_root)
+    summary = store.load_workflow_summary(args.session_id)
+
+    if args.run_id:
+        run = store.load_stage_run(args.run_id)
+    else:
+        expected_stage = _expected_submission_stage(summary)
+        if expected_stage is None:
+            raise SystemExit(f"Cannot verify a stage result while workflow is waiting in {summary.current_state}.")
+        run = store.active_stage_run(args.session_id, stage=expected_stage)
+        if run is None:
+            raise SystemExit(f"No active stage run for {expected_stage}.")
+
+    if run.session_id != args.session_id:
+        raise SystemExit("Stage run session_id does not match --session-id.")
+    if run.state != "SUBMITTED":
+        raise SystemExit(f"Stage run {run.run_id} is {run.state}; expected SUBMITTED.")
+    if not run.candidate_bundle_path:
+        raise SystemExit(f"Stage run {run.run_id} has no submitted candidate bundle.")
+
+    result = StageResultEnvelope.from_dict(json.loads(Path(run.candidate_bundle_path).read_text()))
+    contract = build_stage_contract(
         repo_root=args.repo_root,
         state_store=store,
         session_id=args.session_id,
-        stage=expected_stage,
+        stage=run.stage,
     )
-    if not result.contract_id:
-        raise SystemExit("Bundle is missing contract_id.")
-    if result.contract_id != expected_contract.contract_id:
-        raise SystemExit("Bundle contract_id does not match the current stage contract.")
+    verifying_run = store.update_stage_run(run, state="VERIFYING")
+    gate_result, normalized_result = evaluate_candidate(
+        session=store.load_session(args.session_id),
+        contract=contract,
+        result=result,
+        acceptance_contract=store.load_acceptance_contract(args.session_id),
+    )
 
-    stage_record = store.record_stage_result(args.session_id, result)
+    if gate_result.status == "PASSED":
+        stage_record = store.record_stage_result(args.session_id, normalized_result)
+        session = store.load_session(args.session_id)
+        updated_summary = StageMachine().advance(summary=summary, stage_result=normalized_result)
+        updated_summary.artifact_paths[normalized_result.stage.lower()] = str(stage_record.artifact_path)
+        updated_summary.artifact_paths.update(stage_record.supplemental_artifact_paths)
+        store.save_workflow_summary(session, updated_summary)
+        store.update_stage_run(
+            verifying_run,
+            state="PASSED",
+            gate_result=gate_result,
+            blocked_reason="",
+            artifact_paths={
+                normalized_result.stage.lower(): str(stage_record.artifact_path),
+                **stage_record.supplemental_artifact_paths,
+            },
+        )
+        for finding in normalized_result.findings:
+            store.apply_learning(finding)
+        print(f"run_id: {verifying_run.run_id}")
+        print(f"gate_status: {gate_result.status}")
+        _print_summary(updated_summary)
+        return 0
+
     session = store.load_session(args.session_id)
-    updated_summary = StageMachine().advance(summary=summary, stage_result=result)
-    updated_summary.artifact_paths[result.stage.lower()] = str(stage_record.artifact_path)
-    updated_summary.artifact_paths.update(stage_record.supplemental_artifact_paths)
+    updated_summary = replace(summary, blocked_reason=gate_result.reason if gate_result.status == "BLOCKED" else "")
     store.save_workflow_summary(session, updated_summary)
-    for finding in result.findings:
-        store.apply_learning(finding)
-
-    print(f"stored_bundle: {args.bundle}")
+    store.update_stage_run(
+        verifying_run,
+        state=gate_result.status,
+        gate_result=gate_result,
+        blocked_reason=gate_result.reason if gate_result.status == "BLOCKED" else "",
+    )
+    print(f"run_id: {verifying_run.run_id}")
+    print(f"gate_status: {gate_result.status}")
+    if gate_result.reason:
+        print(f"gate_reason: {gate_result.reason}")
     _print_summary(updated_summary)
-    return 0
+    return 1
 
 
 def _handle_record_human_decision(args: argparse.Namespace) -> int:

@@ -9,15 +9,23 @@ from .models import (
     AcceptanceContract,
     FeedbackRecord,
     Finding,
+    GateResult,
     SessionRecord,
     StageResultEnvelope,
     StageOutput,
     StageRecord,
+    StageRunRecord,
     WorkflowSummary,
 )
 from .workflow_summary import render_workflow_summary
 
 VALID_ROLE_NAMES = {"Product", "Dev", "QA", "Acceptance", "Ops"}
+ACTIVE_STAGE_RUN_STATES = {"READY", "RUNNING", "SUBMITTED", "VERIFYING"}
+TERMINAL_STAGE_RUN_STATES = {"PASSED", "FAILED", "BLOCKED"}
+
+
+class StageRunStateError(ValueError):
+    pass
 
 
 class StateStore:
@@ -196,6 +204,17 @@ class StateStore:
             artifact_paths=artifact_paths,
         )
 
+    def load_acceptance_contract(self, session_id: str) -> AcceptanceContract | None:
+        session = self.load_session(session_id)
+        session_path = session.session_dir / "session.json"
+        if not session_path.exists():
+            return None
+        payload = json.loads(session_path.read_text())
+        contract_payload = payload.get("acceptance_contract")
+        if not isinstance(contract_payload, dict):
+            return None
+        return AcceptanceContract.from_dict(contract_payload)
+
     def record_stage_result(self, session_id: str, result: StageResultEnvelope) -> StageRecord:
         session = self.load_session(session_id)
         round_index = self._next_round_index(session, result.stage)
@@ -217,6 +236,136 @@ class StateStore:
             acceptance_status=result.acceptance_status or self._current_acceptance_status(session),
         )
         return stage_record
+
+    def create_stage_run(
+        self,
+        *,
+        session_id: str,
+        stage: str,
+        contract_id: str,
+        required_outputs: list[str],
+        required_evidence: list[str],
+        worker: str = "",
+    ) -> StageRunRecord:
+        session = self.load_session(session_id)
+        active = self.active_stage_run(session_id, stage=stage)
+        if active is not None:
+            raise StageRunStateError(
+                f"Active stage run already exists for {stage}: {active.run_id} ({active.state})."
+            )
+
+        attempt = 1 + sum(1 for item in self.stage_runs(session_id) if item.stage == stage)
+        timestamp = self._timestamp()
+        run = StageRunRecord(
+            run_id=f"{stage.lower()}-run-{attempt}",
+            session_id=session_id,
+            stage=stage,
+            state="RUNNING",
+            contract_id=contract_id,
+            attempt=attempt,
+            required_outputs=list(required_outputs),
+            required_evidence=list(required_evidence),
+            worker=worker,
+            created_at=timestamp,
+            updated_at=timestamp,
+        )
+        self._save_stage_run(session, run)
+        return run
+
+    def submit_stage_run_result(self, run_id: str, result: StageResultEnvelope) -> StageRunRecord:
+        run = self.load_stage_run(run_id)
+        if run.state != "RUNNING":
+            raise StageRunStateError(f"Stage run {run.run_id} is {run.state}; expected RUNNING.")
+        if run.session_id != result.session_id:
+            raise StageRunStateError("Stage result session_id does not match active run.")
+        if run.stage != result.stage:
+            raise StageRunStateError("Stage result stage does not match active run.")
+        if run.contract_id != result.contract_id:
+            raise StageRunStateError("Stage result contract_id does not match active run.")
+
+        session = self.load_session(run.session_id)
+        candidate_path = self._stage_runs_dir(session) / f"{run.run_id}_candidate.json"
+        self._write_json(candidate_path, result.to_dict())
+        updated = StageRunRecord(
+            run_id=run.run_id,
+            session_id=run.session_id,
+            stage=run.stage,
+            state="SUBMITTED",
+            contract_id=run.contract_id,
+            attempt=run.attempt,
+            required_outputs=list(run.required_outputs),
+            required_evidence=list(run.required_evidence),
+            worker=run.worker,
+            created_at=run.created_at,
+            updated_at=self._timestamp(),
+            candidate_bundle_path=str(candidate_path),
+            gate_result=run.gate_result,
+            blocked_reason=run.blocked_reason,
+            artifact_paths=dict(run.artifact_paths),
+        )
+        self._save_stage_run(session, updated)
+        return updated
+
+    def update_stage_run(
+        self,
+        run: StageRunRecord,
+        *,
+        state: str | None = None,
+        gate_result: GateResult | None = None,
+        blocked_reason: str | None = None,
+        artifact_paths: dict[str, str] | None = None,
+    ) -> StageRunRecord:
+        session = self.load_session(run.session_id)
+        updated = StageRunRecord(
+            run_id=run.run_id,
+            session_id=run.session_id,
+            stage=run.stage,
+            state=state or run.state,
+            contract_id=run.contract_id,
+            attempt=run.attempt,
+            required_outputs=list(run.required_outputs),
+            required_evidence=list(run.required_evidence),
+            worker=run.worker,
+            created_at=run.created_at,
+            updated_at=self._timestamp(),
+            candidate_bundle_path=run.candidate_bundle_path,
+            gate_result=gate_result if gate_result is not None else run.gate_result,
+            blocked_reason=blocked_reason if blocked_reason is not None else run.blocked_reason,
+            artifact_paths=artifact_paths if artifact_paths is not None else dict(run.artifact_paths),
+        )
+        self._save_stage_run(session, updated)
+        return updated
+
+    def active_stage_run(self, session_id: str, stage: str | None = None) -> StageRunRecord | None:
+        active_runs = [
+            run
+            for run in self.stage_runs(session_id)
+            if run.state in ACTIVE_STAGE_RUN_STATES and (stage is None or run.stage == stage)
+        ]
+        return active_runs[-1] if active_runs else None
+
+    def latest_stage_run(self, session_id: str, stage: str | None = None) -> StageRunRecord | None:
+        runs = [run for run in self.stage_runs(session_id) if stage is None or run.stage == stage]
+        return runs[-1] if runs else None
+
+    def load_stage_run(self, run_id: str) -> StageRunRecord:
+        for session_dir in sorted((self.root / "sessions").glob("*")):
+            path = session_dir / "stage_runs" / f"{run_id}.json"
+            if path.exists():
+                return StageRunRecord.from_dict(json.loads(path.read_text()))
+        raise FileNotFoundError(f"Stage run not found: {run_id}")
+
+    def stage_runs(self, session_id: str) -> list[StageRunRecord]:
+        session = self.load_session(session_id)
+        runs_dir = self._stage_runs_dir(session)
+        if not runs_dir.exists():
+            return []
+        records = [
+            StageRunRecord.from_dict(json.loads(path.read_text()))
+            for path in sorted(runs_dir.glob("*.json"))
+            if not path.name.endswith("_candidate.json")
+        ]
+        return sorted(records, key=lambda run: (run.created_at, run.run_id))
 
     def append_stage_record(
         self,
@@ -378,7 +527,24 @@ class StateStore:
         return datetime.now(timezone.utc).isoformat()
 
     def _write_json(self, path: Path, payload: object) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2))
+
+    def _stage_runs_dir(self, session: SessionRecord) -> Path:
+        return session.session_dir / "stage_runs"
+
+    def _save_stage_run(self, session: SessionRecord, run: StageRunRecord) -> None:
+        runs_dir = self._stage_runs_dir(session)
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        self._write_json(runs_dir / f"{run.run_id}.json", run.to_dict())
+
+        session_path = session.session_dir / "session.json"
+        payload = json.loads(session_path.read_text()) if session_path.exists() else session.to_dict()
+        records = [item for item in payload.get("stage_runs", []) if item.get("run_id") != run.run_id]
+        records.append(run.to_dict())
+        payload["stage_runs"] = records
+        payload["updated_at"] = run.updated_at
+        self._write_json(session_path, payload)
 
     def _next_round_index(self, session: SessionRecord, stage: str) -> int:
         session_path = session.session_dir / "session.json"

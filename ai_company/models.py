@@ -201,6 +201,90 @@ class WorkflowSummary:
 
 
 @model_dataclass
+class EvidenceRequirement:
+    name: str
+    required: bool = True
+    allowed_kinds: list[str] = field(default_factory=list)
+    required_fields: list[str] = field(default_factory=list)
+    minimum_items: int = 1
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "EvidenceRequirement":
+        return cls(
+            name=payload.get("name", ""),
+            required=bool(payload.get("required", True)),
+            allowed_kinds=list(payload.get("allowed_kinds", [])),
+            required_fields=list(payload.get("required_fields", [])),
+            minimum_items=int(payload.get("minimum_items", 1)),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "required": self.required,
+            "allowed_kinds": list(self.allowed_kinds),
+            "required_fields": list(self.required_fields),
+            "minimum_items": self.minimum_items,
+        }
+
+
+@model_dataclass
+class EvidenceItem:
+    name: str
+    kind: str = ""
+    summary: str = ""
+    artifact_path: str = ""
+    command: str = ""
+    exit_code: int | None = None
+    producer: str = ""
+    created_at: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_value(cls, value: Any) -> "EvidenceItem":
+        if isinstance(value, EvidenceItem):
+            return value
+        if isinstance(value, str):
+            return cls(name=value)
+        if isinstance(value, dict):
+            return cls(
+                name=value.get("name", ""),
+                kind=value.get("kind", ""),
+                summary=value.get("summary", ""),
+                artifact_path=value.get("artifact_path", ""),
+                command=value.get("command", ""),
+                exit_code=value.get("exit_code"),
+                producer=value.get("producer", ""),
+                created_at=value.get("created_at", ""),
+                metadata=dict(value.get("metadata", {})),
+            )
+        return cls(name=str(value))
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "name": self.name,
+            "kind": self.kind,
+            "summary": self.summary,
+        }
+        if self.artifact_path:
+            payload["artifact_path"] = self.artifact_path
+        if self.command:
+            payload["command"] = self.command
+        if self.exit_code is not None:
+            payload["exit_code"] = self.exit_code
+        if self.producer:
+            payload["producer"] = self.producer
+        if self.created_at:
+            payload["created_at"] = self.created_at
+        if self.metadata:
+            payload["metadata"] = dict(self.metadata)
+        return payload
+
+    def has_field(self, field_name: str) -> bool:
+        return bool(getattr(self, field_name, ""))
+
+
+@model_dataclass
 class StageContract:
     session_id: str
     stage: str
@@ -210,7 +294,14 @@ class StageContract:
     required_outputs: list[str] = field(default_factory=list)
     forbidden_actions: list[str] = field(default_factory=list)
     evidence_requirements: list[str] = field(default_factory=list)
+    evidence_specs: list[EvidenceRequirement] = field(default_factory=list)
     role_context: str = ""
+
+    def __post_init__(self) -> None:
+        self.evidence_specs = [
+            item if isinstance(item, EvidenceRequirement) else EvidenceRequirement.from_dict(item)
+            for item in self.evidence_specs
+        ]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -222,6 +313,7 @@ class StageContract:
             "required_outputs": list(self.required_outputs),
             "forbidden_actions": list(self.forbidden_actions),
             "evidence_requirements": list(self.evidence_requirements),
+            "evidence_specs": [item.to_dict() for item in self.evidence_specs],
             "role_context": self.role_context,
         }
 
@@ -236,12 +328,15 @@ class StageResultEnvelope:
     contract_id: str = ""
     journal: str = ""
     findings: list[Finding] = field(default_factory=list)
-    evidence: list[str] = field(default_factory=list)
+    evidence: list[EvidenceItem] = field(default_factory=list)
     suggested_next_owner: str = ""
     summary: str = ""
     acceptance_status: str = ""
     blocked_reason: str = ""
     supplemental_artifacts: dict[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.evidence = [EvidenceItem.from_value(item) for item in self.evidence]
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "StageResultEnvelope":
@@ -254,7 +349,7 @@ class StageResultEnvelope:
             contract_id=payload.get("contract_id", ""),
             journal=payload.get("journal", ""),
             findings=[Finding.from_dict(item) for item in payload.get("findings", [])],
-            evidence=list(payload.get("evidence", [])),
+            evidence=[EvidenceItem.from_value(item) for item in payload.get("evidence", [])],
             suggested_next_owner=payload.get("suggested_next_owner", ""),
             summary=payload.get("summary", ""),
             acceptance_status=payload.get("acceptance_status", ""),
@@ -272,13 +367,106 @@ class StageResultEnvelope:
             "contract_id": self.contract_id,
             "journal": self.journal,
             "findings": [finding.to_dict() for finding in self.findings],
-            "evidence": list(self.evidence),
+            "evidence": [item.to_dict() for item in self.evidence],
             "suggested_next_owner": self.suggested_next_owner,
             "summary": self.summary,
             "acceptance_status": self.acceptance_status,
             "blocked_reason": self.blocked_reason,
             "supplemental_artifacts": dict(self.supplemental_artifacts),
         }
+
+
+@model_dataclass
+class GateResult:
+    status: str
+    reason: str = ""
+    missing_outputs: list[str] = field(default_factory=list)
+    missing_evidence: list[str] = field(default_factory=list)
+    findings: list[Finding] = field(default_factory=list)
+    checked_at: str = ""
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any] | None) -> "GateResult | None":
+        if payload is None:
+            return None
+        return cls(
+            status=payload.get("status", ""),
+            reason=payload.get("reason", ""),
+            missing_outputs=list(payload.get("missing_outputs", [])),
+            missing_evidence=list(payload.get("missing_evidence", [])),
+            findings=[Finding.from_dict(item) for item in payload.get("findings", [])],
+            checked_at=payload.get("checked_at", ""),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "reason": self.reason,
+            "missing_outputs": list(self.missing_outputs),
+            "missing_evidence": list(self.missing_evidence),
+            "findings": [finding.to_dict() for finding in self.findings],
+            "checked_at": self.checked_at,
+        }
+
+
+@model_dataclass
+class StageRunRecord:
+    run_id: str
+    session_id: str
+    stage: str
+    state: str
+    contract_id: str
+    attempt: int
+    required_outputs: list[str] = field(default_factory=list)
+    required_evidence: list[str] = field(default_factory=list)
+    worker: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+    candidate_bundle_path: str = ""
+    gate_result: GateResult | None = None
+    blocked_reason: str = ""
+    artifact_paths: dict[str, str] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "StageRunRecord":
+        return cls(
+            run_id=payload.get("run_id", ""),
+            session_id=payload.get("session_id", ""),
+            stage=payload.get("stage", ""),
+            state=payload.get("state", ""),
+            contract_id=payload.get("contract_id", ""),
+            attempt=int(payload.get("attempt", 0)),
+            required_outputs=list(payload.get("required_outputs", [])),
+            required_evidence=list(payload.get("required_evidence", [])),
+            worker=payload.get("worker", ""),
+            created_at=payload.get("created_at", ""),
+            updated_at=payload.get("updated_at", ""),
+            candidate_bundle_path=payload.get("candidate_bundle_path", ""),
+            gate_result=GateResult.from_dict(payload.get("gate_result")),
+            blocked_reason=payload.get("blocked_reason", ""),
+            artifact_paths=dict(payload.get("artifact_paths", {})),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = {
+            "run_id": self.run_id,
+            "session_id": self.session_id,
+            "stage": self.stage,
+            "state": self.state,
+            "contract_id": self.contract_id,
+            "attempt": self.attempt,
+            "required_outputs": list(self.required_outputs),
+            "required_evidence": list(self.required_evidence),
+            "worker": self.worker,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "candidate_bundle_path": self.candidate_bundle_path,
+            "blocked_reason": self.blocked_reason,
+            "artifact_paths": dict(self.artifact_paths),
+        }
+        if self.gate_result is not None:
+            payload["gate_result"] = self.gate_result.to_dict()
+        return payload
 
 
 @model_dataclass

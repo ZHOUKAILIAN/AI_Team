@@ -71,8 +71,11 @@ ai-team
 - `ai-team start-session`
 - `ai-team current-stage`
 - `ai-team resume`
+- `ai-team step`
 - `ai-team build-stage-contract`
+- `ai-team acquire-stage-run`
 - `ai-team submit-stage-result`
+- `ai-team verify-stage-result`
 - `ai-team record-human-decision`
 - `ai-team record-feedback`
 - `ai-team review`
@@ -119,7 +122,8 @@ worker 看到的是 stage contract，不是自由发挥的任务描述。
 - app-local 的 workspace 级状态目录
 - 显式 stage machine
 - stage contract 生成
-- stage-result bundle 提交
+- stage-run acquire / submit / verify 强制流转
+- stage-result candidate bundle 提交
 - wait state 下的人工决策
 - feedback 到 memory overlay 的学习回流
 - 可安装的 `ai-team` CLI
@@ -170,17 +174,39 @@ ai-team start-session --message "执行这个需求：<你的需求>"
 ai-team current-stage --session-id <session_id>
 ```
 
+查看当前下一步动作：
+
+```bash
+ai-team step --session-id <session_id>
+```
+
+`step` 会打印下一步动作以及当前 contract 的 `contract_id`、`required_outputs` 和 `required_evidence`。
+
 生成阶段 contract：
 
 ```bash
 ai-team build-stage-contract --session-id <session_id> --stage Product
 ```
 
-提交阶段结果：
+认领当前 stage run：
+
+```bash
+ai-team acquire-stage-run --session-id <session_id> --stage Product
+```
+
+提交阶段候选结果：
 
 ```bash
 ai-team submit-stage-result --session-id <session_id> --bundle /path/to/bundle.json
 ```
+
+验证候选结果并决定是否推进 workflow：
+
+```bash
+ai-team verify-stage-result --session-id <session_id>
+```
+
+候选 bundle 里的 `evidence` 必须是结构化对象，runtime 会按 contract 的 `evidence_specs` 校验证据名称、类型和必填字段。
 
 记录人工决策：
 
@@ -190,7 +216,7 @@ ai-team record-human-decision --session-id <session_id> --decision go
 
 在 `Codex App` 里运行时，推荐把这套系统理解成：
 
-- `ai-team` 负责控流程、发 contract、收 bundle、记状态
+- `ai-team` 负责控流程、发 contract、认领 run、收 candidate bundle、做 gate 验证、记状态
 - Codex 负责按当前 stage contract 执行真实工作并提交结果
 - 当前能稳定支持“最小 harness 循环”，还不是一条命令全自动跑完所有角色
 

@@ -30,19 +30,39 @@ ai-team start-session --message "执行这个需求：做一个新的功能"
 ai-team current-stage --session-id <session_id>
 ```
 
-### 3. 生成阶段 contract
+### 3. 查看下一步 runtime 动作
+
+```bash
+ai-team step --session-id <session_id>
+```
+
+### 4. 生成阶段 contract
 
 ```bash
 ai-team build-stage-contract --session-id <session_id> --stage Product
 ```
 
-### 4. 提交阶段 bundle
+### 5. 认领当前 stage run
+
+```bash
+ai-team acquire-stage-run --session-id <session_id> --stage Product
+```
+
+### 6. 提交阶段候选 bundle
 
 ```bash
 ai-team submit-stage-result --session-id <session_id> --bundle /path/to/bundle.json
 ```
 
-### 5. 记录人工决策
+### 7. 验证候选 bundle 并推进 workflow
+
+```bash
+ai-team verify-stage-result --session-id <session_id>
+```
+
+只有 `verify-stage-result` 返回 `gate_status: PASSED` 后，runtime 才会调用外层 workflow 状态机推进到下一 stage 或等待态。
+
+### 8. 记录人工决策
 
 ```bash
 ai-team record-human-decision --session-id <session_id> --decision go
@@ -74,16 +94,36 @@ ai-team current-stage --session-id <session_id>
 ai-team resume --session-id <session_id>
 ```
 
+查看下一步动作：
+
+```bash
+ai-team step --session-id <session_id>
+```
+
+`step` 会输出当前 stage、下一步动作、`contract_id`、`required_outputs` 和 `required_evidence`，用于避免 worker 靠记忆推进流程。
+
 生成 contract：
 
 ```bash
 ai-team build-stage-contract --session-id <session_id> --stage Product
 ```
 
-提交 bundle：
+认领 stage run：
+
+```bash
+ai-team acquire-stage-run --session-id <session_id> --stage Product
+```
+
+提交 candidate bundle：
 
 ```bash
 ai-team submit-stage-result --session-id <session_id> --bundle /path/to/bundle.json
+```
+
+验证 candidate bundle：
+
+```bash
+ai-team verify-stage-result --session-id <session_id>
 ```
 
 记录人工决策：
@@ -110,11 +150,21 @@ ai-team review
 {
   "session_id": "<session_id>",
   "stage": "Product",
+  "contract_id": "<contract_id>",
   "status": "completed",
   "artifact_name": "prd.md",
-  "artifact_content": "# PRD\n\n## Acceptance Criteria\n- ...\n"
+  "artifact_content": "# PRD\n\n## Acceptance Criteria\n- ...\n",
+  "evidence": [
+    {
+      "name": "explicit_acceptance_criteria",
+      "kind": "report",
+      "summary": "PRD includes explicit acceptance criteria."
+    }
+  ]
 }
 ```
+
+`evidence` 必须是 machine-readable 对象。runtime 会按 contract 里的 `evidence_specs` 检查 `name`、`kind` 和必填字段，例如 `summary`。
 
 ## 当前建议
 

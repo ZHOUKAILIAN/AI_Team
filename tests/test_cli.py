@@ -13,6 +13,18 @@ def local_temp_dir() -> Path:
     return path
 
 
+def evidence(name: str, *, kind: str = "report", summary: str = "Evidence provided.") -> dict[str, object]:
+    payload: dict[str, object] = {
+        "name": name,
+        "kind": kind,
+        "summary": summary,
+    }
+    if kind == "command":
+        payload["command"] = "python -m unittest"
+        payload["exit_code"] = 0
+    return payload
+
+
 class CliTests(unittest.TestCase):
     def test_cli_without_command_exits_with_argparse_error_instead_of_traceback(self) -> None:
         result = subprocess.run(
@@ -278,6 +290,475 @@ class CliTests(unittest.TestCase):
             self.assertIn("must_not_change_stage_order", payload["forbidden_actions"])
             self.assertIn("contract_id", payload)
 
+    def test_submit_stage_result_requires_active_stage_run(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "start-session",
+                    "--message",
+                    "执行这个需求：做一个带阶段门禁的流程",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0)
+            session_id = dict(
+                line.split(": ", 1) for line in bootstrap.stdout.splitlines() if ":" in line
+            )["session_id"]
+
+            contract_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "build-stage-contract",
+                    "--session-id",
+                    session_id,
+                    "--stage",
+                    "Product",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(contract_result.returncode, 0)
+            contract_payload = json.loads(contract_result.stdout)
+
+            bundle = Path(temp_dir) / "product_bundle_without_run.json"
+            bundle.write_text(
+                json.dumps(
+                    {
+                        "session_id": session_id,
+                        "contract_id": contract_payload["contract_id"],
+                        "stage": "Product",
+                        "status": "completed",
+                        "artifact_name": "prd.md",
+                        "artifact_content": "# Product PRD\n\n## Acceptance Criteria\n- Verify gate.\n",
+                        "journal": "# Product Journal\n",
+                        "findings": [],
+                        "evidence": [evidence("explicit_acceptance_criteria", summary="Acceptance criteria documented.")],
+                        "summary": "Drafted PRD",
+                    }
+                )
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "submit-stage-result",
+                    "--session-id",
+                    session_id,
+                    "--bundle",
+                    str(bundle),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("No active stage run", result.stderr + result.stdout)
+
+    def test_acquire_submit_verify_product_moves_to_ceo_wait(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "start-session",
+                    "--message",
+                    "执行这个需求：做一个带阶段门禁的流程",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0)
+            session_id = dict(
+                line.split(": ", 1) for line in bootstrap.stdout.splitlines() if ":" in line
+            )["session_id"]
+
+            contract_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "build-stage-contract",
+                    "--session-id",
+                    session_id,
+                    "--stage",
+                    "Product",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(contract_result.returncode, 0)
+            contract_payload = json.loads(contract_result.stdout)
+
+            acquire_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "acquire-stage-run",
+                    "--session-id",
+                    session_id,
+                    "--stage",
+                    "Product",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(acquire_result.returncode, 0)
+            self.assertIn("run_state: RUNNING", acquire_result.stdout)
+
+            bundle = Path(temp_dir) / "product_bundle.json"
+            bundle.write_text(
+                json.dumps(
+                    {
+                        "session_id": session_id,
+                        "contract_id": contract_payload["contract_id"],
+                        "stage": "Product",
+                        "status": "completed",
+                        "artifact_name": "prd.md",
+                        "artifact_content": "# Product PRD\n\n## Acceptance Criteria\n- Verify gate.\n",
+                        "journal": "# Product Journal\n",
+                        "findings": [],
+                        "evidence": [evidence("explicit_acceptance_criteria", summary="Acceptance criteria documented.")],
+                        "summary": "Drafted PRD",
+                    }
+                )
+            )
+
+            submit_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "submit-stage-result",
+                    "--session-id",
+                    session_id,
+                    "--bundle",
+                    str(bundle),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(submit_result.returncode, 0)
+            self.assertIn("run_state: SUBMITTED", submit_result.stdout)
+            self.assertNotIn("current_state: WaitForCEOApproval", submit_result.stdout)
+
+            verify_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "verify-stage-result",
+                    "--session-id",
+                    session_id,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(verify_result.returncode, 0)
+            self.assertIn("gate_status: PASSED", verify_result.stdout)
+            self.assertIn("current_state: WaitForCEOApproval", verify_result.stdout)
+
+    def test_step_reports_verify_when_candidate_is_submitted(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "start-session",
+                    "--message",
+                    "执行这个需求：做一个带阶段门禁的流程",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0)
+            session_id = dict(
+                line.split(": ", 1) for line in bootstrap.stdout.splitlines() if ":" in line
+            )["session_id"]
+
+            acquire_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "acquire-stage-run",
+                    "--session-id",
+                    session_id,
+                    "--stage",
+                    "Product",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(acquire_result.returncode, 0)
+
+            contract_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "build-stage-contract",
+                    "--session-id",
+                    session_id,
+                    "--stage",
+                    "Product",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            contract_payload = json.loads(contract_result.stdout)
+
+            bundle = Path(temp_dir) / "submitted_product_bundle.json"
+            bundle.write_text(
+                json.dumps(
+                    {
+                        "session_id": session_id,
+                        "contract_id": contract_payload["contract_id"],
+                        "stage": "Product",
+                        "status": "completed",
+                        "artifact_name": "prd.md",
+                        "artifact_content": "# Product PRD\n\n## Acceptance Criteria\n- Verify gate.\n",
+                        "journal": "# Product Journal\n",
+                        "findings": [],
+                        "evidence": [evidence("explicit_acceptance_criteria", summary="Acceptance criteria documented.")],
+                        "summary": "Drafted PRD",
+                    }
+                )
+            )
+
+            submit_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "submit-stage-result",
+                    "--session-id",
+                    session_id,
+                    "--bundle",
+                    str(bundle),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(submit_result.returncode, 0)
+
+            step_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "step",
+                    "--session-id",
+                    session_id,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(step_result.returncode, 0)
+            self.assertIn("next_action: verify-stage-result", step_result.stdout)
+
+    def test_step_reports_contract_requirements_before_acquire(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "start-session",
+                    "--message",
+                    "执行这个需求：做一个带阶段门禁的流程",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0)
+            session_id = dict(
+                line.split(": ", 1) for line in bootstrap.stdout.splitlines() if ":" in line
+            )["session_id"]
+
+            step_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "step",
+                    "--session-id",
+                    session_id,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(step_result.returncode, 0)
+            self.assertIn("next_stage: Product", step_result.stdout)
+            self.assertIn("required_outputs: prd.md", step_result.stdout)
+            self.assertIn("required_evidence: explicit_acceptance_criteria", step_result.stdout)
+            self.assertIn("contract_id:", step_result.stdout)
+
+    def test_step_reports_running_run_requirements_after_acquire(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "start-session",
+                    "--message",
+                    "执行这个需求：做一个带阶段门禁的流程",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0)
+            session_id = dict(
+                line.split(": ", 1) for line in bootstrap.stdout.splitlines() if ":" in line
+            )["session_id"]
+
+            acquire_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "acquire-stage-run",
+                    "--session-id",
+                    session_id,
+                    "--stage",
+                    "Product",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(acquire_result.returncode, 0)
+
+            step_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "step",
+                    "--session-id",
+                    session_id,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(step_result.returncode, 0)
+            self.assertIn("run_state: RUNNING", step_result.stdout)
+            self.assertIn("required_outputs: prd.md", step_result.stdout)
+            self.assertIn("required_evidence: explicit_acceptance_criteria", step_result.stdout)
+
     def test_submit_stage_result_rejects_bundle_for_unexpected_stage(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
 
@@ -304,18 +785,40 @@ class CliTests(unittest.TestCase):
                 line.split(": ", 1) for line in bootstrap.stdout.splitlines() if ":" in line
             )["session_id"]
 
+            acquire_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "acquire-stage-run",
+                    "--session-id",
+                    session_id,
+                    "--stage",
+                    "Product",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(acquire_result.returncode, 0)
+
             wrong_bundle = Path(temp_dir) / "wrong_dev_bundle.json"
             wrong_bundle.write_text(
                 json.dumps(
                     {
                         "session_id": session_id,
+                        "contract_id": "contract-wrong",
                         "stage": "Dev",
                         "status": "completed",
                         "artifact_name": "implementation.md",
                         "artifact_content": "# Implementation\n",
                         "journal": "# Dev Journal\n",
                         "findings": [],
-                        "evidence": ["self_verification"],
+                        "evidence": [evidence("self_verification", kind="command", summary="Self verification completed.")],
                         "summary": "Dev attempted to skip Product",
                     }
                 )
@@ -342,7 +845,7 @@ class CliTests(unittest.TestCase):
             )
 
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("Expected stage Product", result.stderr + result.stdout)
+            self.assertIn("Expected active stage Product", result.stderr + result.stdout)
 
     def test_submit_stage_result_requires_matching_contract_id(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
@@ -392,6 +895,27 @@ class CliTests(unittest.TestCase):
             self.assertEqual(contract_result.returncode, 0)
             contract_payload = json.loads(contract_result.stdout)
 
+            acquire_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "acquire-stage-run",
+                    "--session-id",
+                    session_id,
+                    "--stage",
+                    "Product",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(acquire_result.returncode, 0)
+
             wrong_contract_bundle = Path(temp_dir) / "product_bundle_wrong_contract.json"
             wrong_contract_bundle.write_text(
                 json.dumps(
@@ -404,7 +928,7 @@ class CliTests(unittest.TestCase):
                         "artifact_content": "# Product PRD\n\n## Acceptance Criteria\n- Verify gate.\n",
                         "journal": "# Product Journal\n",
                         "findings": [],
-                        "evidence": ["explicit_acceptance_criteria"],
+                        "evidence": [evidence("explicit_acceptance_criteria", summary="Acceptance criteria documented.")],
                         "summary": "Drafted PRD",
                     }
                 )
@@ -445,7 +969,7 @@ class CliTests(unittest.TestCase):
                         "artifact_content": "# Product PRD\n\n## Acceptance Criteria\n- Verify gate.\n",
                         "journal": "# Product Journal\n",
                         "findings": [],
-                        "evidence": ["explicit_acceptance_criteria"],
+                        "evidence": [evidence("explicit_acceptance_criteria", summary="Acceptance criteria documented.")],
                         "summary": "Drafted PRD",
                     }
                 )
@@ -472,7 +996,28 @@ class CliTests(unittest.TestCase):
             )
 
             self.assertEqual(correct_result.returncode, 0)
-            self.assertIn("current_state: WaitForCEOApproval", correct_result.stdout)
+            self.assertIn("run_state: SUBMITTED", correct_result.stdout)
+
+            verify_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "verify-stage-result",
+                    "--session-id",
+                    session_id,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(verify_result.returncode, 0)
+            self.assertIn("current_state: WaitForCEOApproval", verify_result.stdout)
 
     def test_record_human_decision_routes_wait_state_to_dev(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
@@ -521,6 +1066,27 @@ class CliTests(unittest.TestCase):
             self.assertEqual(contract_result.returncode, 0)
             contract_payload = json.loads(contract_result.stdout)
 
+            acquire_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "acquire-stage-run",
+                    "--session-id",
+                    session_id,
+                    "--stage",
+                    "Product",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(acquire_result.returncode, 0)
+
             product_bundle = Path(temp_dir) / "product_bundle.json"
             product_bundle.write_text(
                 json.dumps(
@@ -533,7 +1099,7 @@ class CliTests(unittest.TestCase):
                         "artifact_content": "# Product PRD\n\n## Acceptance Criteria\n- Verify the harness.\n",
                         "journal": "# Product Journal\n",
                         "findings": [],
-                        "evidence": [],
+                        "evidence": [evidence("explicit_acceptance_criteria", summary="Acceptance criteria documented.")],
                         "summary": "Drafted PRD",
                     }
                 )
@@ -559,6 +1125,25 @@ class CliTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(submit_result.returncode, 0)
+
+            verify_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "verify-stage-result",
+                    "--session-id",
+                    session_id,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(verify_result.returncode, 0)
 
             result = subprocess.run(
                 [

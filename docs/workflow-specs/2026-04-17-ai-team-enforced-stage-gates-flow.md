@@ -113,6 +113,8 @@ stateDiagram-v2
 
 `轮到 Dev 了，Dev 可以开工，但还没人正式接这次任务。`
 
+当前 CLI 实现里，`READY` 是由 `workflow_summary.md` 推导出来的可执行状态，不会单独写成一个 stage-run 文件。调用 `ai-team acquire-stage-run` 后，runtime 才会创建本轮 `stage_runs/<run_id>.json`，初始持久化状态是 `RUNNING`。
+
 #### `RUNNING`
 
 表示 worker 已经通过 `ai-team acquire-stage-run` 明确认领本轮 stage run，runtime 知道这次执行已经开始。
@@ -531,6 +533,15 @@ ai-team start-session
 ai-team record-human-decision
 -> ai-team step
 ```
+
+实现上的关键点：
+
+- `acquire-stage-run` 会创建 active run lock，防止绕过认领直接提交。
+- `step` 会打印当前 `contract_id`、`required_outputs` 和 `required_evidence`，让操作者知道下一步需要满足的硬约束。
+- `submit-stage-result` 只把 bundle 保存成 candidate result，并把 run 置为 `SUBMITTED`。
+- `verify-stage-result` 才会调用 gatekeeper。gatekeeper 会按 `evidence_specs` 检查结构化 evidence 的 `name`、`kind` 和必填字段。
+- 只有 gatekeeper 返回 `PASSED` 时，runtime 才调用 `StageMachine.advance()`。
+- `FAILED` 和 `BLOCKED` 都不会推进 workflow；下一轮需要重新 `acquire-stage-run`。
 
 ## 例子：Dev 到 QA
 

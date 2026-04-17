@@ -195,6 +195,71 @@ class StateTests(unittest.TestCase):
 
         self.assertEqual(artifact_name_for_stage("Dev"), "implementation.md")
 
+    def test_stage_run_lifecycle_persists_active_candidate(self) -> None:
+        from ai_company.models import StageResultEnvelope
+        from ai_company.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("build an enforced workflow")
+
+            run = store.create_stage_run(
+                session_id=session.session_id,
+                stage="Product",
+                contract_id="contract-product",
+                required_outputs=["prd.md"],
+                required_evidence=["explicit_acceptance_criteria"],
+                worker="codex",
+            )
+
+            self.assertEqual(run.state, "RUNNING")
+            self.assertEqual(run.attempt, 1)
+            self.assertEqual(store.active_stage_run(session.session_id).run_id, run.run_id)
+
+            result = StageResultEnvelope(
+                session_id=session.session_id,
+                stage="Product",
+                status="completed",
+                artifact_name="prd.md",
+                artifact_content="# PRD\n\n## Acceptance Criteria\n- Works.\n",
+                contract_id="contract-product",
+                evidence=[
+                    {
+                        "name": "explicit_acceptance_criteria",
+                        "kind": "report",
+                        "summary": "PRD includes explicit acceptance criteria.",
+                    }
+                ],
+            )
+            submitted = store.submit_stage_run_result(run.run_id, result)
+
+            self.assertEqual(submitted.state, "SUBMITTED")
+            self.assertTrue(Path(submitted.candidate_bundle_path).exists())
+            self.assertEqual(store.active_stage_run(session.session_id, stage="Product").state, "SUBMITTED")
+
+    def test_create_stage_run_rejects_existing_active_run(self) -> None:
+        from ai_company.state import StageRunStateError, StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("build an enforced workflow")
+            store.create_stage_run(
+                session_id=session.session_id,
+                stage="Product",
+                contract_id="contract-product",
+                required_outputs=["prd.md"],
+                required_evidence=["explicit_acceptance_criteria"],
+            )
+
+            with self.assertRaises(StageRunStateError):
+                store.create_stage_run(
+                    session_id=session.session_id,
+                    stage="Product",
+                    contract_id="contract-product",
+                    required_outputs=["prd.md"],
+                    required_evidence=["explicit_acceptance_criteria"],
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

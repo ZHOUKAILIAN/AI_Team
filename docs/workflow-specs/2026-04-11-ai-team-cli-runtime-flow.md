@@ -27,8 +27,11 @@ start-session
 - `ai-team start-session`
 - `ai-team current-stage`
 - `ai-team resume`
+- `ai-team step`
 - `ai-team build-stage-contract`
+- `ai-team acquire-stage-run`
 - `ai-team submit-stage-result`
+- `ai-team verify-stage-result`
 - `ai-team record-human-decision`
 - `ai-team record-feedback`
 
@@ -46,23 +49,43 @@ ai-team start-session --message "执行这个需求：<你的需求>"
 ai-team current-stage --session-id <session_id>
 ```
 
-### 3. 生成当前阶段 contract
+### 3. 查看下一步动作
+
+```bash
+ai-team step --session-id <session_id>
+```
+
+### 4. 生成当前阶段 contract
 
 ```bash
 ai-team build-stage-contract --session-id <session_id> --stage Product
 ```
 
-### 4. worker 执行并产出 bundle
+### 5. acquire 当前 stage run
+
+```bash
+ai-team acquire-stage-run --session-id <session_id> --stage Product
+```
+
+### 6. worker 执行并产出 bundle
 
 当前 worker 不由 runtime 自动调度，仍由操作者或 bridge 层触发。
 
-### 5. 回交结果
+### 7. 回交 candidate result
 
 ```bash
 ai-team submit-stage-result --session-id <session_id> --bundle /path/to/bundle.json
 ```
 
-### 6. 遇到等待态时记录人工决策
+### 8. 验证 candidate result
+
+```bash
+ai-team verify-stage-result --session-id <session_id>
+```
+
+只有 gate 通过，workflow 才会推进。
+
+### 9. 遇到等待态时记录人工决策
 
 ```bash
 ai-team record-human-decision --session-id <session_id> --decision go
@@ -125,6 +148,7 @@ Dev 正常完成后进入：
 
 - `workflow_summary.md`
 - `session.json`
+- `stage_runs/*.json`
 - stage records
 - result bundle
 

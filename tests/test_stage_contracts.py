@@ -55,6 +55,9 @@ class StageContractTests(unittest.TestCase):
 
         self.assertIn("qa_report.md", contract.required_outputs)
         self.assertIn("independent_verification", contract.evidence_requirements)
+        self.assertEqual(contract.evidence_specs[0].name, "independent_verification")
+        self.assertIn("summary", contract.evidence_specs[0].required_fields)
+        self.assertIn("command", contract.evidence_specs[0].allowed_kinds)
 
     def test_contract_role_context_includes_learned_context_memory_and_skill(self) -> None:
         from ai_company.models import Finding

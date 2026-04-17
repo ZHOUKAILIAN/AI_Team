@@ -20,16 +20,18 @@
 
 - 用 `ai-team` 创建和推进 session
 - 用 `ai-team` 生成 stage contract
+- 用 `ai-team` acquire 当前 stage run
 - 让 Codex 读取 contract，在真实仓库里执行当前角色工作
 - 由 Codex 产出 stage-result bundle
-- 用 `ai-team` 提交 bundle 并推进状态
+- 用 `ai-team` 提交 candidate bundle
+- 用 `ai-team` verify candidate bundle，只有 gate 通过才推进状态
 - 在等待人工审批的状态停下来，等待人类记录决策
 
 ## 最小 harness 循环
 
 当前最小 harness 循环是：
 
-`start-session -> build-stage-contract -> execute stage work -> submit-stage-result -> wait or next stage`
+`start-session -> step -> build-stage-contract -> acquire-stage-run -> execute stage work -> submit-stage-result -> verify-stage-result -> wait or next stage`
 
 完整最小链路是：
 
@@ -57,6 +59,14 @@ ai-team current-stage --session-id <session_id>
 
 如果当前状态是等待态，先不要继续执行 stage。
 
+也可以让 runtime 直接提示下一步：
+
+```bash
+ai-team step --session-id <session_id>
+```
+
+`step` 输出里的 `contract_id`、`required_outputs` 和 `required_evidence` 是当前执行的硬约束，不要用对话记忆替代这些字段。
+
 ### 3. 构建当前 stage contract
 
 ```bash
@@ -74,7 +84,15 @@ Codex 应该从 contract 里读取：
 - 当前输入资产
 - 角色 context / memory / skill overlay
 
-### 4. 执行当前阶段
+### 4. acquire 当前 stage run
+
+```bash
+ai-team acquire-stage-run --session-id <session_id> --stage <stage_name>
+```
+
+这一步会创建 `RUNNING` 状态的 stage-run record。没有 active run 时，runtime 不接受 stage-result bundle。
+
+### 5. 执行当前阶段
 
 Codex 在真实仓库里完成当前角色工作。
 
@@ -86,29 +104,48 @@ Codex 在真实仓库里完成当前角色工作。
 {
   "session_id": "<session_id>",
   "stage": "Product",
+  "contract_id": "<contract_id>",
   "status": "completed",
   "artifact_name": "prd.md",
   "artifact_content": "# PRD\n\n## Acceptance Criteria\n- ...\n",
   "journal": "# Product Journal\n",
   "findings": [],
-  "evidence": [],
+  "evidence": [
+    {
+      "name": "explicit_acceptance_criteria",
+      "kind": "report",
+      "summary": "PRD includes explicit acceptance criteria."
+    }
+  ],
   "summary": "Stage completed"
 }
 ```
 
-### 5. 提交阶段结果
+`evidence` 必须是结构化对象。runtime 会按 `build-stage-contract` 输出的 `evidence_specs` 检查证据名称、类型和必填字段；只有写在 journal 里的“已验证”不算证据。
+
+### 6. 提交阶段候选结果
 
 ```bash
 ai-team submit-stage-result --session-id <session_id> --bundle /path/to/bundle.json
 ```
 
-提交后再看当前状态：
+这一步只会把 run 置为 `SUBMITTED`，不会推进 workflow。
+
+### 7. 验证候选结果
 
 ```bash
-ai-team current-stage --session-id <session_id>
+ai-team verify-stage-result --session-id <session_id>
 ```
 
-### 6. 等待人工决策时停止
+只有输出 `gate_status: PASSED` 时，runtime 才会把 run 置为 `PASSED` 并调用 workflow 状态机。
+
+验证后再看下一步：
+
+```bash
+ai-team step --session-id <session_id>
+```
+
+### 8. 等待人工决策时停止
 
 Product 完成后，runtime 会进入 `WaitForCEOApproval`。
 
@@ -151,6 +188,7 @@ ai-team record-feedback \
 - 不要用 Dev 自测代替 `QA`
 - 不要让 `Acceptance` 代替最终人工 Go / No-Go
 - 不要绕开 `ai-team` 直接私自改 stage 状态
+- 不要跳过 `acquire-stage-run` 或把 `submit-stage-result` 当成完成信号
 - 不要把 deterministic metadata 当成真实 QA/Acceptance 证据
 
 ## 完成信号
@@ -159,6 +197,8 @@ ai-team record-feedback \
 
 - 能正确使用 `ai-team start-session`
 - 能根据 `ai-team build-stage-contract` 执行当前角色
+- 能通过 `ai-team acquire-stage-run` 认领 stage run
 - 能产出并提交 `submit-stage-result`
+- 能用 `ai-team verify-stage-result` 触发 gatekeeper 验证
 - 遇到等待态时会停止并等待人工决策
 - 能用 `ai-team record-feedback` 把问题沉淀回下一轮 contract

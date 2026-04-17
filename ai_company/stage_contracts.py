@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from .models import StageContract
+from .models import EvidenceRequirement, StageContract
 from .roles import load_role_profiles
 from .state import StateStore, artifact_name_for_stage
 
@@ -26,6 +26,29 @@ EVIDENCE_REQUIREMENTS = {
     "Dev": ["self_verification"],
     "QA": ["independent_verification"],
     "Acceptance": ["product_level_validation"],
+}
+
+EVIDENCE_SPECS = {
+    "explicit_acceptance_criteria": EvidenceRequirement(
+        name="explicit_acceptance_criteria",
+        allowed_kinds=["artifact", "report"],
+        required_fields=["summary"],
+    ),
+    "self_verification": EvidenceRequirement(
+        name="self_verification",
+        allowed_kinds=["command", "artifact", "report"],
+        required_fields=["summary"],
+    ),
+    "independent_verification": EvidenceRequirement(
+        name="independent_verification",
+        allowed_kinds=["command", "artifact", "report"],
+        required_fields=["summary"],
+    ),
+    "product_level_validation": EvidenceRequirement(
+        name="product_level_validation",
+        allowed_kinds=["artifact", "report"],
+        required_fields=["summary"],
+    ),
 }
 
 
@@ -74,8 +97,13 @@ def build_stage_contract(
         required_outputs=[artifact_name_for_stage(stage)],
         forbidden_actions=list(COMMON_FORBIDDEN_ACTIONS),
         evidence_requirements=list(EVIDENCE_REQUIREMENTS.get(stage, [])),
+        evidence_specs=_evidence_specs_for_stage(stage),
         role_context=_compose_role_context(role),
     )
+
+
+def _evidence_specs_for_stage(stage: str) -> list[EvidenceRequirement]:
+    return [EVIDENCE_SPECS[name] for name in EVIDENCE_REQUIREMENTS.get(stage, []) if name in EVIDENCE_SPECS]
 
 
 def _build_contract_id(
