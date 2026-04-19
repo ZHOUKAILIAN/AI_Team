@@ -4,7 +4,25 @@
 
 ## 安装
 
-在仓库根目录执行：
+正式安装方式：
+
+```bash
+curl -fsSL https://github.com/ZHOUKAILIAN/AI_Team/releases/latest/download/install.sh | sh
+```
+
+固定版本安装：
+
+```bash
+curl -fsSL https://github.com/ZHOUKAILIAN/AI_Team/releases/download/v0.1.0/install.sh | sh
+```
+
+安装前提：
+
+- Python 3.13+
+- `curl`
+- `shasum` 或 `sha256sum`
+
+如果是在仓库里做本地开发，再执行：
 
 ```bash
 pip install -e .

@@ -17,7 +17,10 @@ class DocsTests(unittest.TestCase):
         repo_root = Path(__file__).resolve().parents[1]
         readme = (repo_root / "README.md").read_text()
 
-        self.assertIn("pip install -e .", readme)
+        self.assertIn("releases/latest/download/install.sh", readme)
+        self.assertIn("releases/download/v0.1.0/install.sh", readme)
+        self.assertIn("Python 3.13+", readme)
+        self.assertIn("CHANGELOG.md", readme)
         self.assertIn("ai-team start-session", readme)
         self.assertIn("ai-team current-stage", readme)
         self.assertIn("ai-team build-stage-contract", readme)
@@ -50,6 +53,25 @@ class DocsTests(unittest.TestCase):
         self.assertIn("AI_Team CLI Runtime", usage_doc)
         self.assertIn("ai-team start-session", flow_doc)
         self.assertIn("ai-team start-session", usage_doc)
+        self.assertIn("releases/latest/download/install.sh", usage_doc)
+        self.assertIn("releases/download/v0.1.0/install.sh", usage_doc)
+
+    def test_release_workflows_define_ci_and_tag_release(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        ci_workflow = (repo_root / ".github" / "workflows" / "ci.yml").read_text()
+        release_workflow = (repo_root / ".github" / "workflows" / "release.yml").read_text()
+        release_config = (repo_root / ".github" / "release.yml").read_text()
+
+        self.assertIn("python-version: \"3.13\"", ci_workflow)
+        self.assertIn("python -m unittest discover -s tests", ci_workflow)
+        self.assertIn("python -m build", ci_workflow)
+        self.assertIn("tags:", release_workflow)
+        self.assertIn("\"v*\"", release_workflow)
+        self.assertIn("contents: write", release_workflow)
+        self.assertIn("verify_release_version.py", release_workflow)
+        self.assertIn("render_install_script.py", release_workflow)
+        self.assertIn("SHA256SUMS", release_workflow)
+        self.assertIn("Packaging", release_config)
 
     def test_codex_help_and_skill_integration_docs_exist(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]

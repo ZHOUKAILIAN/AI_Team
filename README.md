@@ -152,7 +152,41 @@ $CODEX_HOME/ai-team/workspaces/<workspace_fingerprint>/
 
 ## 安装与使用
 
-在仓库根目录安装本地 CLI：
+推荐通过 GitHub Releases 安装正式版本。
+
+安装前提：
+
+- Python 3.13+
+- `curl`
+- `shasum` 或 `sha256sum`
+
+安装最新版本：
+
+```bash
+curl -fsSL https://github.com/ZHOUKAILIAN/AI_Team/releases/latest/download/install.sh | sh
+```
+
+安装固定版本：
+
+```bash
+curl -fsSL https://github.com/ZHOUKAILIAN/AI_Team/releases/download/v0.1.0/install.sh | sh
+```
+
+安装完成后，稳定命令入口是：
+
+```bash
+~/.local/bin/ai-team
+```
+
+如果你需要安装随包分发的 Codex skill：
+
+```bash
+ai-team install-codex-skill
+```
+
+当前版本发布资产包括 `wheel`、源码包、`install.sh`、`SHA256SUMS` 和版本级 `CHANGELOG.md`。
+
+如果你是在仓库里做开发，再使用本地 editable 安装：
 
 ```bash
 pip install -e .
@@ -218,6 +252,7 @@ ai-team record-human-decision --session-id <session_id> --decision go
 - [运行时设计](docs/workflow-specs/2026-04-11-ai-team-cli-runtime-design.md)
 - [当前流程说明](docs/workflow-specs/2026-04-11-ai-team-cli-runtime-flow.md)
 - [CLI 使用说明](docs/workflow-specs/2026-04-11-ai-team-cli-runtime-usage.md)
+- [变更记录](CHANGELOG.md)
 - [Codex 运行 Help](docs/workflow-specs/2026-04-11-ai-team-codex-cli-help.md)
 - [Codex Harness 方案](docs/workflow-specs/2026-04-11-ai-team-codex-harness-solution.md)
 - [Skill 接入说明](docs/workflow-specs/2026-04-11-ai-team-skill-integration.md)

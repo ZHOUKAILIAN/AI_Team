@@ -1,0 +1,12 @@
+changelog:
+  categories:
+    - title: Runtime
+      labels:
+        - runtime
+    - title: Packaging
+      labels:
+        - packaging
+        - release
+    - title: Documentation
+      labels:
+        - docs
