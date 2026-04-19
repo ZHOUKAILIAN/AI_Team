@@ -1,0 +1,108 @@
+#!/bin/sh
+set -eu
+
+AI_TEAM_REPO="${AI_TEAM_REPO:-{{ repo }}}"
+AI_TEAM_RELEASE_TAG="${AI_TEAM_RELEASE_TAG:-{{ tag }}}"
+AI_TEAM_VERSION="${AI_TEAM_VERSION:-{{ version }}}"
+AI_TEAM_WHEEL="${AI_TEAM_WHEEL:-{{ wheel }}}"
+AI_TEAM_RELEASE_BASE_URL="${AI_TEAM_RELEASE_BASE_URL:-https://github.com/${AI_TEAM_REPO}/releases/download/${AI_TEAM_RELEASE_TAG}}"
+AI_TEAM_INSTALL_DIR="${AI_TEAM_INSTALL_DIR:-${HOME}/.local/share/ai-team}"
+AI_TEAM_BIN_DIR="${AI_TEAM_BIN_DIR:-${HOME}/.local/bin}"
+AI_TEAM_FORCE="${AI_TEAM_FORCE:-0}"
+
+fail() {
+  printf '%s\n' "error: $*" >&2
+  exit 1
+}
+
+need_command() {
+  command -v "$1" >/dev/null 2>&1 || fail "$1 is required"
+}
+
+check_python_version() {
+  python3 - <<'PY' || fail "Python 3.13+ is required"
+import sys
+raise SystemExit(0 if sys.version_info >= (3, 13) else 1)
+PY
+}
+
+sha256_file() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+    return
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+    return
+  fi
+  fail "shasum or sha256sum is required"
+}
+
+verify_checksum() {
+  file_path="$1"
+  sums_path="$2"
+  file_name="$(basename "$file_path")"
+  expected="$(grep "  ${file_name}$" "$sums_path" | awk '{print $1}' || true)"
+  [ -n "$expected" ] || fail "SHA256SUMS is missing ${file_name}"
+  actual="$(sha256_file "$file_path")"
+  [ "$expected" = "$actual" ] || fail "checksum mismatch for ${file_name}"
+}
+
+current_version() {
+  if [ ! -L "${AI_TEAM_INSTALL_DIR}/current" ]; then
+    return
+  fi
+  current_target="$(readlink "${AI_TEAM_INSTALL_DIR}/current")"
+  basename "$current_target"
+}
+
+need_command python3
+need_command curl
+check_python_version
+
+if [ "${AI_TEAM_FORCE}" != "1" ] && [ "$(current_version || true)" = "${AI_TEAM_VERSION}" ]; then
+  printf '%s\n' "AI_Team ${AI_TEAM_VERSION} is already installed."
+  exit 0
+fi
+
+tmp_dir="$(mktemp -d)"
+candidate_root=""
+
+cleanup() {
+  rm -rf "$tmp_dir"
+  if [ -n "$candidate_root" ]; then
+    rm -rf "$candidate_root"
+  fi
+}
+trap cleanup EXIT HUP INT TERM
+
+mkdir -p "${AI_TEAM_INSTALL_DIR}/versions" "${AI_TEAM_BIN_DIR}"
+
+curl -fsSL "${AI_TEAM_RELEASE_BASE_URL}/${AI_TEAM_WHEEL}" -o "${tmp_dir}/${AI_TEAM_WHEEL}" || fail "failed to download ${AI_TEAM_WHEEL}"
+curl -fsSL "${AI_TEAM_RELEASE_BASE_URL}/SHA256SUMS" -o "${tmp_dir}/SHA256SUMS" || fail "failed to download SHA256SUMS"
+verify_checksum "${tmp_dir}/${AI_TEAM_WHEEL}" "${tmp_dir}/SHA256SUMS"
+
+version_dir="${AI_TEAM_INSTALL_DIR}/versions/${AI_TEAM_VERSION}"
+candidate_root="$version_dir"
+rm -rf "$candidate_root"
+mkdir -p "$candidate_root"
+
+python3 -m venv "${candidate_root}/venv" || fail "failed to create virtual environment"
+"${candidate_root}/venv/bin/python" -m pip install --no-index "${tmp_dir}/${AI_TEAM_WHEEL}" || fail "failed to install ${AI_TEAM_WHEEL}"
+"${candidate_root}/venv/bin/ai-team" --help >/dev/null || fail "candidate ${AI_TEAM_VERSION} failed smoke check"
+
+cat > "${candidate_root}/install-manifest.json" <<EOF
+{
+  "repo": "${AI_TEAM_REPO}",
+  "release_tag": "${AI_TEAM_RELEASE_TAG}",
+  "version": "${AI_TEAM_VERSION}",
+  "wheel": "${AI_TEAM_WHEEL}"
+}
+EOF
+
+ln -sfn "$version_dir" "${AI_TEAM_INSTALL_DIR}/current"
+ln -sfn "${AI_TEAM_INSTALL_DIR}/current/venv/bin/ai-team" "${AI_TEAM_BIN_DIR}/ai-team"
+candidate_root=""
+
+printf '%s\n' "Installed AI_Team ${AI_TEAM_VERSION}."
+printf '%s\n' "Command: ${AI_TEAM_BIN_DIR}/ai-team"
