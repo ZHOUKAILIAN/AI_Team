@@ -190,6 +190,22 @@ class StateTests(unittest.TestCase):
             self.assertIn("Product Manager Onboarding Manual", roles["Product"].effective_context_text)
             self.assertIn("Initialized memory system", roles["Product"].effective_memory_text)
 
+    def test_load_role_profiles_uses_packaged_assets_when_repo_roles_are_missing(self) -> None:
+        from ai_company.roles import load_role_profiles
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            temp_root = Path(temp_dir)
+            repo_root = temp_root / "empty-repo"
+            repo_root.mkdir()
+            state_root = temp_root / "state"
+            state_root.mkdir()
+
+            roles = load_role_profiles(repo_root=repo_root, state_root=state_root)
+
+            self.assertIn("Product", roles)
+            self.assertIn("QA", roles)
+            self.assertIn("Product Manager Onboarding Manual", roles["Product"].effective_context_text)
+
     def test_artifact_name_for_dev_stage_is_implementation(self) -> None:
         from ai_company.state import artifact_name_for_stage
 
