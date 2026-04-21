@@ -14,6 +14,7 @@ from .harness_paths import default_state_root
 from .intake import parse_intake_message
 from .models import Finding, StageResultEnvelope, WorkflowSummary
 from .orchestrator import WorkflowOrchestrator
+from .panel import build_panel_snapshot, run_panel_server
 from .project_scaffold import scaffold_project_codex_files
 from .stage_contracts import build_stage_contract
 from .stage_machine import StageMachine
@@ -206,6 +207,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="Explicit closure signal for the learning overlay.",
     )
+    feedback_parser.add_argument(
+        "--apply-rework",
+        action="store_true",
+        help="Also route the waiting workflow back to the target stage as a human rework decision.",
+    )
     feedback_parser.set_defaults(handler=_handle_record_feedback)
 
     board_snapshot_parser = subparsers.add_parser(
@@ -232,6 +238,34 @@ def build_parser() -> argparse.ArgumentParser:
     review_parser = subparsers.add_parser("review", help="Print the latest or a selected review.")
     review_parser.add_argument("--session-id", help="Specific session ID to inspect.")
     review_parser.set_defaults(handler=_handle_review)
+
+    status_parser = subparsers.add_parser(
+        "status",
+        help="Print a user-friendly project, role, and status summary for a session.",
+    )
+    status_parser.add_argument("--session-id", help="Specific session ID to inspect.")
+    status_parser.set_defaults(handler=_handle_status)
+
+    panel_snapshot_parser = subparsers.add_parser(
+        "panel-snapshot",
+        help="Print the current session snapshot as JSON for the runtime panel.",
+    )
+    panel_snapshot_parser.add_argument("--session-id", help="Specific session ID to inspect.")
+    panel_snapshot_parser.set_defaults(handler=_handle_panel_snapshot)
+
+    panel_parser = subparsers.add_parser(
+        "panel",
+        help="Start a local read-only web panel for workflow visibility.",
+    )
+    panel_parser.add_argument("--session-id", help="Specific session ID to inspect.")
+    panel_parser.add_argument("--host", default="127.0.0.1", help="Host interface for the local panel.")
+    panel_parser.add_argument("--port", type=int, default=8765, help="Port for the local panel.")
+    panel_parser.add_argument(
+        "--open-browser",
+        action="store_true",
+        help="Open the local panel URL in the default browser.",
+    )
+    panel_parser.set_defaults(handler=_handle_panel)
 
     return parser
 
@@ -383,6 +417,16 @@ def _handle_build_stage_contract(args: argparse.Namespace) -> int:
         state_store=store,
         session_id=args.session_id,
         stage=args.stage,
+    )
+    store.record_event(
+        args.session_id,
+        kind="stage_contract_requested",
+        stage=args.stage,
+        state=args.stage,
+        actor="operator",
+        status="requested",
+        message=f"Stage contract requested for {args.stage}.",
+        details={"contract_id": contract.contract_id},
     )
     print(json.dumps(contract.to_dict(), indent=2))
     return 0
@@ -543,12 +587,35 @@ def _handle_record_human_decision(args: argparse.Namespace) -> int:
     )
     store.save_workflow_summary(session, updated_summary)
     store.set_human_decision(args.session_id, updated_summary.human_decision)
+    store.record_event(
+        args.session_id,
+        kind="workflow_state_changed",
+        stage=updated_summary.current_stage,
+        state=updated_summary.current_state,
+        actor="runtime",
+        status=updated_summary.human_decision,
+        message=(
+            f"Workflow moved to {updated_summary.current_stage} / "
+            f"{updated_summary.current_state} after human decision."
+        ),
+    )
     _print_summary(updated_summary)
     return 0
 
 
 def _handle_record_feedback(args: argparse.Namespace) -> int:
     store = StateStore(args.state_root)
+    session = None
+    updated_summary = None
+    if args.apply_rework:
+        session = store.load_session(args.session_id)
+        summary = store.load_workflow_summary(args.session_id)
+        updated_summary = StageMachine().apply_human_decision(
+            summary=summary,
+            decision="rework",
+            target_stage=args.target_stage,
+        )
+
     finding = Finding(
         source_stage=args.source_stage,
         target_stage=args.target_stage,
@@ -564,6 +631,22 @@ def _handle_record_feedback(args: argparse.Namespace) -> int:
     )
     feedback_path = store.record_feedback(args.session_id, finding)
     print(f"recorded_feedback: {feedback_path}")
+    if updated_summary is not None and session is not None:
+        store.save_workflow_summary(session, updated_summary)
+        store.set_human_decision(args.session_id, updated_summary.human_decision)
+        store.record_event(
+            args.session_id,
+            kind="workflow_state_changed",
+            stage=updated_summary.current_stage,
+            state=updated_summary.current_state,
+            actor="human",
+            status=updated_summary.human_decision,
+            message=(
+                f"Workflow moved to {updated_summary.current_stage} / "
+                f"{updated_summary.current_state} after feedback-triggered rework."
+            ),
+        )
+        _print_summary(updated_summary)
     return 0
 
 
@@ -617,6 +700,47 @@ def _execute_workflow(
 def _handle_review(args: argparse.Namespace) -> int:
     store = StateStore(args.state_root)
     print(store.read_review(session_id=args.session_id))
+    return 0
+
+
+def _handle_panel_snapshot(args: argparse.Namespace) -> int:
+    store = StateStore(args.state_root)
+    session_id = args.session_id or store.latest_session_id()
+    if not session_id:
+        raise SystemExit("No workflow session exists yet.")
+
+    print(json.dumps(build_panel_snapshot(store, session_id, repo_root=args.repo_root), indent=2))
+    return 0
+
+
+def _handle_status(args: argparse.Namespace) -> int:
+    store = StateStore(args.state_root)
+    session_id = args.session_id or store.latest_session_id()
+    if not session_id:
+        raise SystemExit("No workflow session exists yet.")
+
+    snapshot = build_panel_snapshot(store, session_id, repo_root=args.repo_root)
+    overview = snapshot["overview"]
+    print(f"project: {overview['project']}")
+    print(f"role: {overview['role']}")
+    print(f"status: {overview['status']}")
+    print(f"detail: {overview['detail']}")
+    print(f"session_id: {session_id}")
+    print(f"status_path: {store.status_path(session_id)}")
+    print(f"panel: ai-team panel --session-id {session_id}")
+    return 0
+
+
+def _handle_panel(args: argparse.Namespace) -> int:
+    store = StateStore(args.state_root)
+    run_panel_server(
+        store,
+        session_id=args.session_id,
+        repo_root=args.repo_root,
+        host=args.host,
+        port=args.port,
+        open_browser=args.open_browser,
+    )
     return 0
 
 

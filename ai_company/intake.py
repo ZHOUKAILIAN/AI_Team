@@ -3,8 +3,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .acceptance_policy import match_visual_evidence_profile
+from .acceptance_policy import load_acceptance_policy, match_visual_evidence_profile
 from .models import AcceptanceContract
+
+FIGMA_REVIEW_METHOD = "figma-restoration-review"
+FIGMA_NODE_ID_PATTERN = re.compile(r"\b\d{2,}:\d+\b")
 
 TRIGGER_PATTERNS = (
     re.compile(r"^\s*执行这个需求[:：]\s*(?P<request>.+?)\s*$", re.IGNORECASE | re.DOTALL),
@@ -52,8 +55,10 @@ def parse_intake_message(message: str) -> IntakeMessage:
 
 def _build_acceptance_contract(message: str) -> AcceptanceContract:
     lowered = message.lower()
-    review_method = "figma-restoration-review" if "figma-restoration-review" in lowered else ""
+    review_method = _detect_review_method(message)
     profile = match_visual_evidence_profile(message) if review_method else None
+    if review_method and profile is None:
+        profile = load_acceptance_policy().get("evidence_profiles", {}).get("page_root_visual_parity")
 
     contract = AcceptanceContract(
         review_method=review_method,
@@ -80,6 +85,57 @@ def _build_acceptance_contract(message: str) -> AcceptanceContract:
     if review_method and not contract.recursive:
         contract.recursive = True
     return contract
+
+
+def _detect_review_method(message: str) -> str:
+    lowered = message.lower()
+    if any(token in lowered for token in ("figma-restoration-review", "figma-review")):
+        return FIGMA_REVIEW_METHOD
+
+    if "figma" not in lowered:
+        return ""
+
+    visual_review_signals = (
+        "1:1",
+        "视觉验收",
+        "视觉还原",
+        "fresh reread",
+        "重新完整读取",
+        "重新读取",
+        "读取 figma 节点",
+        "figma 节点",
+        "node-id",
+        "deviation checklist",
+        "偏差",
+        "overlay diff",
+        "runtime screenshot",
+        "0.5px",
+    )
+    if any(signal in lowered for signal in visual_review_signals):
+        return FIGMA_REVIEW_METHOD
+    if _looks_like_figma_node_restoration(message):
+        return FIGMA_REVIEW_METHOD
+    return ""
+
+
+def _looks_like_figma_node_restoration(message: str) -> bool:
+    lowered = message.lower()
+    if "figma" not in lowered or FIGMA_NODE_ID_PATTERN.search(message) is None:
+        return False
+    return any(
+        token in lowered
+        for token in (
+            "节点",
+            "node",
+            "还原",
+            "恢复",
+            "修正",
+            "对齐",
+            "样式",
+            "restore",
+            "parity",
+        )
+    )
 
 
 def _detect_boundary(lowered: str) -> str:

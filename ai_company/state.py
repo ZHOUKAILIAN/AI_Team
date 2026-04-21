@@ -17,6 +17,7 @@ from .models import (
     StageRunRecord,
     WorkflowSummary,
 )
+from .status import render_status_markdown
 from .workflow_summary import render_workflow_summary
 
 VALID_ROLE_NAMES = {"Product", "Dev", "QA", "Acceptance", "Ops"}
@@ -35,9 +36,7 @@ class StateStore:
     def ensure_layout(self) -> None:
         for directory in (
             self.root,
-            self.root / "artifacts",
             self.root / "memory",
-            self.root / "sessions",
         ):
             directory.mkdir(parents=True, exist_ok=True)
 
@@ -51,11 +50,11 @@ class StateStore:
     ) -> SessionRecord:
         self.ensure_layout()
         session_id = self._next_session_id(request)
-        artifact_dir = self.root / "artifacts" / session_id
-        session_dir = self.root / "sessions" / session_id
+        session_dir = self.root / session_id
+        artifact_dir = session_dir
         stages_dir = session_dir / "stages"
 
-        artifact_dir.mkdir(parents=True, exist_ok=True)
+        session_dir.mkdir(parents=True, exist_ok=True)
         stages_dir.mkdir(parents=True, exist_ok=True)
 
         session = SessionRecord(
@@ -80,7 +79,7 @@ class StateStore:
             )
         artifact_paths = {
             "request": str(request_path),
-            "workflow_summary": str(self.workflow_summary_path(session.session_id)),
+            "workflow_summary": str(session.artifact_dir / "workflow_summary.md"),
         }
         artifact_paths.update(self._write_acceptance_contract_artifacts(session, contract))
         self.save_workflow_summary(
@@ -98,6 +97,15 @@ class StateStore:
         if contract is not None and contract.has_constraints():
             payload["acceptance_contract"] = contract.to_dict()
         self._write_json(session_path, payload)
+        self.record_event(
+            session.session_id,
+            kind="session_created",
+            stage="Intake",
+            state="Intake",
+            actor="runtime",
+            status="ready",
+            message=f"Session created for request: {request.strip()}",
+        )
         return session
 
     def record_stage(
@@ -148,15 +156,22 @@ class StateStore:
         return review_path
 
     def workflow_summary_path(self, session_id: str) -> Path:
-        return self.root / "artifacts" / session_id / "workflow_summary.md"
+        return self.root / session_id / "workflow_summary.md"
 
     def save_workflow_summary(self, session: SessionRecord, summary: WorkflowSummary) -> Path:
         summary_path = self.workflow_summary_path(session.session_id)
-        summary_path.write_text(render_workflow_summary(summary))
+        rendered = render_workflow_summary(summary)
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path.write_text(rendered)
+        artifact_summary_path = session.artifact_dir / "workflow_summary.md"
+        if artifact_summary_path != summary_path:
+            artifact_summary_path.parent.mkdir(parents=True, exist_ok=True)
+            artifact_summary_path.write_text(rendered)
+        self._write_status_markdown(summary)
         return summary_path
 
     def load_session(self, session_id: str) -> SessionRecord:
-        session_path = self.root / "sessions" / session_id / "session.json"
+        session_path = self.root / session_id / "session.json"
         if not session_path.exists():
             raise FileNotFoundError(f"Session not found: {session_id}")
         payload = json.loads(session_path.read_text())
@@ -172,7 +187,14 @@ class StateStore:
     def load_workflow_summary(self, session_id: str) -> WorkflowSummary:
         summary_path = self.workflow_summary_path(session_id)
         if not summary_path.exists():
-            raise FileNotFoundError(f"Workflow summary not found for session {session_id}.")
+            session_path = self.root / session_id / "session.json"
+            if session_path.exists():
+                payload = json.loads(session_path.read_text())
+                fallback_path = Path(payload.get("artifact_dir", "")) / "workflow_summary.md"
+                if fallback_path.exists():
+                    summary_path = fallback_path
+            if not summary_path.exists():
+                raise FileNotFoundError(f"Workflow summary not found for session {session_id}.")
 
         payload: dict[str, str] = {}
         artifact_paths: dict[str, str] = {}
@@ -234,6 +256,20 @@ class StateStore:
             stage_record=stage_record,
             findings=result.findings,
             acceptance_status=result.acceptance_status or self._current_acceptance_status(session),
+        )
+        self.record_event(
+            session_id,
+            kind="stage_result_recorded",
+            stage=result.stage,
+            state=result.stage,
+            actor=result.stage,
+            status=result.status or "recorded",
+            message=f"{result.stage} bundle recorded with artifact {result.artifact_name}.",
+            details={
+                "artifact_name": result.artifact_name,
+                "acceptance_status": result.acceptance_status,
+                "findings_count": len(result.findings),
+            },
         )
         return stage_record
 
@@ -349,7 +385,12 @@ class StateStore:
         return runs[-1] if runs else None
 
     def load_stage_run(self, run_id: str) -> StageRunRecord:
-        for session_dir in sorted((self.root / "sessions").glob("*")):
+        session_dirs = list((self.root / "sessions").glob("*")) + [
+            path
+            for path in self.root.glob("*")
+            if path.is_dir() and (path / "session.json").exists()
+        ]
+        for session_dir in sorted(session_dirs):
             path = session_dir / "stage_runs" / f"{run_id}.json"
             if path.exists():
                 return StageRunRecord.from_dict(json.loads(path.read_text()))
@@ -394,6 +435,22 @@ class StateStore:
         payload["human_decision"] = decision
         payload["updated_at"] = self._timestamp()
         self._write_json(session_path, payload)
+        try:
+            summary = self.load_workflow_summary(session_id)
+            stage = summary.current_stage
+            state = summary.current_state
+        except FileNotFoundError:
+            stage = ""
+            state = ""
+        self.record_event(
+            session_id,
+            kind="human_decision_recorded",
+            stage=stage,
+            state=state,
+            actor="human",
+            status=decision,
+            message=f"Human decision recorded: {decision}.",
+        )
 
     def update_session(
         self,
@@ -413,7 +470,7 @@ class StateStore:
         self._write_json(session_path, payload)
 
     def record_feedback(self, session_id: str, finding: Finding) -> Path:
-        session_dir = self.root / "sessions" / session_id
+        session_dir = self.root / session_id
         session_path = session_dir / "session.json"
         if not session_path.exists():
             raise FileNotFoundError(f"Session not found: {session_id}")
@@ -444,6 +501,21 @@ class StateStore:
         payload["feedback_records"].append(str(feedback_path))
         payload["updated_at"] = recorded_at
         self._write_json(session_path, payload)
+
+        self.record_event(
+            session_id,
+            kind="feedback_recorded",
+            stage=finding.source_stage,
+            state="Feedback",
+            actor="human",
+            status=finding.severity,
+            message=f"Feedback recorded for {finding.target_stage}: {finding.issue}",
+            details={
+                "target_stage": finding.target_stage,
+                "required_evidence": list(finding.required_evidence),
+                "completion_signal": finding.completion_signal,
+            },
+        )
 
         self.apply_learning(finding)
         return feedback_path
@@ -498,11 +570,14 @@ class StateStore:
             handle.write(json.dumps({"applied_at": self._timestamp(), **finding.to_dict()}) + "\n")
 
     def latest_session_id(self) -> str | None:
-        sessions_dir = self.root / "sessions"
-        if not sessions_dir.exists():
+        if not self.root.exists():
             return None
 
-        candidates = sorted(path.name for path in sessions_dir.iterdir() if path.is_dir())
+        candidates = sorted(
+            path.name
+            for path in self.root.iterdir()
+            if path.is_dir() and (path / "session.json").exists()
+        )
         return candidates[-1] if candidates else None
 
     def read_review(self, session_id: str | None = None) -> str:
@@ -510,10 +585,68 @@ class StateStore:
         if not target_session:
             raise FileNotFoundError("No workflow session exists yet.")
 
-        review_path = self.root / "sessions" / target_session / "review.md"
+        review_path = self.root / target_session / "review.md"
         if not review_path.exists():
             raise FileNotFoundError(f"Review not found for session {target_session}.")
         return review_path.read_text()
+
+    def session_events_path(self, session_id: str) -> Path:
+        return self.root / session_id / "events.jsonl"
+
+    def status_path(self, session_id: str) -> Path:
+        return self.root / session_id / "status.md"
+
+    def record_event(
+        self,
+        session_id: str,
+        *,
+        kind: str,
+        stage: str,
+        state: str,
+        actor: str,
+        status: str,
+        message: str,
+        details: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        event = {
+            "at": self._timestamp(),
+            "session_id": session_id,
+            "kind": kind,
+            "stage": stage,
+            "state": state,
+            "actor": actor,
+            "status": status,
+            "message": message,
+            "details": details or {},
+        }
+        events_path = self.session_events_path(session_id)
+        events_path.parent.mkdir(parents=True, exist_ok=True)
+        with events_path.open("a") as handle:
+            handle.write(json.dumps(event) + "\n")
+        try:
+            summary = self.load_workflow_summary(session_id)
+        except FileNotFoundError:
+            return event
+        self._write_status_markdown(summary)
+        return event
+
+    def read_session_events(self, session_id: str) -> list[dict[str, object]]:
+        events_path = self.session_events_path(session_id)
+        if not events_path.exists():
+            return []
+        return [json.loads(line) for line in events_path.read_text().splitlines() if line.strip()]
+
+    def _write_status_markdown(self, summary: WorkflowSummary) -> Path:
+        status_path = self.status_path(summary.session_id)
+        status_path.parent.mkdir(parents=True, exist_ok=True)
+        status_path.write_text(
+            render_status_markdown(
+                summary=summary,
+                state_root=self.root,
+                events=self.read_session_events(summary.session_id),
+            )
+        )
+        return status_path
 
     def _append_unique_section(self, path: Path, title: str, content: str, marker: str) -> None:
         existing = path.read_text() if path.exists() else f"# {title}\n\n"
@@ -578,7 +711,7 @@ class StateStore:
         candidate = base
         suffix = 1
 
-        while (self.root / "sessions" / candidate).exists() or (self.root / "artifacts" / candidate).exists():
+        while (self.root / candidate).exists():
             suffix += 1
             candidate = f"{base}-{suffix}"
 

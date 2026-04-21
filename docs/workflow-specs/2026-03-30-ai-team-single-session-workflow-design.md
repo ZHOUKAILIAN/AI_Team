@@ -4,7 +4,7 @@ Date: 2026-03-30
 
 ## Summary
 
-This design replaces the current "deterministic template backend" execution model with a single-session workflow state machine that runs inside the active Codex conversation. The same Codex session will serially act as `Product -> Dev <-> QA -> Acceptance`, while stage outputs are persisted as explicit handoff files under `.ai_company_state/artifacts/<session_id>/`.
+This design replaces the current "deterministic template backend" execution model with a single-session workflow state machine that runs inside the active Codex conversation. The same Codex session will serially act as `Product -> Dev <-> QA -> Acceptance`, while stage outputs are persisted as explicit handoff files under `.ai-team/<session_id>/`.
 
 The goal is not to simulate a non-existent `agent_team` runtime. The goal is to make AI_Team work reliably in Codex as it actually exists today:
 
@@ -278,7 +278,7 @@ Responsibilities:
 All stage artifacts live under:
 
 ```text
-.ai_company_state/artifacts/<session_id>/
+.ai-team/<session_id>/
 ```
 
 ### workflow_summary.md

@@ -52,13 +52,31 @@ class WorkflowOrchestrator:
             current_stage="Intake",
             artifact_paths={
                 "request": str(session.artifact_dir / "request.md"),
-                "workflow_summary": str(self.state_store.workflow_summary_path(session.session_id)),
+                "workflow_summary": str(session.artifact_dir / "workflow_summary.md"),
                 **self.state_store.session_contract_artifact_paths(session),
             },
+        )
+        self.state_store.record_event(
+            session.session_id,
+            kind="workflow_started",
+            stage="Intake",
+            state=summary.current_state,
+            actor="runtime",
+            status="started",
+            message="Deterministic workflow run started.",
         )
 
         for stage in self.stage_order:
             role = roles[stage]
+            self.state_store.record_event(
+                session.session_id,
+                kind="stage_started",
+                stage=stage,
+                state=summary.current_state,
+                actor=stage,
+                status="started",
+                message=f"{stage} started.",
+            )
             output = self.backend.run_stage(
                 stage=stage,
                 request=request,
@@ -95,6 +113,20 @@ class WorkflowOrchestrator:
                 elif output.acceptance_status == "blocked":
                     summary.blocked_reason = "Deterministic demo runtime surfaced unresolved downstream findings."
             self.state_store.save_workflow_summary(session, summary)
+            self.state_store.record_event(
+                session.session_id,
+                kind="stage_completed",
+                stage=stage,
+                state=summary.current_state,
+                actor=stage,
+                status=output.acceptance_status or ("blocked" if output.findings else "completed"),
+                message=f"{stage} completed with {len(output.findings)} finding(s).",
+                details={
+                    "artifact_name": output.artifact_name,
+                    "acceptance_status": output.acceptance_status or "",
+                    "findings_count": len(output.findings),
+                },
+            )
 
             for finding in output.findings:
                 self.state_store.apply_learning(finding)
@@ -111,6 +143,15 @@ class WorkflowOrchestrator:
         if acceptance_status == "blocked" and not summary.blocked_reason:
             summary.blocked_reason = "Deterministic demo runtime ended with unresolved findings."
         self.state_store.save_workflow_summary(session, summary)
+        self.state_store.record_event(
+            session.session_id,
+            kind="workflow_waiting_human_decision",
+            stage=summary.current_stage,
+            state=summary.current_state,
+            actor="runtime",
+            status=acceptance_status,
+            message="Workflow is waiting for the final human Go/No-Go decision.",
+        )
 
         review = build_session_review(
             stage_artifacts=stage_artifacts,
@@ -159,14 +200,33 @@ class WorkflowOrchestrator:
             current_stage="Intake",
             artifact_paths={
                 "request": str(session.artifact_dir / "request.md"),
-                "workflow_summary": str(self.state_store.workflow_summary_path(session.session_id)),
+                "workflow_summary": str(session.artifact_dir / "workflow_summary.md"),
                 **self.state_store.session_contract_artifact_paths(session),
             },
+        )
+        self.state_store.record_event(
+            session.session_id,
+            kind="workflow_started",
+            stage="Intake",
+            state=summary.current_state,
+            actor="runtime",
+            status="started",
+            message="Deterministic workflow run started.",
         )
 
         while stage:
             stage_rounds[stage] += 1
             role = roles[stage]
+            self.state_store.record_event(
+                session.session_id,
+                kind="stage_started",
+                stage=stage,
+                state=summary.current_state,
+                actor=stage,
+                status="started",
+                message=f"{stage} round {stage_rounds[stage]} started.",
+                details={"round_index": stage_rounds[stage]},
+            )
             output = self.backend.run_stage(
                 stage=stage,
                 request=request,
@@ -207,6 +267,21 @@ class WorkflowOrchestrator:
                     summary.blocked_reason = output.blocked_reason
 
             self.state_store.save_workflow_summary(session, summary)
+            self.state_store.record_event(
+                session.session_id,
+                kind="stage_completed",
+                stage=stage,
+                state=summary.current_state,
+                actor=stage,
+                status=output.acceptance_status or ("blocked" if output.findings else "completed"),
+                message=f"{stage} round {stage_rounds[stage]} completed with {len(output.findings)} finding(s).",
+                details={
+                    "round_index": stage_rounds[stage],
+                    "artifact_name": output.artifact_name,
+                    "acceptance_status": output.acceptance_status or "",
+                    "findings_count": len(output.findings),
+                },
+            )
 
             for finding in output.findings:
                 self.state_store.apply_learning(finding)
@@ -224,6 +299,15 @@ class WorkflowOrchestrator:
                         f"Maximum automated rework rounds ({MAX_REWORK_ROUNDS}) reached."
                     )
                     self.state_store.save_workflow_summary(session, summary)
+                    self.state_store.record_event(
+                        session.session_id,
+                        kind="workflow_blocked",
+                        stage=stage,
+                        state=summary.current_state,
+                        actor="runtime",
+                        status="blocked",
+                        message=summary.blocked_reason,
+                    )
                     break
 
             if output.findings:
@@ -232,6 +316,17 @@ class WorkflowOrchestrator:
                 active_findings = []
 
             stage = self._next_stage(stage=stage, routed_stage=routed_stage)
+            if routed_stage:
+                self.state_store.record_event(
+                    session.session_id,
+                    kind="rework_routed",
+                    stage=routed_stage,
+                    state=routed_stage,
+                    actor="runtime",
+                    status="routed",
+                    message=f"Findings routed workflow back to {routed_stage}.",
+                    details={"from_stage": output.stage},
+                )
             if stage is None and acceptance_status == "pending":
                 acceptance_status = "recommended_go" if not active_findings else "blocked"
 
@@ -241,6 +336,15 @@ class WorkflowOrchestrator:
         if not summary.current_stage:
             summary.current_stage = "Acceptance"
         self.state_store.save_workflow_summary(session, summary)
+        self.state_store.record_event(
+            session.session_id,
+            kind="workflow_waiting_human_decision",
+            stage=summary.current_stage,
+            state=summary.current_state,
+            actor="runtime",
+            status=acceptance_status,
+            message="Workflow is waiting for the final human Go/No-Go decision.",
+        )
 
         review = build_session_review(
             stage_artifacts=stage_artifacts,
