@@ -51,11 +51,21 @@ Codex 需要记住输出里的：
 - `artifact_dir`
 - `summary_path`
 
+其中 `artifact_dir` 和 `summary_path` 都会落在仓库内的 `.ai-team/<session_id>/`。
+
 ### 2. 查看当前状态
 
 ```bash
 ai-team current-stage --session-id <session_id>
 ```
+
+如果要给用户展示当前进度，优先使用：
+
+```bash
+ai-team status --session-id <session_id>
+```
+
+它会输出当前项目、当前角色和当前状态，并同步到 `.ai-team/<session_id>/status.md`。
 
 如果当前状态是等待态，先不要继续执行 stage。
 
@@ -66,6 +76,12 @@ ai-team step --session-id <session_id>
 ```
 
 `step` 输出里的 `contract_id`、`required_outputs` 和 `required_evidence` 是当前执行的硬约束，不要用对话记忆替代这些字段。
+
+如果需要看当前 action、阻塞原因和最近 timeline，可以直接打开：
+
+```bash
+ai-team panel --session-id <session_id> --port 8765
+```
 
 ### 3. 构建当前 stage contract
 

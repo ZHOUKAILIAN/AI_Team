@@ -25,6 +25,7 @@ start-session
 ## 当前关键命令
 
 - `ai-team start-session`
+- `ai-team status`
 - `ai-team current-stage`
 - `ai-team resume`
 - `ai-team step`
@@ -45,6 +46,8 @@ start-session
 ai-team start-session --message "执行这个需求：<你的需求>"
 ```
 
+创建后，当前 session 的全部运行态文件都会集中在 `.ai-team/<session_id>/`。
+
 ### 2. 查看当前阶段
 
 ```bash
@@ -55,6 +58,12 @@ ai-team current-stage --session-id <session_id>
 
 ```bash
 ai-team step --session-id <session_id>
+```
+
+面向用户展示时优先使用：
+
+```bash
+ai-team status --session-id <session_id>
 ```
 
 ### 4. 生成当前阶段 contract

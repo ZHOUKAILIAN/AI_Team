@@ -4,7 +4,15 @@
       "matchers": [
         "page-root",
         "page root",
+        "figma 1:1",
+        "1:1 还原",
         "figma parity",
+        "视觉验收",
+        "视觉还原",
+        "fresh reread",
+        "重新完整读取",
+        "figma 节点",
+        "deviation checklist",
         "0.5px",
         "overlay diff",
         "runtime screenshot"

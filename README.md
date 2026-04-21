@@ -69,9 +69,12 @@ ai-team
 已经落地的主要命令：
 
 - `ai-team start-session`
+- `ai-team status`
 - `ai-team current-stage`
 - `ai-team resume`
 - `ai-team step`
+- `ai-team panel-snapshot`
+- `ai-team panel`
 - `ai-team build-stage-contract`
 - `ai-team acquire-stage-run`
 - `ai-team submit-stage-result`
@@ -121,26 +124,30 @@ worker 看到的是 stage contract，不是自由发挥的任务描述。
 
 当前分支已经落地的能力包括：
 
-- app-local 的 workspace 级状态目录
+- 仓库内 `.ai-team/` 单目录状态
 - 显式 stage machine
 - stage contract 生成
 - stage-run acquire / submit / verify 强制流转
 - stage-result candidate bundle 提交
 - wait state 下的人工决策
 - feedback 到 memory overlay 的学习回流
+- 事件流驱动的 panel snapshot
+- 本地只读 Web panel
 - 可安装的 `ai-team` CLI
 
 当前默认状态目录：
 
 ```text
-$CODEX_HOME/ai-team/workspaces/<workspace_fingerprint>/
+<repo-root>/.ai-team/
 ```
 
-如果没有设置 `CODEX_HOME`，则回退到：
+session 文件集中在：
 
 ```text
-~/.codex/ai-team/workspaces/<workspace_fingerprint>/
+<repo-root>/.ai-team/<session_id>/
 ```
+
+长期学习内容放在 `<repo-root>/.ai-team/memory/`。runtime 不再默认拆出 repo 外的 `workspaces/`、`artifacts/`、`sessions/` 多层目录。
 
 ## 当前未完成的部分
 
@@ -218,6 +225,26 @@ ai-team step --session-id <session_id>
 
 `step` 会打印下一步动作以及当前 contract 的 `contract_id`、`required_outputs` 和 `required_evidence`。
 
+查看用户友好的状态摘要：
+
+```bash
+ai-team status --session-id <session_id>
+```
+
+输出会同步展示当前项目、当前角色和当前状态；同一份内容也会写入 `.ai-team/<session_id>/status.md` 供复盘。
+
+查看机器可读的 panel snapshot：
+
+```bash
+ai-team panel-snapshot --session-id <session_id>
+```
+
+打开本地只读 panel：
+
+```bash
+ai-team panel --session-id <session_id> --port 8765
+```
+
 生成阶段 contract：
 
 ```bash
@@ -250,6 +277,12 @@ ai-team verify-stage-result --session-id <session_id>
 ai-team record-human-decision --session-id <session_id> --decision go
 ```
 
+把人工反馈同时作为 rework 决策回流到目标阶段：
+
+```bash
+ai-team record-feedback --session-id <session_id> --source-stage Acceptance --target-stage Dev --issue "<issue>" --apply-rework
+```
+
 输出只读看板 JSON：
 
 ```bash
@@ -267,6 +300,7 @@ ai-team serve-board --all-workspaces --port 8765 --poll-interval 5
 在 `Codex App` 里运行时，推荐把这套系统理解成：
 
 - `ai-team` 负责控流程、发 contract、认领 run、收 candidate bundle、做 gate 验证、记状态
+- `ai-team panel` 把当前 action、阻塞原因、证据缺口和最近 timeline 可视化出来
 - Codex 负责按当前 stage contract 执行真实工作并提交结果
 - 当前能稳定支持“最小 harness 循环”，还不是一条命令全自动跑完所有角色
 
@@ -295,6 +329,7 @@ ai-team serve-board --all-workspaces --port 8765 --poll-interval 5
 - [当前流程说明](docs/workflow-specs/2026-04-11-ai-team-cli-runtime-flow.md)
 - [CLI 使用说明](docs/workflow-specs/2026-04-11-ai-team-cli-runtime-usage.md)
 - [变更记录](CHANGELOG.md)
+- [版本发布页](https://github.com/ZHOUKAILIAN/AI_Team/releases)
 - [Codex 运行 Help](docs/workflow-specs/2026-04-11-ai-team-codex-cli-help.md)
 - [Codex Harness 方案](docs/workflow-specs/2026-04-11-ai-team-codex-harness-solution.md)
 - [Skill 接入说明](docs/workflow-specs/2026-04-11-ai-team-skill-integration.md)

@@ -107,9 +107,16 @@ def _worktree_payload(metadata: WorkspaceMetadata) -> dict[str, Any]:
 
 def _session_ids(state_root: Path) -> list[str]:
     sessions_dir = state_root / "sessions"
-    if not sessions_dir.exists():
-        return []
-    return sorted((path.name for path in sessions_dir.iterdir() if path.is_dir()), reverse=True)
+    if sessions_dir.exists():
+        return sorted((path.name for path in sessions_dir.iterdir() if path.is_dir()), reverse=True)
+    return sorted(
+        (
+            path.name
+            for path in state_root.iterdir()
+            if path.is_dir() and (path / "session.json").exists()
+        ),
+        reverse=True,
+    )
 
 
 def _session_payload(store: StateStore, session_id: str) -> dict[str, Any] | None:

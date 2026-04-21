@@ -1,8 +1,8 @@
+import os
 import subprocess
 import sys
 import unittest
 import json
-import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -52,6 +52,9 @@ class CliTests(unittest.TestCase):
         self.assertIn("agent-run", result.stdout)
         self.assertIn("start-session", result.stdout)
         self.assertIn("codex-init", result.stdout)
+        self.assertIn("panel", result.stdout)
+        self.assertIn("panel-snapshot", result.stdout)
+        self.assertIn("status", result.stdout)
 
     def test_cli_help_lists_readonly_board_commands(self) -> None:
         result = subprocess.run(
@@ -145,7 +148,7 @@ class CliTests(unittest.TestCase):
             artifact_dir = Path(output_map["artifact_dir"])
             summary_path = Path(output_map["summary_path"])
             request_path = artifact_dir / "request.md"
-            session_json_path = Path(temp_dir) / "sessions" / session_id / "session.json"
+            session_json_path = Path(temp_dir) / session_id / "session.json"
 
             self.assertTrue(artifact_dir.exists())
             self.assertTrue(summary_path.exists())
@@ -170,13 +173,12 @@ class CliTests(unittest.TestCase):
             result.stdout,
         )
 
-    def test_start_session_uses_app_local_state_root_by_default(self) -> None:
-        repo_root = Path(__file__).resolve().parents[1]
+    def test_start_session_uses_repo_local_ai_team_state_root_by_default(self) -> None:
         raw_message = "执行这个需求：做一个 harness-first workflow"
 
-        with TemporaryDirectory(dir=local_temp_dir()) as codex_home:
-            env = os.environ.copy()
-            env["CODEX_HOME"] = codex_home
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            repo_root = Path(temp_dir) / "repo"
+            repo_root.mkdir()
             result = subprocess.run(
                 [
                     sys.executable,
@@ -191,13 +193,12 @@ class CliTests(unittest.TestCase):
                 capture_output=True,
                 text=True,
                 check=False,
-                env=env,
             )
 
             self.assertEqual(result.returncode, 0)
             output_lines = [line for line in result.stdout.splitlines() if ":" in line]
             artifact_dir = Path(dict(line.split(": ", 1) for line in output_lines)["artifact_dir"])
-            self.assertIn("ai-team/workspaces", artifact_dir.as_posix())
+            self.assertEqual(artifact_dir.parent, repo_root / ".ai-team")
             self.assertTrue(artifact_dir.exists())
 
     def test_current_stage_prints_session_summary_fields(self) -> None:
@@ -250,11 +251,14 @@ class CliTests(unittest.TestCase):
             self.assertIn("human_decision: pending", result.stdout)
 
     def test_board_snapshot_outputs_all_workspace_board_json(self) -> None:
+        from ai_company.workspace_metadata import refresh_workspace_metadata
+
         repo_root = Path(__file__).resolve().parents[1]
 
         with TemporaryDirectory(dir=local_temp_dir()) as codex_home:
             env = os.environ.copy()
             env["CODEX_HOME"] = codex_home
+            state_root = Path(codex_home) / "ai-team" / "workspaces" / "cli-board-test"
             start_result = subprocess.run(
                 [
                     sys.executable,
@@ -262,6 +266,8 @@ class CliTests(unittest.TestCase):
                     "ai_company",
                     "--repo-root",
                     str(repo_root),
+                    "--state-root",
+                    str(state_root),
                     "start-session",
                     "--message",
                     "执行这个需求：做一个只读看板",
@@ -272,6 +278,7 @@ class CliTests(unittest.TestCase):
                 env=env,
             )
             self.assertEqual(start_result.returncode, 0)
+            refresh_workspace_metadata(state_root=state_root, repo_root=repo_root)
 
             result = subprocess.run(
                 [
@@ -294,6 +301,107 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["stats"]["projects"], 1)
             self.assertEqual(payload["stats"]["sessions"], 1)
             self.assertEqual(payload["projects"][0]["project_name"], repo_root.name)
+
+    def test_panel_snapshot_prints_json_for_latest_session(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        raw_message = "执行这个需求：做一个带面板的 workflow"
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "start-session",
+                    "--message",
+                    raw_message,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0)
+            output_lines = [line for line in bootstrap.stdout.splitlines() if ":" in line]
+            session_id = dict(line.split(": ", 1) for line in output_lines)["session_id"]
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "panel-snapshot",
+                    "--session-id",
+                    session_id,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["session"]["session_id"], session_id)
+            self.assertEqual(payload["state"]["current_state"], "Intake")
+            self.assertEqual(payload["events"][0]["kind"], "session_created")
+
+    def test_status_prints_user_friendly_project_role_and_status(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        raw_message = "执行这个需求：做一个可查询状态的 workflow"
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            state_root = Path(temp_dir) / ".ai-team"
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    str(state_root),
+                    "start-session",
+                    "--message",
+                    raw_message,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0)
+            output_lines = [line for line in bootstrap.stdout.splitlines() if ":" in line]
+            session_id = dict(line.split(": ", 1) for line in output_lines)["session_id"]
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    str(state_root),
+                    "status",
+                    "--session-id",
+                    session_id,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("project: ai-team-runtime", result.stdout)
+            self.assertIn("role: Intake", result.stdout)
+            self.assertIn("status: in_progress", result.stdout)
+            self.assertIn("status_path:", result.stdout)
 
     def test_build_stage_contract_outputs_machine_readable_json(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
@@ -1299,7 +1407,7 @@ class CliTests(unittest.TestCase):
             feedback_lines = [line for line in result.stdout.splitlines() if ":" in line]
             feedback_path = Path(dict(line.split(": ", 1) for line in feedback_lines)["recorded_feedback"])
             lessons_path = Path(temp_dir) / "memory" / "Dev" / "lessons.md"
-            session_json_path = Path(temp_dir) / "sessions" / session_id / "session.json"
+            session_json_path = Path(temp_dir) / session_id / "session.json"
 
             self.assertTrue(feedback_path.exists())
             self.assertTrue(lessons_path.exists())
@@ -1315,6 +1423,64 @@ class CliTests(unittest.TestCase):
             session_payload = json.loads(session_json_path.read_text())
             self.assertIn("feedback_records", session_payload)
             self.assertEqual(len(session_payload["feedback_records"]), 1)
+
+    def test_record_feedback_can_apply_rework_decision_in_same_command(self) -> None:
+        from ai_company.models import WorkflowSummary
+        from ai_company.state import StateStore
+
+        repo_root = Path(__file__).resolve().parents[1]
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("做一个支持验收回流的流程")
+            store.save_workflow_summary(
+                session,
+                WorkflowSummary(
+                    session_id=session.session_id,
+                    runtime_mode="session_bootstrap",
+                    current_state="WaitForHumanDecision",
+                    current_stage="Acceptance",
+                    prd_status="drafted",
+                    dev_status="completed",
+                    qa_status="passed",
+                    acceptance_status="recommended_go",
+                    human_decision="pending",
+                    artifact_paths={"workflow_summary": str(session.artifact_dir / "workflow_summary.md")},
+                ),
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "record-feedback",
+                    "--session-id",
+                    session.session_id,
+                    "--source-stage",
+                    "Acceptance",
+                    "--target-stage",
+                    "Dev",
+                    "--issue",
+                    "Acceptance found a missed Figma parity issue.",
+                    "--severity",
+                    "high",
+                    "--apply-rework",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("recorded_feedback:", result.stdout)
+            self.assertIn("current_state: Dev", result.stdout)
+            self.assertIn("current_stage: Dev", result.stdout)
+            self.assertIn("human_decision: rework", result.stdout)
 
     def test_codex_init_reports_project_scoped_codex_setup(self) -> None:
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:

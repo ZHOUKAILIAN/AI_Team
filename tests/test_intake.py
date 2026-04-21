@@ -29,6 +29,56 @@ class IntakeTests(unittest.TestCase):
         self.assertFalse(intake.contract.allow_host_environment_changes)
         self.assertEqual(len(intake.contract.acceptance_criteria), 3)
 
+    def test_infers_figma_review_contract_from_generic_figma_1to1_request(self) -> None:
+        from ai_company.intake import parse_intake_message
+
+        intake = parse_intake_message(
+            (
+                "执行这个需求：在当前 worktree 完成 Figma 1:1 还原。"
+                "验收时必须重新完整读取 Figma 节点 2411:6162、2455:12852，"
+                "不允许只依赖开发阶段读取结果，并输出 deviation checklist。"
+            )
+        )
+
+        self.assertEqual(intake.contract.review_method, "figma-restoration-review")
+        self.assertEqual(intake.contract.boundary, "page_root")
+        self.assertTrue(intake.contract.recursive)
+        self.assertIn("deviation_checklist.md", intake.contract.required_artifacts)
+        self.assertIn("review_completion.json", intake.contract.required_artifacts)
+        self.assertIn("runtime_screenshot", intake.contract.required_evidence)
+        self.assertIn("overlay_diff", intake.contract.required_evidence)
+        self.assertIn("page_root_recursive_audit", intake.contract.required_evidence)
+
+    def test_plain_figma_reference_does_not_force_review_contract(self) -> None:
+        from ai_company.intake import parse_intake_message
+
+        intake = parse_intake_message(
+            "执行这个需求：根据 Figma 设计实现一个活动报名按钮，保持现有业务交互不变。"
+        )
+
+        self.assertEqual(intake.contract.review_method, "")
+        self.assertEqual(intake.contract.required_artifacts, [])
+        self.assertEqual(intake.contract.required_evidence, [])
+
+    def test_figma_node_restoration_request_triggers_visual_review_contract(self) -> None:
+        from ai_company.intake import parse_intake_message
+
+        intake = parse_intake_message(
+            (
+                "用 AI_Team 修改：1. 运动统计周维度中，本周和上周不要显示时间段，只显示本周和上周。"
+                "2. 还原 Figma 我的页统计相关节点 2411:3042、2411:3049、2411:3080，修正当前样式。"
+            )
+        )
+
+        self.assertEqual(intake.contract.review_method, "figma-restoration-review")
+        self.assertEqual(intake.contract.boundary, "page_root")
+        self.assertTrue(intake.contract.recursive)
+        self.assertIn("deviation_checklist.md", intake.contract.required_artifacts)
+        self.assertIn("review_completion.json", intake.contract.required_artifacts)
+        self.assertIn("runtime_screenshot", intake.contract.required_evidence)
+        self.assertIn("overlay_diff", intake.contract.required_evidence)
+        self.assertIn("page_root_recursive_audit", intake.contract.required_evidence)
+
     def test_extracts_request_from_chinese_trigger(self) -> None:
         from ai_company.intake import extract_request_from_message
 

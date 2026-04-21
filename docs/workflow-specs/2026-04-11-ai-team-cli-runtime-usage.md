@@ -54,6 +54,20 @@ ai-team current-stage --session-id <session_id>
 ai-team step --session-id <session_id>
 ```
 
+如果只想看对用户友好的摘要：
+
+```bash
+ai-team status --session-id <session_id>
+```
+
+默认状态目录在仓库根目录下：
+
+```text
+.ai-team/<session_id>/
+```
+
+这里会同时放 `session.json`、`workflow_summary.md`、阶段产物、`review.md` 和 `events.jsonl`。
+
 ### 4. 生成阶段 contract
 
 ```bash
@@ -106,6 +120,24 @@ ai-team codex-init
 ai-team current-stage --session-id <session_id>
 ```
 
+查看用户友好状态：
+
+```bash
+ai-team status --session-id <session_id>
+```
+
+查看当前 session 的可视化快照：
+
+```bash
+ai-team panel-snapshot --session-id <session_id>
+```
+
+打开本地只读 panel：
+
+```bash
+ai-team panel --session-id <session_id> --port 8765
+```
+
 恢复查看：
 
 ```bash
@@ -154,6 +186,12 @@ ai-team record-human-decision --session-id <session_id> --decision go
 
 ```bash
 ai-team record-feedback --session-id <session_id> --source-stage Acceptance --target-stage Dev --issue "<issue>"
+```
+
+如果这条反馈本身就是人工 rework 决策，可以在同一条命令里把 workflow 拉回目标阶段：
+
+```bash
+ai-team record-feedback --session-id <session_id> --source-stage Acceptance --target-stage Dev --issue "<issue>" --apply-rework
 ```
 
 查看 review：

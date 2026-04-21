@@ -193,7 +193,7 @@ class DeterministicBackend:
             f"{_excerpt(prd)}\n\n"
             "## Change Summary\n"
             "- Load role context, base memory, and learned overlay memory.\n"
-            "- Persist sessions, artifacts, journals, findings, and reviews under `.ai_company_state/`.\n"
+            "- Persist sessions, artifacts, journals, findings, and reviews under the configured runtime state root.\n"
             "- Keep learned context and skill updates as auditable overlays instead of mutating seed files.\n\n"
             "## Changed Files\n"
             "- Demo backend placeholder: no repository files were modified by the deterministic runtime.\n\n"

@@ -1,5 +1,6 @@
 import shutil
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -38,9 +39,9 @@ class StateTests(unittest.TestCase):
                 ),
             )
 
-            contract_path = root / "artifacts" / session.session_id / "acceptance_contract.json"
-            review_completion_path = root / "artifacts" / session.session_id / "review_completion.json"
-            deviation_checklist_path = root / "artifacts" / session.session_id / "deviation_checklist.md"
+            contract_path = root / session.session_id / "acceptance_contract.json"
+            review_completion_path = root / session.session_id / "review_completion.json"
+            deviation_checklist_path = root / session.session_id / "deviation_checklist.md"
 
             self.assertTrue(contract_path.exists())
             self.assertTrue(review_completion_path.exists())
@@ -56,9 +57,11 @@ class StateTests(unittest.TestCase):
             store = StateStore(Path(temp_dir))
             session = store.create_session("demo")
 
-            self.assertTrue((Path(temp_dir) / "sessions" / session.session_id / "session.json").exists())
-            self.assertTrue((Path(temp_dir) / "artifacts" / session.session_id).exists())
-            workflow_summary = Path(temp_dir) / "artifacts" / session.session_id / "workflow_summary.md"
+            self.assertTrue((Path(temp_dir) / session.session_id / "session.json").exists())
+            self.assertTrue((Path(temp_dir) / session.session_id).exists())
+            self.assertFalse((Path(temp_dir) / "sessions").exists())
+            self.assertFalse((Path(temp_dir) / "artifacts").exists())
+            workflow_summary = Path(temp_dir) / session.session_id / "workflow_summary.md"
             self.assertTrue(workflow_summary.exists())
             summary_text = workflow_summary.read_text()
             self.assertIn("- runtime_mode: session_bootstrap", summary_text)
@@ -139,8 +142,8 @@ class StateTests(unittest.TestCase):
                 session_id="demo-session",
                 request="demo",
                 created_at="2026-04-10T00:00:00Z",
-                session_dir=root / "sessions" / "demo-session",
-                artifact_dir=root / "artifacts" / "demo-session",
+                session_dir=root / "demo-session",
+                artifact_dir=root / "demo-session",
             )
             session.session_dir.mkdir(parents=True, exist_ok=True)
             (session.session_dir / "stages").mkdir(parents=True, exist_ok=True)
@@ -275,6 +278,64 @@ class StateTests(unittest.TestCase):
                     required_outputs=["prd.md"],
                     required_evidence=["explicit_acceptance_criteria"],
                 )
+
+    def test_load_workflow_summary_falls_back_to_artifact_dir(self) -> None:
+        from ai_company.models import SessionRecord, WorkflowSummary
+        from ai_company.state import StateStore
+        from ai_company.workflow_summary import render_workflow_summary
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            root = Path(temp_dir) / "sessions"
+            artifacts_root = Path(temp_dir) / "artifacts"
+            store = StateStore(root)
+            session_id = "session-with-external-artifacts"
+            session_dir = root / session_id
+            artifact_dir = artifacts_root / session_id
+            session_dir.mkdir(parents=True, exist_ok=True)
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+
+            session = SessionRecord(
+                session_id=session_id,
+                request="demo",
+                created_at=datetime.now(timezone.utc).isoformat(),
+                session_dir=session_dir,
+                artifact_dir=artifact_dir,
+            )
+            (session_dir / "session.json").write_text(
+                """
+{
+  "session_id": "session-with-external-artifacts",
+  "request": "demo",
+  "created_at": "2026-04-20T00:00:00+00:00",
+  "session_dir": "__SESSION_DIR__",
+  "artifact_dir": "__ARTIFACT_DIR__"
+}
+                """.strip()
+                .replace("__SESSION_DIR__", str(session_dir))
+                .replace("__ARTIFACT_DIR__", str(artifact_dir))
+            )
+            (artifact_dir / "workflow_summary.md").write_text(
+                render_workflow_summary(
+                    WorkflowSummary(
+                        session_id=session_id,
+                        runtime_mode="session_bootstrap",
+                        current_state="WaitForHumanDecision",
+                        current_stage="Acceptance",
+                        acceptance_status="recommended_go",
+                        artifact_paths={"workflow_summary": str(artifact_dir / "workflow_summary.md")},
+                    )
+                )
+            )
+
+            summary = store.load_workflow_summary(session_id)
+
+            self.assertEqual(summary.current_state, "WaitForHumanDecision")
+            self.assertEqual(summary.current_stage, "Acceptance")
+            self.assertEqual(summary.acceptance_status, "recommended_go")
+            self.assertEqual(
+                summary.artifact_paths["workflow_summary"],
+                str(artifact_dir / "workflow_summary.md"),
+            )
 
 
 if __name__ == "__main__":

@@ -157,14 +157,16 @@ Best practice: invoke this skill only when Codex is opened at the target project
 - `scripts/company-init.sh`: local setup helper that generates `.codex/agents/` and `.agents/skills/ai-team-run/`; generated files stay out of git.
 - `scripts/company-run.sh`: local session bootstrap helper that prints `session_id`, `artifact_dir`, and `summary_path`.
 - `.codex/agents/`: local Product, Dev, QA, and Acceptance agents for this repository.
-- `.ai_company_state/artifacts/<session_id>/`: session-scoped artifacts and handoff files.
 - `ai-team`: runtime CLI backed by `ai_company/cli.py`, exposing the `ai-team start-session` bootstrap entrypoint.
+- `.ai-team/<session_id>/`: the session-scoped runtime directory; `artifact_dir` points here and session metadata lives beside the artifacts.
+- `ai-team status`: user-friendly project / role / status summary.
+- `ai-team panel` / `ai-team panel-snapshot`: read-only visibility tools for current action, blockers, evidence, and recent events.
 
 Read the available helper assets before choosing the bootstrap path.
 
 ## Workflow Contract
 
-- Read the generated `workflow_summary.md` and the active session artifact directory.
+- Read the generated `status.md`, `workflow_summary.md`, and the active session directory.
 - If subagents are available, prefer the local agents from `.codex/agents/` for Product, Dev, QA, and Acceptance.
 - Product writes `prd.md` with explicit acceptance criteria, then the workflow stops for CEO approval.
 - After approval, Dev and QA iterate until QA produces independent evidence or blocks with concrete findings.
@@ -173,7 +175,7 @@ Read the available helper assets before choosing the bootstrap path.
 
 ## Rules
 
-- Use session-scoped artifacts under `.ai_company_state/artifacts/<session_id>/`.
+- Use the explicit `artifact_dir` and `summary_path` printed by the runtime; they resolve into `.ai-team/<session_id>/`.
 - Never collapse QA into Dev self-verification.
 - If QA or Acceptance lacks real evidence, mark the workflow as `blocked`.
 - If subagents are unavailable, follow the same stages sequentially in the current session.
