@@ -12,7 +12,7 @@ from .gatekeeper import evaluate_candidate
 from .codex_skill_installer import install_codex_skill
 from .harness_paths import default_state_root
 from .intake import parse_intake_message
-from .models import Finding, StageResultEnvelope, WorkflowSummary
+from .models import Finding, GateResult, StageResultEnvelope, WorkflowSummary
 from .orchestrator import WorkflowOrchestrator
 from .panel import build_panel_snapshot, run_panel_server
 from .project_scaffold import scaffold_project_codex_files
@@ -152,7 +152,88 @@ def build_parser() -> argparse.ArgumentParser:
     )
     verify_result_parser.add_argument("--session-id", required=True, help="Existing workflow session ID.")
     verify_result_parser.add_argument("--run-id", help="Optional explicit stage run to verify.")
+    verify_result_parser.add_argument(
+        "--judge",
+        choices=["off", "noop", "openai-sandbox"],
+        default="off",
+        help="Optional independent judge to run after hard gates pass.",
+    )
+    verify_result_parser.add_argument("--model", default="gpt-5.4", help="Model for --judge openai-sandbox.")
+    verify_result_parser.add_argument(
+        "--docker-image",
+        default="python:3.13-slim",
+        help="Docker image for --judge openai-sandbox.",
+    )
+    verify_result_parser.add_argument(
+        "--openai-api-key",
+        help="Optional API key for --judge openai-sandbox. Defaults to SDK environment resolution.",
+    )
+    verify_result_parser.add_argument(
+        "--openai-base-url",
+        help="Optional base URL for --judge openai-sandbox. Defaults to SDK environment resolution.",
+    )
+    verify_result_parser.add_argument(
+        "--openai-proxy-url",
+        help="Optional HTTP proxy URL for --judge openai-sandbox, for example http://127.0.0.1:7897.",
+    )
+    verify_result_parser.add_argument(
+        "--openai-user-agent",
+        default="AI-Team-Runtime/0.1",
+        help="User-Agent for OpenAI-compatible requests. Defaults to AI-Team-Runtime/0.1.",
+    )
+    verify_result_parser.add_argument(
+        "--acceptance-matrix",
+        type=Path,
+        help="Optional JSON file containing the approved acceptance matrix.",
+    )
     verify_result_parser.set_defaults(handler=_handle_verify_stage_result)
+
+    judge_result_parser = subparsers.add_parser(
+        "judge-stage-result",
+        help="Run read-only hard gate plus optional independent judge for a submitted stage result.",
+    )
+    judge_result_parser.add_argument("--session-id", required=True, help="Existing workflow session ID.")
+    judge_result_parser.add_argument("--run-id", help="Optional explicit stage run to judge.")
+    judge_result_parser.add_argument(
+        "--judge",
+        choices=["noop", "openai-sandbox"],
+        default="noop",
+        help="Judge backend. noop is local and deterministic; openai-sandbox uses OpenAI Agents SDK.",
+    )
+    judge_result_parser.add_argument("--model", default="gpt-5.4", help="Model for --judge openai-sandbox.")
+    judge_result_parser.add_argument(
+        "--docker-image",
+        default="python:3.13-slim",
+        help="Docker image for --judge openai-sandbox.",
+    )
+    judge_result_parser.add_argument(
+        "--openai-api-key",
+        help="Optional API key for --judge openai-sandbox. Defaults to SDK environment resolution.",
+    )
+    judge_result_parser.add_argument(
+        "--openai-base-url",
+        help="Optional base URL for --judge openai-sandbox. Defaults to SDK environment resolution.",
+    )
+    judge_result_parser.add_argument(
+        "--openai-proxy-url",
+        help="Optional HTTP proxy URL for --judge openai-sandbox, for example http://127.0.0.1:7897.",
+    )
+    judge_result_parser.add_argument(
+        "--openai-user-agent",
+        default="AI-Team-Runtime/0.1",
+        help="User-Agent for OpenAI-compatible requests. Defaults to AI-Team-Runtime/0.1.",
+    )
+    judge_result_parser.add_argument(
+        "--acceptance-matrix",
+        type=Path,
+        help="Optional JSON file containing the approved acceptance matrix.",
+    )
+    judge_result_parser.add_argument(
+        "--print-context",
+        action="store_true",
+        help="Include the generated JudgeContextCompact in the JSON output.",
+    )
+    judge_result_parser.set_defaults(handler=_handle_judge_stage_result)
 
     human_decision_parser = subparsers.add_parser(
         "record-human-decision",
@@ -528,12 +609,17 @@ def _handle_verify_stage_result(args: argparse.Namespace) -> int:
         stage=run.stage,
     )
     verifying_run = store.update_stage_run(run, state="VERIFYING")
-    gate_result, normalized_result = evaluate_candidate(
-        session=store.load_session(args.session_id),
-        contract=contract,
-        result=result,
-        acceptance_contract=store.load_acceptance_contract(args.session_id),
-    )
+    try:
+        gate_result, normalized_result, judge_payload = _evaluate_stage_result_for_verification(
+            args=args,
+            store=store,
+            summary=summary,
+            contract=contract,
+            result=result,
+        )
+    except SystemExit:
+        store.update_stage_run(verifying_run, state="SUBMITTED")
+        raise
 
     if gate_result.status == "PASSED":
         stage_record = store.record_stage_result(args.session_id, normalized_result)
@@ -556,6 +642,7 @@ def _handle_verify_stage_result(args: argparse.Namespace) -> int:
             store.apply_learning(finding)
         print(f"run_id: {verifying_run.run_id}")
         print(f"gate_status: {gate_result.status}")
+        _print_judge_payload(judge_payload)
         _print_summary(updated_summary)
         return 0
 
@@ -570,10 +657,172 @@ def _handle_verify_stage_result(args: argparse.Namespace) -> int:
     )
     print(f"run_id: {verifying_run.run_id}")
     print(f"gate_status: {gate_result.status}")
+    _print_judge_payload(judge_payload)
     if gate_result.reason:
         print(f"gate_reason: {gate_result.reason}")
     _print_summary(updated_summary)
     return 1
+
+
+def _evaluate_stage_result_for_verification(
+    *,
+    args: argparse.Namespace,
+    store: StateStore,
+    summary: WorkflowSummary,
+    contract,
+    result: StageResultEnvelope,
+):
+    if args.judge == "off":
+        gate_result, normalized_result = evaluate_candidate(
+            session=store.load_session(args.session_id),
+            contract=contract,
+            result=result,
+            acceptance_contract=store.load_acceptance_contract(args.session_id),
+        )
+        return gate_result, normalized_result, None
+
+    from .gate_evaluator import GateEvaluator, NoopJudge
+    from .openai_sandbox_judge import OpenAISandboxJudge, OpenAISandboxJudgeUnavailable
+    from .stage_policies import default_policy_registry
+
+    judge = (
+        OpenAISandboxJudge(
+            model=args.model,
+            docker_image=args.docker_image,
+            api_key=args.openai_api_key,
+            base_url=args.openai_base_url,
+            proxy_url=args.openai_proxy_url,
+            user_agent=args.openai_user_agent,
+        )
+        if args.judge == "openai-sandbox"
+        else NoopJudge()
+    )
+    session = store.load_session(args.session_id)
+    try:
+        evaluation = GateEvaluator(judge=judge).evaluate(
+            session=session,
+            policy=default_policy_registry().get(result.stage),
+            contract=contract,
+            result=result,
+            original_request_summary=session.request,
+            approved_prd_summary=_approved_prd_summary(summary=summary, result=result),
+            approved_acceptance_matrix=_load_acceptance_matrix(args.acceptance_matrix),
+        )
+    except OpenAISandboxJudgeUnavailable as exc:
+        raise SystemExit(str(exc))
+
+    return (
+        _gate_result_from_evaluation(evaluation),
+        evaluation.result,
+        {
+            "decision": _gate_decision_to_dict(evaluation.decision),
+            "judge_result": _judge_result_to_dict(evaluation.judge_result),
+        },
+    )
+
+
+def _gate_result_from_evaluation(evaluation) -> GateResult:
+    decision = evaluation.decision
+    if decision.outcome == "pass":
+        status = "PASSED"
+    elif decision.outcome == "blocked":
+        status = "BLOCKED"
+    else:
+        status = "FAILED"
+    return GateResult(
+        status=status,
+        reason=decision.reason,
+        missing_outputs=list(decision.missing_outputs),
+        missing_evidence=list(decision.missing_evidence),
+        findings=list(decision.findings),
+        checked_at=evaluation.hard_gate_result.checked_at,
+    )
+
+
+def _print_judge_payload(payload: dict[str, object] | None) -> None:
+    if payload is None:
+        return
+    decision = payload["decision"]
+    judge_result = payload["judge_result"]
+    if isinstance(decision, dict):
+        print(f"decision_outcome: {decision['outcome']}")
+    if isinstance(judge_result, dict):
+        print(f"judge_verdict: {judge_result['verdict']}")
+        print(f"judge_confidence: {judge_result['confidence']}")
+
+
+def _handle_judge_stage_result(args: argparse.Namespace) -> int:
+    from .gate_evaluator import GateEvaluator, NoopJudge
+    from .openai_sandbox_judge import OpenAISandboxJudge, OpenAISandboxJudgeUnavailable
+    from .stage_policies import default_policy_registry
+
+    store = StateStore(args.state_root)
+    summary = store.load_workflow_summary(args.session_id)
+
+    if args.run_id:
+        run = store.load_stage_run(args.run_id)
+    else:
+        expected_stage = _expected_submission_stage(summary)
+        if expected_stage is None:
+            raise SystemExit(f"Cannot judge a stage result while workflow is waiting in {summary.current_state}.")
+        run = store.active_stage_run(args.session_id, stage=expected_stage)
+        if run is None:
+            raise SystemExit(f"No active stage run for {expected_stage}.")
+
+    if run.session_id != args.session_id:
+        raise SystemExit("Stage run session_id does not match --session-id.")
+    if not run.candidate_bundle_path:
+        raise SystemExit(f"Stage run {run.run_id} has no submitted candidate bundle.")
+
+    result = StageResultEnvelope.from_dict(json.loads(Path(run.candidate_bundle_path).read_text()))
+    contract = build_stage_contract(
+        repo_root=args.repo_root,
+        state_store=store,
+        session_id=args.session_id,
+        stage=run.stage,
+    )
+    policy = default_policy_registry().get(run.stage)
+    session = store.load_session(args.session_id)
+    acceptance_matrix = _load_acceptance_matrix(args.acceptance_matrix)
+    judge = (
+        OpenAISandboxJudge(
+            model=args.model,
+            docker_image=args.docker_image,
+            api_key=args.openai_api_key,
+            base_url=args.openai_base_url,
+            proxy_url=args.openai_proxy_url,
+            user_agent=args.openai_user_agent,
+        )
+        if args.judge == "openai-sandbox"
+        else NoopJudge()
+    )
+
+    try:
+        evaluation = GateEvaluator(judge=judge).evaluate(
+            session=session,
+            policy=policy,
+            contract=contract,
+            result=result,
+            original_request_summary=session.request,
+            approved_prd_summary=_approved_prd_summary(summary=summary, result=result),
+            approved_acceptance_matrix=acceptance_matrix,
+        )
+    except OpenAISandboxJudgeUnavailable as exc:
+        raise SystemExit(str(exc))
+
+    payload = {
+        "session_id": args.session_id,
+        "run_id": run.run_id,
+        "stage": run.stage,
+        "judge": args.judge,
+        "hard_gate_result": evaluation.hard_gate_result.to_dict(),
+        "decision": _gate_decision_to_dict(evaluation.decision),
+        "judge_result": _judge_result_to_dict(evaluation.judge_result),
+    }
+    if args.print_context and evaluation.judge_context is not None:
+        payload["judge_context"] = evaluation.judge_context.to_dict()
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
 
 
 def _handle_record_human_decision(args: argparse.Namespace) -> int:
@@ -750,6 +999,53 @@ def _print_summary(summary: WorkflowSummary) -> None:
     print(f"current_stage: {summary.current_stage}")
     print(f"acceptance_status: {summary.acceptance_status}")
     print(f"human_decision: {summary.human_decision}")
+
+
+def _load_acceptance_matrix(path: Path | None) -> list[dict[str, object]]:
+    if path is None:
+        return []
+    payload = json.loads(path.read_text())
+    if not isinstance(payload, list):
+        raise SystemExit("--acceptance-matrix must point to a JSON array.")
+    return [dict(item) for item in payload]
+
+
+def _approved_prd_summary(*, summary: WorkflowSummary, result: StageResultEnvelope) -> str:
+    if result.stage == "Product" and result.artifact_name == "prd.md":
+        return result.artifact_content[:4000]
+    prd_path = summary.artifact_paths.get("product") or summary.artifact_paths.get("prd")
+    if prd_path and Path(prd_path).exists():
+        return Path(prd_path).read_text()[:4000]
+    return ""
+
+
+def _gate_decision_to_dict(decision) -> dict[str, object]:
+    return {
+        "outcome": decision.outcome,
+        "target_stage": decision.target_stage,
+        "reason": decision.reason,
+        "missing_outputs": list(decision.missing_outputs),
+        "missing_evidence": list(decision.missing_evidence),
+        "findings": [finding.to_dict() for finding in decision.findings],
+        "judge_verdict": decision.judge_verdict,
+        "judge_confidence": decision.judge_confidence,
+        "judge_trace_id": decision.judge_trace_id,
+        "derived_status": decision.derived_status,
+    }
+
+
+def _judge_result_to_dict(judge_result) -> dict[str, object] | None:
+    if judge_result is None:
+        return None
+    return {
+        "verdict": judge_result.verdict,
+        "target_stage": judge_result.target_stage,
+        "confidence": judge_result.confidence,
+        "reasons": list(judge_result.reasons),
+        "missing_evidence": list(judge_result.missing_evidence),
+        "findings": [finding.to_dict() for finding in judge_result.findings],
+        "trace_id": judge_result.trace_id,
+    }
 
 
 def _expected_submission_stage(summary: WorkflowSummary) -> str | None:
