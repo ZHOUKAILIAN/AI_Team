@@ -1,3 +1,4 @@
+import argparse
 import json
 import subprocess
 import sys
@@ -25,6 +26,26 @@ def evidence(name: str, *, kind: str = "artifact", summary: str = "Evidence prov
 
 
 class JudgeStageResultCliTests(unittest.TestCase):
+    def test_resolve_openai_oa_header_defaults_to_user_agent(self) -> None:
+        from ai_company.cli import _resolve_openai_oa_header
+
+        args = argparse.Namespace(
+            openai_oa=None,
+            openai_user_agent="AI-Team-Runtime/0.1",
+        )
+
+        self.assertEqual(_resolve_openai_oa_header(args), "AI-Team-Runtime/0.1")
+
+    def test_resolve_openai_oa_header_prefers_explicit_value(self) -> None:
+        from ai_company.cli import _resolve_openai_oa_header
+
+        args = argparse.Namespace(
+            openai_oa="proxy-specific-oa",
+            openai_user_agent="AI-Team-Runtime/0.1",
+        )
+
+        self.assertEqual(_resolve_openai_oa_header(args), "proxy-specific-oa")
+
     def test_judge_stage_result_noop_outputs_context_and_decision_json(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
 
@@ -397,6 +418,8 @@ class JudgeStageResultCliTests(unittest.TestCase):
                     "https://example.test/v1",
                     "--openai-proxy-url",
                     "http://127.0.0.1:7897",
+                    "--openai-oa",
+                    "oa-secret-test",
                 ],
                 capture_output=True,
                 text=True,
@@ -428,6 +451,8 @@ class JudgeStageResultCliTests(unittest.TestCase):
         )
         self.assertNotIn("sk-secret-test", verify.stdout)
         self.assertNotIn("sk-secret-test", verify.stderr)
+        self.assertNotIn("oa-secret-test", verify.stdout)
+        self.assertNotIn("oa-secret-test", verify.stderr)
         self.assertIn("next_action: verify-stage-result", step.stdout)
 
 

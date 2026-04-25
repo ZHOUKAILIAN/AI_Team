@@ -33,6 +33,7 @@ class OpenAISandboxJudge:
     base_url: str | None = None
     proxy_url: str | None = None
     user_agent: str = DEFAULT_OPENAI_USER_AGENT
+    oa_header: str | None = None
     instructions: str = (
         "You are an independent AI_Team judge. Review the compact context in a read-only way. "
         "Do not write files, do not change workflow state, do not run git commands, and do not "
@@ -55,6 +56,7 @@ class OpenAISandboxJudge:
                 base_url=self.base_url,
                 proxy_url=self.proxy_url,
                 user_agent=self.user_agent,
+                oa_header=self.oa_header,
             )
         return _run_with_openai_agents_sdk(
             prompt=prompt,
@@ -65,6 +67,7 @@ class OpenAISandboxJudge:
             base_url=self.base_url,
             proxy_url=self.proxy_url,
             user_agent=self.user_agent,
+            oa_header=self.oa_header,
         )
 
 
@@ -151,6 +154,7 @@ def _run_with_openai_agents_sdk(
     base_url: str | None = None,
     proxy_url: str | None = None,
     user_agent: str = DEFAULT_OPENAI_USER_AGENT,
+    oa_header: str | None = None,
 ) -> str:
     try:
         from agents import OpenAIProvider, Runner
@@ -192,11 +196,14 @@ def _run_with_openai_agents_sdk(
         instructions="Return only a structured JudgeResult JSON object.",
         model=model,
     )
+    client_headers = {"User-Agent": user_agent}
+    if oa_header:
+        client_headers["oa"] = oa_header
     openai_client = AsyncOpenAI(
         api_key=api_key,
         base_url=base_url,
+        default_headers=client_headers,
         http_client=httpx.AsyncClient(
-            headers={"User-Agent": user_agent},
             proxy=proxy_url,
             trust_env=True,
         ),

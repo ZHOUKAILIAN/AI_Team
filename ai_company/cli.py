@@ -182,6 +182,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="User-Agent for OpenAI-compatible requests. Defaults to AI-Team-Runtime/0.1.",
     )
     verify_result_parser.add_argument(
+        "--openai-oa",
+        help="Optional oa header for OpenAI-compatible proxy requests. Defaults to --openai-user-agent.",
+    )
+    verify_result_parser.add_argument(
         "--acceptance-matrix",
         type=Path,
         help="Optional JSON file containing the approved acceptance matrix.",
@@ -222,6 +226,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--openai-user-agent",
         default="AI-Team-Runtime/0.1",
         help="User-Agent for OpenAI-compatible requests. Defaults to AI-Team-Runtime/0.1.",
+    )
+    judge_result_parser.add_argument(
+        "--openai-oa",
+        help="Optional oa header for OpenAI-compatible proxy requests. Defaults to --openai-user-agent.",
     )
     judge_result_parser.add_argument(
         "--acceptance-matrix",
@@ -693,6 +701,7 @@ def _evaluate_stage_result_for_verification(
             base_url=args.openai_base_url,
             proxy_url=args.openai_proxy_url,
             user_agent=args.openai_user_agent,
+            oa_header=_resolve_openai_oa_header(args),
         )
         if args.judge == "openai-sandbox"
         else NoopJudge()
@@ -792,6 +801,7 @@ def _handle_judge_stage_result(args: argparse.Namespace) -> int:
             base_url=args.openai_base_url,
             proxy_url=args.openai_proxy_url,
             user_agent=args.openai_user_agent,
+            oa_header=_resolve_openai_oa_header(args),
         )
         if args.judge == "openai-sandbox"
         else NoopJudge()
@@ -823,6 +833,10 @@ def _handle_judge_stage_result(args: argparse.Namespace) -> int:
         payload["judge_context"] = evaluation.judge_context.to_dict()
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
+
+
+def _resolve_openai_oa_header(args: argparse.Namespace) -> str:
+    return args.openai_oa or args.openai_user_agent
 
 
 def _handle_record_human_decision(args: argparse.Namespace) -> int:

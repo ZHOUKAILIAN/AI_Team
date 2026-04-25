@@ -777,6 +777,9 @@ OPENAI_API_KEY=... .venv/bin/ai-team --state-root /tmp/ai-team-demo verify-stage
 `OPENAI_API_KEY` / `OPENAI_BASE_URL`。如果网络需要本地代理，可以显式传
 `--openai-proxy-url "http://127.0.0.1:7897"`。judge runtime 默认使用 `AI-Team-Runtime/0.1`
 作为 User-Agent，避免部分 OpenAI-compatible 网关对 `OpenAI/Python ...` 默认 SDK 标识做 WAF 拦截。
+`oa` header 默认会继承 `--openai-user-agent`，这样像 `ai.smartingredients.my` 这类依赖自定义 header 的中转，
+不需要每次手动再传一遍。如果你的中转要求一个与 User-Agent 不同的 `oa` 值，再显式传
+`--openai-oa "<value>"` 覆盖默认值即可。
 CLI 输出只包含 judge verdict、confidence 和 gate decision，不回显 API key。
 
 如果 Docker 未启动，命令会 fail closed，输出：

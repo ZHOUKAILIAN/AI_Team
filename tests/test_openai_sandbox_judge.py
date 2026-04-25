@@ -30,7 +30,18 @@ class OpenAISandboxJudgeTests(unittest.TestCase):
 
         calls = []
 
-        def fake_runner(*, prompt, model, sandbox_backend, docker_image, api_key, base_url, proxy_url, user_agent):
+        def fake_runner(
+            *,
+            prompt,
+            model,
+            sandbox_backend,
+            docker_image,
+            api_key,
+            base_url,
+            proxy_url,
+            user_agent,
+            oa_header,
+        ):
             calls.append(
                 {
                     "prompt": prompt,
@@ -41,6 +52,7 @@ class OpenAISandboxJudgeTests(unittest.TestCase):
                     "base_url": base_url,
                     "proxy_url": proxy_url,
                     "user_agent": user_agent,
+                    "oa_header": oa_header,
                 }
             )
             return {
@@ -67,6 +79,7 @@ class OpenAISandboxJudgeTests(unittest.TestCase):
             api_key="sk-test",
             base_url="https://example.test/v1",
             proxy_url="http://127.0.0.1:7897",
+            oa_header="oa-test",
         ).judge(Context())
 
         self.assertEqual(result.verdict, "rework")
@@ -80,6 +93,7 @@ class OpenAISandboxJudgeTests(unittest.TestCase):
         self.assertEqual(calls[0]["base_url"], "https://example.test/v1")
         self.assertEqual(calls[0]["proxy_url"], "http://127.0.0.1:7897")
         self.assertEqual(calls[0]["user_agent"], "AI-Team-Runtime/0.1")
+        self.assertEqual(calls[0]["oa_header"], "oa-test")
         self.assertIn("read-only", calls[0]["prompt"])
         self.assertIn("JudgeResult", calls[0]["prompt"])
         self.assertIn('"hard_gate_result"', calls[0]["prompt"])
@@ -91,7 +105,18 @@ class OpenAISandboxJudgeTests(unittest.TestCase):
             def to_dict(self):
                 return {"stage": "QA", "required_output_schema": "JudgeResult"}
 
-        def fake_runner(*, prompt, model, sandbox_backend, docker_image, api_key, base_url, proxy_url, user_agent):
+        def fake_runner(
+            *,
+            prompt,
+            model,
+            sandbox_backend,
+            docker_image,
+            api_key,
+            base_url,
+            proxy_url,
+            user_agent,
+            oa_header,
+        ):
             return json.dumps({"verdict": "pass", "confidence": 1.0, "reasons": ["All criteria met."]})
 
         result = OpenAISandboxJudge(model="gpt-test", runner=fake_runner).judge(Context())
@@ -129,7 +154,18 @@ class OpenAISandboxJudgeTests(unittest.TestCase):
             def to_dict(self):
                 return {"stage": "QA", "required_output_schema": "JudgeResult"}
 
-        def fake_runner(*, prompt, model, sandbox_backend, docker_image, api_key, base_url, proxy_url, user_agent):
+        def fake_runner(
+            *,
+            prompt,
+            model,
+            sandbox_backend,
+            docker_image,
+            api_key,
+            base_url,
+            proxy_url,
+            user_agent,
+            oa_header,
+        ):
             return {"verdict": "merge", "confidence": 1.0}
 
         with self.assertRaises(ValueError) as raised:
@@ -195,9 +231,10 @@ class OpenAISandboxJudgeTests(unittest.TestCase):
                     self.openai_client = openai_client
 
             class AsyncOpenAI:
-                def __init__(self, *, api_key=None, base_url=None, http_client=None):
+                def __init__(self, *, api_key=None, base_url=None, default_headers=None, http_client=None):
                     self.api_key = api_key
                     self.base_url = base_url
+                    self.default_headers = default_headers or {}
                     self.http_client = http_client
 
             class AsyncClient:
@@ -237,6 +274,7 @@ class OpenAISandboxJudgeTests(unittest.TestCase):
                 base_url="https://example.test/v1",
                 proxy_url="http://127.0.0.1:7897",
                 user_agent="AI-Team-Runtime/0.1",
+                oa_header="oa-test",
             )
 
             self.assertEqual(output, Result.final_output)
@@ -246,8 +284,12 @@ class OpenAISandboxJudgeTests(unittest.TestCase):
             self.assertEqual(calls["run_config"].model_provider.openai_client.api_key, "sk-test")
             self.assertEqual(calls["run_config"].model_provider.openai_client.base_url, "https://example.test/v1")
             self.assertEqual(
-                calls["run_config"].model_provider.openai_client.http_client.headers["User-Agent"],
+                calls["run_config"].model_provider.openai_client.default_headers["User-Agent"],
                 "AI-Team-Runtime/0.1",
+            )
+            self.assertEqual(
+                calls["run_config"].model_provider.openai_client.default_headers["oa"],
+                "oa-test",
             )
             self.assertEqual(
                 calls["run_config"].model_provider.openai_client.http_client.proxy,
