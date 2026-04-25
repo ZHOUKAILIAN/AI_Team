@@ -115,6 +115,65 @@ class StageContractTests(unittest.TestCase):
         self.assertIn("Preserve empty-state validation in follow-up rounds.", contract.role_context)
         self.assertIn("Require visible empty-state evidence before reporting success.", contract.role_context)
 
+    def test_dev_contract_references_latest_execution_context(self) -> None:
+        from ai_company.execution_context import build_stage_execution_context
+        from ai_company.models import EvidenceItem, StageResultEnvelope
+        from ai_company.stage_contracts import build_stage_contract
+        from ai_company.state import StateStore
+
+        repo_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session(
+                "Build a harness-first workflow",
+                runtime_mode="harness",
+            )
+            product_result = StageResultEnvelope(
+                session_id=session.session_id,
+                contract_id="product-contract",
+                stage="Product",
+                status="completed",
+                artifact_name="prd.md",
+                artifact_content="# Product PRD\n\n## Acceptance Criteria\n- Verify gate.\n",
+                journal="# Product Journal\n",
+                evidence=[
+                    EvidenceItem(
+                        name="explicit_acceptance_criteria",
+                        kind="report",
+                        summary="Acceptance criteria documented.",
+                    )
+                ],
+                summary="Drafted PRD",
+            )
+            stage_record = store.record_stage_result(session.session_id, product_result)
+            summary = store.load_workflow_summary(session.session_id)
+            summary.artifact_paths["product"] = str(stage_record.artifact_path)
+            store.save_workflow_summary(session, summary)
+
+            initial_contract = build_stage_contract(
+                repo_root=repo_root,
+                state_store=store,
+                session_id=session.session_id,
+                stage="Dev",
+            )
+            context = build_stage_execution_context(
+                repo_root=repo_root,
+                state_store=store,
+                session_id=session.session_id,
+                stage="Dev",
+                contract=initial_contract,
+            )
+            context_path = store.save_execution_context(context)
+
+            contract = build_stage_contract(
+                repo_root=repo_root,
+                state_store=store,
+                session_id=session.session_id,
+                stage="Dev",
+            )
+
+        self.assertEqual(contract.input_artifacts["execution_context"], str(context_path))
+
 
 if __name__ == "__main__":
     unittest.main()
