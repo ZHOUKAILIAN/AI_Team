@@ -5,6 +5,9 @@ description = "Local workflow engine for a one-person AI company."
 readme = "README.md"
 requires-python = ">=3.13"
 
+[project.optional-dependencies]
+openai-sandbox = ["openai-agents[docker]"]
+
 [project.scripts]
 ai-team = "ai_company.cli:main"
 

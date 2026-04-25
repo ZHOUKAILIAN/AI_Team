@@ -34,6 +34,28 @@ class StageContractTests(unittest.TestCase):
         self.assertIn("must_not_change_stage_order", contract.forbidden_actions)
         self.assertIn("request", contract.input_artifacts)
 
+    def test_product_contract_uses_requirements_approval_language(self) -> None:
+        from ai_company.stage_contracts import build_stage_contract
+        from ai_company.state import StateStore
+
+        repo_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session(
+                "Build a harness-first workflow",
+                runtime_mode="harness",
+            )
+
+            contract = build_stage_contract(
+                repo_root=repo_root,
+                state_store=store,
+                session_id=session.session_id,
+                stage="Product",
+            )
+
+        self.assertIn("requirements approval", contract.goal)
+        self.assertNotIn("CEO approval", contract.goal)
+
     def test_qa_contract_requires_independent_evidence(self) -> None:
         from ai_company.stage_contracts import build_stage_contract
         from ai_company.state import StateStore
