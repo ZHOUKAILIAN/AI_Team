@@ -408,6 +408,49 @@ class StateStore:
         ]
         return sorted(records, key=lambda run: (run.created_at, run.run_id))
 
+    def save_execution_context(self, context) -> Path:
+        session = self.load_session(context.session_id)
+        context_dir = session.session_dir / "execution_context"
+        context_dir.mkdir(parents=True, exist_ok=True)
+        path = context_dir / f"{context.stage.lower()}_round_{context.round_index}.json"
+        self._write_json(path, context.to_dict())
+        self.record_event(
+            context.session_id,
+            kind="execution_context_saved",
+            stage=context.stage,
+            state=context.stage,
+            actor="runtime",
+            status="saved",
+            message=f"Execution context saved for {context.stage}.",
+            details={
+                "context_id": context.context_id,
+                "contract_id": context.contract_id,
+                "path": str(path),
+            },
+        )
+        return path
+
+    def latest_execution_context_path(self, session_id: str, stage: str) -> Path | None:
+        session = self.load_session(session_id)
+        context_dir = session.session_dir / "execution_context"
+        if not context_dir.exists():
+            return None
+        prefix = f"{stage.lower()}_round_"
+        candidates = [
+            path
+            for path in context_dir.glob(f"{prefix}*.json")
+            if path.name.startswith(prefix)
+        ]
+        if not candidates:
+            return None
+        return sorted(candidates, key=lambda path: (_round_index_from_context_path(path), path.name))[-1]
+
+    def load_execution_context(self, session_id: str, stage: str) -> dict[str, object] | None:
+        path = self.latest_execution_context_path(session_id, stage)
+        if path is None:
+            return None
+        return json.loads(path.read_text())
+
     def append_stage_record(
         self,
         *,
@@ -773,6 +816,11 @@ def artifact_name_for_stage(stage: str) -> str:
 def _slugify(text: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9]+", "-", text.strip().lower()).strip("-")
     return cleaned[:40] or "session"
+
+
+def _round_index_from_context_path(path: Path) -> int:
+    match = re.search(r"_round_(\d+)\.json$", path.name)
+    return int(match.group(1)) if match else 0
 
 
 def _completion_signal_for_finding(finding: Finding) -> str:

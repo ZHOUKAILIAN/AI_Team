@@ -398,7 +398,7 @@ class CliTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0)
-            self.assertIn("project: ai-team-runtime", result.stdout)
+            self.assertIn(f"project: {repo_root.name}", result.stdout)
             self.assertIn("role: Intake", result.stdout)
             self.assertIn("status: in_progress", result.stdout)
             self.assertIn("status_path:", result.stdout)
@@ -454,6 +454,68 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["stage"], "Product")
             self.assertIn("prd.md", payload["required_outputs"])
             self.assertIn("must_not_change_stage_order", payload["forbidden_actions"])
+            self.assertIn("contract_id", payload)
+
+    def test_build_execution_context_outputs_dev_context_json(self) -> None:
+        from ai_company.models import EvidenceItem, StageResultEnvelope
+        from ai_company.state import StateStore
+
+        repo_root = Path(__file__).resolve().parents[1]
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session(
+                "Build a runtime-controlled Dev handoff.",
+                runtime_mode="harness",
+            )
+            stage_record = store.record_stage_result(
+                session.session_id,
+                StageResultEnvelope(
+                    session_id=session.session_id,
+                    contract_id="product-contract",
+                    stage="Product",
+                    status="completed",
+                    artifact_name="prd.md",
+                    artifact_content="# Product PRD\n\n## Acceptance Criteria\n- Verify the handoff.\n",
+                    journal="# Product Journal\n",
+                    evidence=[
+                        EvidenceItem(
+                            name="explicit_acceptance_criteria",
+                            kind="report",
+                            summary="Acceptance criteria documented.",
+                        )
+                    ],
+                    summary="Drafted PRD",
+                ),
+            )
+            summary = store.load_workflow_summary(session.session_id)
+            summary.artifact_paths["product"] = str(stage_record.artifact_path)
+            store.save_workflow_summary(session, summary)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "build-execution-context",
+                    "--session-id",
+                    session.session_id,
+                    "--stage",
+                    "Dev",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["stage"], "Dev")
+            self.assertEqual(payload["required_outputs"], ["implementation.md"])
             self.assertIn("contract_id", payload)
 
     def test_submit_stage_result_requires_active_stage_run(self) -> None:
@@ -1334,6 +1396,12 @@ class CliTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0)
             self.assertIn("current_state: Dev", result.stdout)
             self.assertIn("current_stage: Dev", result.stdout)
+            self.assertIn("execution_context:", result.stdout)
+            context_path = Path(temp_dir) / session_id / "execution_context" / "dev_round_1.json"
+            self.assertTrue(context_path.exists())
+            context_payload = json.loads(context_path.read_text())
+            self.assertEqual(context_payload["stage"], "Dev")
+            self.assertIn("Verify the harness.", context_payload["approved_prd_summary"])
 
     def test_record_feedback_persists_learning_and_feedback_metadata(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]

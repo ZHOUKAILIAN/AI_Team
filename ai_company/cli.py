@@ -8,6 +8,7 @@ from pathlib import Path
 from .backend import DeterministicBackend
 from .board import build_board_snapshot
 from .board_server import create_board_server
+from .execution_context import build_stage_execution_context
 from .gatekeeper import evaluate_candidate
 from .codex_skill_installer import install_codex_skill
 from .harness_paths import default_state_root
@@ -128,6 +129,14 @@ def build_parser() -> argparse.ArgumentParser:
     build_contract_parser.add_argument("--session-id", required=True, help="Existing workflow session ID.")
     build_contract_parser.add_argument("--stage", required=True, help="Stage name to compile.")
     build_contract_parser.set_defaults(handler=_handle_build_stage_contract)
+
+    build_execution_context_parser = subparsers.add_parser(
+        "build-execution-context",
+        help="Build and persist a machine-readable execution context for the requested stage.",
+    )
+    build_execution_context_parser.add_argument("--session-id", required=True, help="Existing workflow session ID.")
+    build_execution_context_parser.add_argument("--stage", required=True, help="Stage name to compile.")
+    build_execution_context_parser.set_defaults(handler=_handle_build_execution_context)
 
     acquire_stage_run_parser = subparsers.add_parser(
         "acquire-stage-run",
@@ -521,6 +530,30 @@ def _handle_build_stage_contract(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_build_execution_context(args: argparse.Namespace) -> int:
+    store = StateStore(args.state_root)
+    contract = build_stage_contract(
+        repo_root=args.repo_root,
+        state_store=store,
+        session_id=args.session_id,
+        stage=args.stage,
+    )
+    context = build_stage_execution_context(
+        repo_root=args.repo_root,
+        state_store=store,
+        session_id=args.session_id,
+        stage=args.stage,
+        contract=contract,
+    )
+    context_path = store.save_execution_context(context)
+    session = store.load_session(args.session_id)
+    summary = store.load_workflow_summary(args.session_id)
+    summary.artifact_paths["execution_context"] = str(context_path)
+    store.save_workflow_summary(session, summary)
+    print(json.dumps(context.to_dict(), ensure_ascii=False, indent=2))
+    return 0
+
+
 def _handle_acquire_stage_run(args: argparse.Namespace) -> int:
     store = StateStore(args.state_root)
     summary = store.load_workflow_summary(args.session_id)
@@ -848,7 +881,25 @@ def _handle_record_human_decision(args: argparse.Namespace) -> int:
         decision=args.decision,
         target_stage=args.target_stage,
     )
+    execution_context_path = None
     store.save_workflow_summary(session, updated_summary)
+    if summary.current_state == "WaitForCEOApproval" and updated_summary.current_state == "Dev":
+        contract = build_stage_contract(
+            repo_root=args.repo_root,
+            state_store=store,
+            session_id=args.session_id,
+            stage="Dev",
+        )
+        context = build_stage_execution_context(
+            repo_root=args.repo_root,
+            state_store=store,
+            session_id=args.session_id,
+            stage="Dev",
+            contract=contract,
+        )
+        execution_context_path = store.save_execution_context(context)
+        updated_summary.artifact_paths["execution_context"] = str(execution_context_path)
+        store.save_workflow_summary(session, updated_summary)
     store.set_human_decision(args.session_id, updated_summary.human_decision)
     store.record_event(
         args.session_id,
@@ -863,6 +914,8 @@ def _handle_record_human_decision(args: argparse.Namespace) -> int:
         ),
     )
     _print_summary(updated_summary)
+    if execution_context_path is not None:
+        print(f"execution_context: {execution_context_path}")
     return 0
 
 

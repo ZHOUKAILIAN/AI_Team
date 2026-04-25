@@ -44,6 +44,9 @@ def build_stage_contract(
 
     input_artifacts = dict(summary.artifact_paths)
     input_artifacts["session"] = str(session.session_dir / "session.json")
+    execution_context_path = state_store.latest_execution_context_path(session_id, stage)
+    if execution_context_path is not None:
+        input_artifacts["execution_context"] = str(execution_context_path)
     required_outputs = [artifact_name_for_stage(stage)]
     if artifact_name_for_stage(stage) in policy.required_outputs:
         required_outputs = list(policy.required_outputs)
