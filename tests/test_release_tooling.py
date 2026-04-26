@@ -99,7 +99,7 @@ class ReleaseToolingTests(unittest.TestCase):
                 sys.executable,
                 "scripts/release/extract_release_changelog.py",
                 "--version",
-                "0.2.0b1",
+                "0.2.0b2",
                 "--changelog",
                 str(repo_root / "CHANGELOG.md"),
             ],
@@ -110,7 +110,7 @@ class ReleaseToolingTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("## [0.2.0b1] - 2026-04-26", result.stdout)
+        self.assertIn("## [0.2.0b2] - 2026-04-26", result.stdout)
         self.assertNotIn("## [Unreleased]", result.stdout)
 
     def test_render_install_script_embeds_release_coordinates(self) -> None:

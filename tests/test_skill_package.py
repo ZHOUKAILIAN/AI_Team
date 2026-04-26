@@ -204,8 +204,18 @@ class SkillPackageTests(unittest.TestCase):
             self.assertFalse((project_root / ".codex" / "config.toml").exists())
             self.assertFalse((project_root / ".agents" / "skills" / "ai-team-init" / "SKILL.md").exists())
             dev_agent_lines = (project_root / ".codex" / "agents" / "ai_team_dev.toml").read_text().splitlines()
+            all_agent_text = "\n".join(
+                path.read_text()
+                for path in (project_root / ".codex" / "agents").glob("ai_team_*.toml")
+            )
             self.assertIn('developer_instructions = """', dev_agent_lines)
             self.assertNotIn('instructions = """', dev_agent_lines)
+            self.assertIn("packaged Dev role context", all_agent_text)
+            self.assertIn("runtime stage contract", all_agent_text)
+            self.assertNotIn("Read and follow `Product/context.md`", all_agent_text)
+            self.assertNotIn("Read and follow `Dev/context.md`", all_agent_text)
+            self.assertNotIn("Read and follow `QA/context.md`", all_agent_text)
+            self.assertNotIn("Read and follow `Acceptance/context.md`", all_agent_text)
 
         self.assertTrue((repo_root / "scripts" / "company-init.sh").exists())
         self.assertTrue((repo_root / "scripts" / "company-run.sh").exists())

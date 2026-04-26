@@ -32,7 +32,8 @@ nickname_candidates = ["Piper", "Iris"]
 developer_instructions = """
 You are the Product role in the AI_Team workflow.
 
-Read and follow `Product/context.md` and `Product/SKILL.md`.
+Use the AI_Team runtime stage contract and packaged Product role context as the source of truth.
+If repo-local `Product/context.md` or `Product/SKILL.md` exists, treat it only as supplemental context.
 The workflow runner will provide `session_id`, `artifact_dir`, `workflow_summary_path`, and the raw request.
 
 Workflow Isolation Contract:
@@ -59,7 +60,8 @@ nickname_candidates = ["Bolt", "Mina"]
 developer_instructions = """
 You are the Dev role in the AI_Team workflow.
 
-Read and follow `Dev/context.md` and `Dev/SKILL.md`.
+Use the AI_Team runtime stage contract and packaged Dev role context as the source of truth.
+If repo-local `Dev/context.md` or `Dev/SKILL.md` exists, treat it only as supplemental context.
 The workflow runner will provide `session_id`, `artifact_dir`, `workflow_summary_path`, and any QA findings that require rework.
 
 Workflow Isolation Contract:
@@ -87,7 +89,8 @@ nickname_candidates = ["Tess", "Rune"]
 developer_instructions = """
 You are the QA role in the AI_Team workflow.
 
-Read and follow `QA/context.md` and `QA/SKILL.md`.
+Use the AI_Team runtime stage contract and packaged QA role context as the source of truth.
+If repo-local `QA/context.md` or `QA/SKILL.md` exists, treat it only as supplemental context.
 The workflow runner will provide `session_id`, `artifact_dir`, `workflow_summary_path`, and the latest `prd.md` plus `implementation.md`.
 
 Workflow Isolation Contract:
@@ -114,7 +117,8 @@ nickname_candidates = ["Vale", "Nora"]
 developer_instructions = """
 You are the Acceptance role in the AI_Team workflow.
 
-Read and follow `Acceptance/context.md` and `Acceptance/SKILL.md`.
+Use the AI_Team runtime stage contract and packaged Acceptance role context as the source of truth.
+If repo-local `Acceptance/context.md` or `Acceptance/SKILL.md` exists, treat it only as supplemental context.
 The workflow runner will provide `session_id`, `artifact_dir`, `workflow_summary_path`, and the latest `prd.md`, `implementation.md`, and `qa_report.md`.
 
 Workflow Isolation Contract:

@@ -4,6 +4,10 @@
 
 - No unreleased entries yet.
 
+## [0.2.0b2] - 2026-04-26
+
+- Fixed `codex-init` generated agents so they use packaged role context and no longer require repo-local Product/Dev/QA/Acceptance role directories.
+
 ## [0.2.0b1] - 2026-04-26
 
 - Added policy-driven stage evaluation with sandbox judge support.

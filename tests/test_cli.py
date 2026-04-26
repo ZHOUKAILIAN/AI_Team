@@ -1590,8 +1590,12 @@ class CliTests(unittest.TestCase):
             self.assertTrue((repo_root / ".agents" / "skills" / "ai-team-run" / "SKILL.md").exists())
             self.assertFalse((repo_root / ".codex" / "config.toml").exists())
             product_agent_lines = (repo_root / ".codex" / "agents" / "ai_team_product.toml").read_text().splitlines()
+            product_agent = (repo_root / ".codex" / "agents" / "ai_team_product.toml").read_text()
             self.assertIn('developer_instructions = """', product_agent_lines)
             self.assertNotIn('instructions = """', product_agent_lines)
+            self.assertIn("runtime stage contract", product_agent)
+            self.assertIn("packaged Product role context", product_agent)
+            self.assertNotIn("Read and follow `Product/context.md`", product_agent)
 
 
 if __name__ == "__main__":

@@ -182,7 +182,7 @@ curl -fsSL https://github.com/ZHOUKAILIAN/ai-team-runtime/releases/latest/downlo
 安装当前 beta 版本：
 
 ```bash
-curl -fsSL https://github.com/ZHOUKAILIAN/ai-team-runtime/releases/download/v0.2.0b1/install.sh | sh
+curl -fsSL https://github.com/ZHOUKAILIAN/ai-team-runtime/releases/download/v0.2.0b2/install.sh | sh
 ```
 
 安装固定版本：
