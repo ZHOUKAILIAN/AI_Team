@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+from .memory_layers import MemoryRetrievalResult, retrieve_role_memory
 from .roles import load_role_profiles
 from .state import StateStore, artifact_name_for_stage
 from .stage_policies import default_policy_registry
@@ -14,7 +15,7 @@ COMMON_FORBIDDEN_ACTIONS = [
 ]
 
 
-def _compose_role_context(role) -> str:
+def _compose_role_context(role, retrieved_memory: MemoryRetrievalResult | None = None) -> str:
     if role is None:
         return ""
 
@@ -25,6 +26,8 @@ def _compose_role_context(role) -> str:
         sections.append("# Role Memory\n\n" + role.effective_memory_text.strip())
     if role.effective_skill_text.strip():
         sections.append("# Role Skill\n\n" + role.effective_skill_text.strip())
+    if retrieved_memory is not None and retrieved_memory.matches:
+        sections.append("# Relevant Memory (CLI Keyword Retrieval)\n\n" + retrieved_memory.to_markdown())
     return "\n\n".join(sections)
 
 
@@ -41,6 +44,12 @@ def build_stage_contract(
     role = roles.get(stage)
     registry = default_policy_registry()
     policy = registry.get(stage)
+    retrieved_memory = retrieve_role_memory(
+        state_root=state_store.root,
+        role_name=stage,
+        query=session.request,
+        max_results=8,
+    )
 
     input_artifacts = dict(summary.artifact_paths)
     input_artifacts["session"] = str(session.session_dir / "session.json")
@@ -64,7 +73,7 @@ def build_stage_contract(
         stage=stage,
         contract_id=contract_id,
         input_artifacts=input_artifacts,
-        role_context=_compose_role_context(role),
+        role_context=_compose_role_context(role, retrieved_memory),
     )
 
 
