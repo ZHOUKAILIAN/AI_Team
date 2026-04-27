@@ -256,6 +256,53 @@ class StateTests(unittest.TestCase):
             self.assertTrue(Path(submitted.candidate_bundle_path).exists())
             self.assertEqual(store.active_stage_run(session.session_id, stage="Product").state, "SUBMITTED")
 
+    def test_submit_stage_run_result_uses_result_session_when_run_ids_repeat(self) -> None:
+        from ai_company.models import StageResultEnvelope
+        from ai_company.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            first_session = store.create_session("first workflow")
+            second_session = store.create_session("second workflow")
+            first_run = store.create_stage_run(
+                session_id=first_session.session_id,
+                stage="Product",
+                contract_id="first-contract",
+                required_outputs=["prd.md"],
+                required_evidence=["explicit_acceptance_criteria"],
+            )
+            second_run = store.create_stage_run(
+                session_id=second_session.session_id,
+                stage="Product",
+                contract_id="second-contract",
+                required_outputs=["prd.md"],
+                required_evidence=["explicit_acceptance_criteria"],
+            )
+
+            self.assertEqual(first_run.run_id, second_run.run_id)
+            submitted = store.submit_stage_run_result(
+                second_run.run_id,
+                StageResultEnvelope(
+                    session_id=second_session.session_id,
+                    stage="Product",
+                    status="completed",
+                    artifact_name="prd.md",
+                    artifact_content="# PRD\n\n## Acceptance Criteria\n- Works.\n",
+                    contract_id="second-contract",
+                    evidence=[
+                        {
+                            "name": "explicit_acceptance_criteria",
+                            "kind": "report",
+                            "summary": "PRD includes explicit acceptance criteria.",
+                        }
+                    ],
+                ),
+            )
+
+            self.assertEqual(submitted.session_id, second_session.session_id)
+            self.assertEqual(store.active_stage_run(first_session.session_id, stage="Product").state, "RUNNING")
+            self.assertEqual(store.active_stage_run(second_session.session_id, stage="Product").state, "SUBMITTED")
+
     def test_create_stage_run_rejects_existing_active_run(self) -> None:
         from ai_company.state import StageRunStateError, StateStore
 

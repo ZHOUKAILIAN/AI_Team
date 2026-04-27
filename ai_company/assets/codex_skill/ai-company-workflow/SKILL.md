@@ -36,13 +36,15 @@ Use this skill when the active workspace contains the AI_Team runtime or the ins
 
 ## Available assets
 
-- `scripts/company-run.sh`: skill-bundled bootstrap helper; the helper script only bootstraps a session and does not complete QA or Acceptance by itself.
-- project runtime helpers: optional workspace-local setup and session bootstrap helpers when the current workspace is the AI_Team runtime repository.
-- runtime CLI: exposes `ai-team` as the user-facing entrypoint for session bootstrap, state lookup, stage contract generation, stage result submission, and feedback recording.
+- `scripts/company-run.sh`: skill-bundled runtime-driver helper; by default it calls `ai-team run-requirement` with the `codex-exec` executor and stops at human gates.
+- project runtime helpers: optional workspace-local setup and runtime-driver helpers when the current workspace is the AI_Team runtime repository.
+- runtime CLI: exposes `ai-team` as the user-facing entrypoint for runtime-driver execution, session bootstrap, state lookup, stage contract generation, stage result submission, verification, and feedback recording.
+- stage-run trace: `<session_id>/stage_runs/<run_id>_trace.json` records non-skippable `contract -> context -> acquire -> execute -> submit -> verify -> advance` steps.
+- layered memory: `.ai-team/memory/<Role>/raw`, `extracted`, and `graph` preserve original records, extracted rules, and relation edges.
 - generated local agents: optional Product, Dev, QA, and Acceptance agents for project-scoped execution.
 - generated local run skill: optional `ai-team-run` entrypoint for project-root workflow runs.
 
-Read available helper assets before choosing the bootstrap path. After bootstrap, continue the state machine in the current Codex session to produce the full artifact contract.
+Read available helper assets before choosing the bootstrap path. Prefer `run-requirement` so the runtime acquires, executes, submits, verifies, and advances stages instead of relying on conversational follow-through. A passed stage must have a complete runtime trace.
 
 ## Artifact Contract
 
@@ -77,6 +79,7 @@ Every active session maintains these artifacts under the provided session artifa
 - The native-node policy excludes host-owned nodes such as `wechat_native_capsule` from business diffs; verify safe-area avoidance instead.
 - Host-tool or local-environment changes require explicit user approval before QA or Acceptance proceeds.
 - Human feedback can enter the same learning loop through `record-feedback`.
+- Memory retrieval is keyword-first: use CLI search over raw/extracted/graph memory and include relevant hits in the stage contract; reserve graph/AI reasoning for weak implicit relationships.
 - deterministic runtime output is workflow metadata only, not real QA/Acceptance evidence.
 
 ## Completion Signals
@@ -87,10 +90,11 @@ Every active session maintains these artifacts under the provided session artifa
 - Acceptance handoff is complete when `acceptance_report.md` records `recommended_go`, `recommended_no_go`, or `blocked`, and any declared review contract is satisfied or explicitly blocked.
 - The AI_Team workflow is not done until the human records the Go/No-Go decision.
 
-## Continue after session bootstrap:
+## Continue after runtime driver bootstrap:
 
-- inspect and implement in the real repository
+- use `ai-team run-requirement --session-id <id>` to continue an existing session after human approval
+- inspect and implement in the real repository through the active stage executor
 - execute real verification against the runnable path when feasible
-- collect concrete evidence for QA and Acceptance decisions
+- collect concrete evidence for QA and Acceptance decisions through stage-result evidence
 - route actionable QA, Acceptance, or human feedback into structured findings for the correct owner
 - if evidence is missing, report blocked instead of accepted

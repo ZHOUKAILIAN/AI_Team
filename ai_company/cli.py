@@ -41,7 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ai-team",
         description=(
-            "AI_Team single-session workflow CLI. Prefer start-session for the real skill-driven workflow; "
+            "AI_Team single-session workflow CLI. Prefer run-requirement for runtime-driven execution; "
             "run/agent-run are deterministic demo commands."
         ),
     )
@@ -72,11 +72,11 @@ def build_parser() -> argparse.ArgumentParser:
         "run",
         help=(
             "Demo command: execute the deterministic workflow session from an explicit request "
-            "(real workflow entrypoint: start-session)."
+            "(real workflow entrypoint: run-requirement)."
         ),
         description=(
             "Demo command: execute the deterministic workflow session from an explicit request. "
-            "For the real skill-driven workflow, use start-session."
+            "For the real runtime-driven workflow, use run-requirement."
         ),
     )
     run_parser.add_argument("--request", required=True, help="Raw feature or process request.")
@@ -100,6 +100,88 @@ def build_parser() -> argparse.ArgumentParser:
     )
     start_session_parser.add_argument("--message", required=True, help="Raw user message for session intake.")
     start_session_parser.set_defaults(handler=_handle_start_session)
+
+    run_requirement_parser = subparsers.add_parser(
+        "run-requirement",
+        help="Drive an AI_Team requirement through runtime-controlled stage execution.",
+        description=(
+            "Create or resume an AI_Team session and let the runtime acquire, execute, submit, "
+            "verify, and advance each executable stage. Human gates are preserved unless explicit "
+            "auto-decision flags are provided."
+        ),
+    )
+    run_requirement_target = run_requirement_parser.add_mutually_exclusive_group(required=True)
+    run_requirement_target.add_argument("--message", help="Raw user message for a new requirement session.")
+    run_requirement_target.add_argument("--session-id", help="Existing session ID to continue driving.")
+    run_requirement_parser.add_argument(
+        "--executor",
+        choices=["codex-exec", "command", "dry-run"],
+        default="codex-exec",
+        help="Stage executor backend. codex-exec runs Codex CLI; command runs --executor-command.",
+    )
+    run_requirement_parser.add_argument(
+        "--executor-command",
+        help=(
+            "Shell command for --executor command. The command receives AI_TEAM_* environment variables "
+            "and must write a StageResultEnvelope JSON to AI_TEAM_RESULT_BUNDLE or stdout."
+        ),
+    )
+    run_requirement_parser.add_argument(
+        "--command-timeout-seconds",
+        type=int,
+        default=3600,
+        help="Timeout for codex-exec or command executor stage runs.",
+    )
+    run_requirement_parser.add_argument(
+        "--auto-approve-product",
+        action="store_true",
+        help="Automatically record Product approval and continue into Dev.",
+    )
+    run_requirement_parser.add_argument(
+        "--auto-final-decision",
+        choices=["go", "no-go"],
+        default="",
+        help="Automatically record the final human decision after Acceptance.",
+    )
+    run_requirement_parser.add_argument(
+        "--max-stage-runs",
+        type=int,
+        default=12,
+        help="Maximum executable stage attempts before the driver blocks to avoid loops.",
+    )
+    run_requirement_parser.add_argument(
+        "--judge",
+        choices=["off", "noop", "openai-sandbox"],
+        default="off",
+        help="Optional independent judge after hard gates pass.",
+    )
+    run_requirement_parser.add_argument("--model", default="gpt-5.4", help="Model for --judge openai-sandbox.")
+    run_requirement_parser.add_argument("--docker-image", default="python:3.13-slim")
+    run_requirement_parser.add_argument("--openai-api-key")
+    run_requirement_parser.add_argument("--openai-base-url")
+    run_requirement_parser.add_argument("--openai-proxy-url")
+    run_requirement_parser.add_argument("--openai-user-agent", default="AI-Team-Runtime/0.1")
+    run_requirement_parser.add_argument("--openai-oa")
+    run_requirement_parser.add_argument("--codex-model", default="", help="Optional model for codex-exec.")
+    run_requirement_parser.add_argument(
+        "--codex-sandbox",
+        choices=["read-only", "workspace-write", "danger-full-access"],
+        default="workspace-write",
+        help="Sandbox mode passed to codex exec.",
+    )
+    run_requirement_parser.add_argument(
+        "--codex-approval-policy",
+        choices=["untrusted", "on-request", "never"],
+        default="never",
+        help="Approval policy passed to codex exec.",
+    )
+    run_requirement_parser.add_argument(
+        "--codex-extra-arg",
+        action="append",
+        default=[],
+        help="Extra argument passed through to codex exec. Repeat for multiple arguments.",
+    )
+    run_requirement_parser.set_defaults(handler=_handle_run_requirement)
 
     current_stage_parser = subparsers.add_parser(
         "current-stage",
@@ -265,11 +347,11 @@ def build_parser() -> argparse.ArgumentParser:
         "agent-run",
         help=(
             "Demo command: execute the deterministic workflow session from a raw user message "
-            "(real workflow entrypoint: start-session)."
+            "(real workflow entrypoint: run-requirement)."
         ),
         description=(
             "Demo command: execute the deterministic workflow session from a raw user message. "
-            "For the real skill-driven workflow, use start-session."
+            "For the real runtime-driven workflow, use run-requirement."
         ),
     )
     agent_run_parser.add_argument("--message", required=True, help="Raw user message for the agent to process.")
@@ -443,6 +525,57 @@ def _handle_start_session(args: argparse.Namespace) -> int:
     print(f"artifact_dir: {session.artifact_dir}")
     print(f"summary_path: {summary_path}")
     return 0
+
+
+def _handle_run_requirement(args: argparse.Namespace) -> int:
+    from .runtime_driver import RuntimeDriverError, RuntimeDriverOptions, run_requirement
+
+    try:
+        result = run_requirement(
+            repo_root=args.repo_root,
+            state_root=args.state_root,
+            message=args.message or "",
+            session_id=args.session_id or "",
+            options=RuntimeDriverOptions(
+                executor=args.executor,
+                executor_command=args.executor_command or "",
+                command_timeout_seconds=args.command_timeout_seconds,
+                auto_approve_product=args.auto_approve_product,
+                auto_final_decision=args.auto_final_decision,
+                max_stage_runs=args.max_stage_runs,
+                judge=args.judge,
+                model=args.model,
+                docker_image=args.docker_image,
+                openai_api_key=args.openai_api_key,
+                openai_base_url=args.openai_base_url,
+                openai_proxy_url=args.openai_proxy_url,
+                openai_user_agent=args.openai_user_agent,
+                openai_oa=args.openai_oa,
+                codex_model=args.codex_model,
+                codex_sandbox=args.codex_sandbox,
+                codex_approval_policy=args.codex_approval_policy,
+                codex_extra_args=list(args.codex_extra_arg),
+            ),
+        )
+    except RuntimeDriverError as exc:
+        raise SystemExit(str(exc))
+
+    print(f"session_id: {result.session_id}")
+    print(f"artifact_dir: {result.artifact_dir}")
+    print(f"summary_path: {result.summary_path}")
+    print(f"runtime_driver_status: {result.status}")
+    print(f"current_state: {result.current_state}")
+    print(f"current_stage: {result.current_stage}")
+    print(f"acceptance_status: {result.acceptance_status}")
+    print(f"human_decision: {result.human_decision}")
+    print(f"stage_run_count: {result.stage_run_count}")
+    if result.gate_status:
+        print(f"gate_status: {result.gate_status}")
+    if result.gate_reason:
+        print(f"gate_reason: {result.gate_reason}")
+    if result.next_action:
+        print(f"next_action: {result.next_action}")
+    return 1 if result.status in {"blocked", "failed"} else 0
 
 
 def _handle_current_stage(args: argparse.Namespace) -> int:
