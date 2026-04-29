@@ -44,6 +44,13 @@ class StageHarnessTests(unittest.TestCase):
         self.assertIn("Don't gold-plate", prompt)
         self.assertIn("implementation.md", prompt)
         self.assertIn("self_verification", prompt)
+        self.assertIn("== SCOPE ==", prompt)
+        self.assertIn("== SECURITY ==", prompt)
+        self.assertIn("== SELF-VERIFICATION ==", prompt)
+        self.assertIn("== BOUNDARY ==", prompt)
+        self.assertIn("OWASP top 10", prompt)
+        self.assertIn("Never claim \"all tests pass\"", prompt)
+        self.assertIn("Do NOT attempt to advance the workflow state machine", prompt)
 
     def test_qa_prompt_includes_clean_sandbox_and_skepticism(self) -> None:
         prompt = stage_prompt(
@@ -58,6 +65,12 @@ class StageHarnessTests(unittest.TestCase):
         self.assertIn("INDEPENDENTLY VERIFY", prompt)
         self.assertIn("Be skeptical", prompt)
         self.assertIn("qa_report.md", prompt)
+        self.assertIn("== VERIFICATION PROTOCOL ==", prompt)
+        self.assertIn("== INTEGRITY RULES ==", prompt)
+        self.assertIn("command injection", prompt)
+        self.assertIn("hardcoded secrets", prompt)
+        self.assertIn("Do NOT modify the codebase", prompt)
+        self.assertIn("\"Tests passed\" without evidence is not acceptable", prompt)
 
     def test_acceptance_prompt_uses_paper_trail_and_final_recommendation(self) -> None:
         prompt = stage_prompt(
@@ -79,6 +92,11 @@ class StageHarnessTests(unittest.TestCase):
         self.assertIn("FINAL recommendation", prompt)
         self.assertIn("recommended_go", prompt)
         self.assertIn("acceptance_report.md", prompt)
+        self.assertIn("== ASSESSMENT DIMENSIONS ==", prompt)
+        self.assertIn("== INTEGRITY RULES ==", prompt)
+        self.assertIn("Do not fill the gap with assumptions", prompt)
+        self.assertIn("Per-criterion pass/fail/blocked table", prompt)
+        self.assertIn("the human decides", prompt)
 
     def test_run_product_stage_submits_and_verifies_result(self) -> None:
         from ai_company.state import StateStore
