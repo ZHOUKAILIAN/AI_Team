@@ -50,6 +50,7 @@ class ConsoleScriptTests(unittest.TestCase):
                 check=False,
             )
         self.assertEqual(ai_team_help.returncode, 0, ai_team_help.stderr)
+        self.assertIn("run-requirement", ai_team_help.stdout)
         self.assertIn("start-session", ai_team_help.stdout)
         self.assertIn("current-stage", ai_team_help.stdout)
 
@@ -93,6 +94,7 @@ class ConsoleScriptTests(unittest.TestCase):
             )
 
         self.assertEqual(help_result.returncode, 0, help_result.stderr)
+        self.assertIn("run-requirement", help_result.stdout)
         self.assertIn("start-session", help_result.stdout)
         self.assertIn("current-stage", help_result.stdout)
 

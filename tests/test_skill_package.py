@@ -17,7 +17,7 @@ class SkillPackageTests(unittest.TestCase):
 
     @staticmethod
     def _assert_common_follow_through_contract(testcase: unittest.TestCase, content: str) -> None:
-        testcase.assertIn("Continue after session bootstrap", content)
+        testcase.assertIn("Continue after runtime driver bootstrap", content)
         testcase.assertIn("inspect and implement in the real repository", content)
         testcase.assertIn("execute real verification against the runnable path when feasible", content)
         testcase.assertIn("collect concrete evidence for QA and Acceptance decisions", content)
@@ -125,9 +125,9 @@ class SkillPackageTests(unittest.TestCase):
             "deterministic runtime output is workflow metadata only, not real QA/Acceptance evidence",
             content,
         )
-        self.assertIn("helper script only bootstraps a session", content)
-        self.assertIn("continue the state machine in the current Codex session", content)
-        self.assertIn("does not complete QA or Acceptance by itself", content)
+        self.assertIn("runtime-driver helper", content)
+        self.assertIn("Prefer `run-requirement`", content)
+        self.assertIn("stops at human gates", content)
         self._assert_common_follow_through_contract(self, content)
 
     def test_skills_stay_close_to_skill_standard(self) -> None:
@@ -153,7 +153,7 @@ class SkillPackageTests(unittest.TestCase):
         ).read_text()
 
         follow_through_lines = [
-            "Continue after session bootstrap:",
+            "Continue after runtime driver bootstrap:",
             "- inspect and implement in the real repository",
             "- execute real verification against the runnable path when feasible",
             "- collect concrete evidence for QA and Acceptance decisions",
@@ -390,9 +390,11 @@ class SkillPackageTests(unittest.TestCase):
                 [
                     "--repo-root",
                     str(project_root.resolve()),
-                    "start-session",
+                    "run-requirement",
                     "--message",
                     "执行这个需求：验证全局 helper 使用当前项目根目录",
+                    "--executor",
+                    "codex-exec",
                 ],
             )
 
@@ -429,6 +431,7 @@ class SkillPackageTests(unittest.TestCase):
             env = os.environ.copy()
             env["HOME"] = temp_dir
             env["AI_TEAM_REPO_SOURCE"] = str(repo_root)
+            env["AI_TEAM_EXECUTOR"] = "dry-run"
             env.pop("CODEX_HOME", None)
             install_result = subprocess.run(
                 [str(install_script)],
@@ -461,7 +464,7 @@ class SkillPackageTests(unittest.TestCase):
             self.assertIn("session_id:", run_result.stdout)
             self.assertIn("artifact_dir:", run_result.stdout)
             self.assertIn("summary_path:", run_result.stdout)
-            self.assertNotIn("acceptance_status:", run_result.stdout)
+            self.assertIn("runtime_driver_status: waiting_human", run_result.stdout)
 
 
 if __name__ == "__main__":

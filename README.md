@@ -130,9 +130,11 @@ worker 看到的是 stage contract，不是自由发挥的任务描述。
 - 显式 stage machine
 - stage contract 生成
 - stage-run acquire / submit / verify 强制流转
+- runtime driver 逐阶段执行 `contract -> context -> acquire -> execute -> submit -> verify -> advance`，并写入 `<run_id>_trace.json`
 - stage-result candidate bundle 提交
 - wait state 下的人工决策
-- feedback 到 memory overlay 的学习回流
+- feedback 到三层 memory 的学习回流：`raw/` 原始记录、`extracted/` 可执行规则、`graph/` 关联边
+- role memory 先用 CLI 关键词检索，再把命中的 raw/extracted/graph 片段压进 stage contract；隐含关系才需要后续 AI/图分析
 - 事件流驱动的 panel snapshot
 - 本地只读 Web panel
 - 可安装的 `ai-team` CLI
@@ -149,21 +151,27 @@ session 文件集中在：
 <repo-root>/.ai-team/<session_id>/
 ```
 
-长期学习内容放在 `<repo-root>/.ai-team/memory/`。runtime 不再默认拆出 repo 外的 `workspaces/`、`artifacts/`、`sessions/` 多层目录。
+长期学习内容放在 `<repo-root>/.ai-team/memory/`。每个角色下同时保留兼容旧文件的 overlay，以及三层结构：
 
-## 当前未完成的部分
+```text
+<repo-root>/.ai-team/memory/<Role>/raw/findings.jsonl
+<repo-root>/.ai-team/memory/<Role>/extracted/{lessons,context_patch,skill_patch}.md
+<repo-root>/.ai-team/memory/<Role>/graph/relations.jsonl
+```
 
-当前这套 runtime 还不是最终形态，未完成部分主要包括：
+runtime 不再默认拆出 repo 外的 `workspaces/`、`artifacts/`、`sessions/` 多层目录。
 
-- 自动 worker dispatch
-- 更完整的 supervisor loop
+## 当前边界
+
+当前这套 runtime 已经能用 `run-requirement` 自动驱动 Product/Dev/QA/Acceptance，并在人工 gate 处停住。仍在演进的部分主要包括：
+
 - 原生 Codex 插件体验
 - 更完整的扩展注册机制
 - 可视化审批和 timeline
 
 所以当前最准确的理解是：
 
-它已经能稳定地“控流程”，但还没有完全自动地“跑流程”。
+它已经用 runtime 强制“控流程”和“跑流程”；PRD 审批与最终 Go/No-Go 仍由人卡控。
 
 ## 安装与使用
 
@@ -247,7 +255,25 @@ ai-team dev --skills-empty
 启动一个 session：
 
 ```bash
-ai-team start-session --message "执行这个需求：<你的需求>"
+ai-team run-requirement --message "执行这个需求：<你的需求>"
+```
+
+默认 executor 是 `codex-exec`，runtime 会逐阶段调用 `codex exec`，并在每个阶段之后提交和验证 `StageResultEnvelope`。每个 stage-run 会生成 `<run_id>_trace.json`，记录不可跳过的 `contract_built`、`execution_context_built`、`stage_run_acquired`、`executor_started`、`executor_completed`、`result_submitted`、`gate_evaluated`、`state_advanced` 链路。Product 完成后默认停在 `WaitForCEOApproval`；如果你明确想让 runtime 自动进入 Dev，可以加：
+
+```bash
+ai-team run-requirement --message "执行这个需求：<你的需求>" --auto-approve-product
+```
+
+测试或离线演示可以用 deterministic executor：
+
+```bash
+ai-team run-requirement --message "执行这个需求：<你的需求>" --executor dry-run
+```
+
+继续一个已经通过 PRD 审批的 session：
+
+```bash
+ai-team run-requirement --session-id <session_id> --auto-approve-product
 ```
 
 查看当前阶段：

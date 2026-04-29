@@ -21,6 +21,7 @@ class DocsTests(unittest.TestCase):
         self.assertIn("releases/download/v0.1.0/install.sh", readme)
         self.assertIn("Python 3.13+", readme)
         self.assertIn("CHANGELOG.md", readme)
+        self.assertIn("ai-team run-requirement", readme)
         self.assertIn("ai-team start-session", readme)
         self.assertIn("ai-team dev", readme)
         self.assertIn("ai-team skill list", readme)

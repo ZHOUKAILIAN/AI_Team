@@ -163,10 +163,12 @@ Best practice: invoke this skill only when Codex is opened at the target project
 ## Available assets
 
 - `scripts/company-init.sh`: local setup helper that generates `.codex/agents/` and `.agents/skills/ai-team-run/`; generated files stay out of git.
-- `scripts/company-run.sh`: local session bootstrap helper that prints `session_id`, `artifact_dir`, and `summary_path`.
+- `scripts/company-run.sh`: local runtime-driver helper that calls `ai-team run-requirement` and prints `session_id`, `artifact_dir`, and `summary_path`.
 - `.codex/agents/`: local Product, Dev, QA, and Acceptance agents for this repository.
 - `ai-team`: runtime CLI backed by `ai_company/cli.py`, exposing `ai-team dev` for human terminal workflows and `ai-team start-session` for explicit bootstrap.
 - `.ai-team/<session_id>/`: the session-scoped runtime directory; `artifact_dir` points here and session metadata lives beside the artifacts.
+- `.ai-team/<session_id>/stage_runs/<run_id>_trace.json`: non-skippable runtime trace for `contract -> context -> acquire -> execute -> submit -> verify -> advance`.
+- `.ai-team/memory/<Role>/raw|extracted|graph`: layered memory for original findings, extracted reusable rules, and relation edges.
 - `ai-team status`: user-friendly project / role / status summary.
 - `ai-team panel` / `ai-team panel-snapshot`: read-only visibility tools for current action, blockers, evidence, and recent events.
 
@@ -184,6 +186,9 @@ This confirms the requirement, confirms acceptance criteria, asks for a technica
 
 ## Workflow Contract
 
+- Prefer `ai-team run-requirement` so the runtime acquires, executes, submits, verifies, and advances stages.
+- A passed runtime-driven stage must have a complete trace; missing trace steps are blocking, not advisory.
+- Memory retrieval is keyword-first with CLI search over raw/extracted/graph layers; use graph/AI reasoning only for weak implicit relationships.
 - Read the generated `status.md`, `workflow_summary.md`, and the active session directory.
 - If subagents are available, prefer the local agents from `.codex/agents/` for Product, Dev, QA, and Acceptance.
 - Product writes `prd.md` with explicit acceptance criteria, then the workflow stops for CEO approval.

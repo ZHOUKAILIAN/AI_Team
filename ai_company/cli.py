@@ -45,7 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ai-team",
         description=(
-            "AI_Team single-session workflow CLI. Prefer start-session for the real skill-driven workflow; "
+            "AI_Team single-session workflow CLI. Prefer run-requirement for runtime-driven execution; "
             "run/agent-run are deterministic demo commands."
         ),
     )
@@ -76,11 +76,11 @@ def build_parser() -> argparse.ArgumentParser:
         "run",
         help=(
             "Demo command: execute the deterministic workflow session from an explicit request "
-            "(real workflow entrypoint: start-session)."
+            "(real workflow entrypoint: run-requirement)."
         ),
         description=(
             "Demo command: execute the deterministic workflow session from an explicit request. "
-            "For the real skill-driven workflow, use start-session."
+            "For the real runtime-driven workflow, use run-requirement."
         ),
     )
     run_parser.add_argument("--request", required=True, help="Raw feature or process request.")
@@ -343,11 +343,11 @@ def build_parser() -> argparse.ArgumentParser:
         "agent-run",
         help=(
             "Demo command: execute the deterministic workflow session from a raw user message "
-            "(real workflow entrypoint: start-session)."
+            "(real workflow entrypoint: run-requirement)."
         ),
         description=(
             "Demo command: execute the deterministic workflow session from a raw user message. "
-            "For the real skill-driven workflow, use start-session."
+            "For the real runtime-driven workflow, use run-requirement."
         ),
     )
     agent_run_parser.add_argument("--message", required=True, help="Raw user message for the agent to process.")

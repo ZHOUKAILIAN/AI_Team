@@ -52,6 +52,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("review", result.stdout)
         self.assertIn("agent-run", result.stdout)
         self.assertIn("start-session", result.stdout)
+        self.assertIn("run-requirement", result.stdout)
         self.assertIn("codex-init", result.stdout)
         self.assertIn("panel", result.stdout)
         self.assertIn("panel-snapshot", result.stdout)
@@ -247,6 +248,162 @@ class CliTests(unittest.TestCase):
             "Create a session scaffold for the single-session AI_Team workflow.",
             result.stdout,
         )
+
+    def test_run_requirement_dry_run_stops_at_product_approval_gate(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "run-requirement",
+                    "--message",
+                    "执行这个需求：做一个 runtime 强制驱动流程",
+                    "--executor",
+                    "dry-run",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("runtime_driver_status: waiting_human", result.stdout)
+            self.assertIn("current_state: WaitForCEOApproval", result.stdout)
+            self.assertIn("next_action: record-human-decision --decision go", result.stdout)
+            output_lines = [line for line in result.stdout.splitlines() if ": " in line]
+            output_map = dict(line.split(": ", 1) for line in output_lines)
+            session_id = output_map["session_id"]
+            session_dir = Path(temp_dir) / session_id
+            self.assertTrue((session_dir / "prd.md").exists())
+            self.assertFalse((session_dir / "implementation.md").exists())
+            self.assertTrue((session_dir / "stage_runs" / "product-run-1.json").exists())
+
+    def test_run_requirement_dry_run_can_drive_to_acceptance_human_gate(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "run-requirement",
+                    "--message",
+                    "执行这个需求：做一个 runtime 强制驱动流程",
+                    "--executor",
+                    "dry-run",
+                    "--auto-approve-product",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("runtime_driver_status: waiting_human", result.stdout)
+            self.assertIn("current_state: WaitForHumanDecision", result.stdout)
+            self.assertIn("acceptance_status: recommended_go", result.stdout)
+            output_lines = [line for line in result.stdout.splitlines() if ": " in line]
+            output_map = dict(line.split(": ", 1) for line in output_lines)
+            session_id = output_map["session_id"]
+            session_dir = Path(temp_dir) / session_id
+            self.assertTrue((session_dir / "prd.md").exists())
+            self.assertTrue((session_dir / "implementation.md").exists())
+            self.assertTrue((session_dir / "qa_report.md").exists())
+            self.assertTrue((session_dir / "acceptance_report.md").exists())
+            self.assertTrue((session_dir / "stage_runs" / "acceptance-run-1.json").exists())
+
+    def test_run_requirement_dry_run_can_record_final_human_decision(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "run-requirement",
+                    "--message",
+                    "执行这个需求：做一个 runtime 强制驱动流程",
+                    "--executor",
+                    "dry-run",
+                    "--auto-approve-product",
+                    "--auto-final-decision",
+                    "go",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("runtime_driver_status: done", result.stdout)
+            self.assertIn("current_state: Done", result.stdout)
+            self.assertIn("human_decision: go", result.stdout)
+
+    def test_run_requirement_command_executor_receives_stage_environment(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            worker_path = Path(temp_dir) / "stage_worker.py"
+            worker_path.write_text(
+                "import json, os\n"
+                "contract = json.loads(open(os.environ['AI_TEAM_CONTRACT_PATH']).read())\n"
+                "payload = {\n"
+                "  'session_id': os.environ['AI_TEAM_SESSION_ID'],\n"
+                "  'stage': os.environ['AI_TEAM_STAGE'],\n"
+                "  'status': 'completed',\n"
+                "  'artifact_name': contract['required_outputs'][0],\n"
+                "  'artifact_content': '# PRD\\n\\n## Acceptance Criteria\\n- Command executor ran.\\n',\n"
+                "  'contract_id': contract['contract_id'],\n"
+                "  'journal': 'command executor wrote the product bundle',\n"
+                "  'evidence': [{'name': 'explicit_acceptance_criteria', 'kind': 'report', 'summary': 'criteria present'}],\n"
+                "  'summary': 'command executor completed Product'\n"
+                "}\n"
+                "open(os.environ['AI_TEAM_RESULT_BUNDLE'], 'w').write(json.dumps(payload))\n"
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    temp_dir,
+                    "run-requirement",
+                    "--message",
+                    "执行这个需求：验证 command executor",
+                    "--executor",
+                    "command",
+                    "--executor-command",
+                    f"{sys.executable} {worker_path}",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("runtime_driver_status: waiting_human", result.stdout)
+            output_lines = [line for line in result.stdout.splitlines() if ": " in line]
+            session_id = dict(line.split(": ", 1) for line in output_lines)["session_id"]
+            self.assertIn("Command executor ran.", (Path(temp_dir) / session_id / "prd.md").read_text())
 
     def test_start_session_uses_repo_local_ai_team_state_root_by_default(self) -> None:
         raw_message = "执行这个需求：做一个 harness-first workflow"
