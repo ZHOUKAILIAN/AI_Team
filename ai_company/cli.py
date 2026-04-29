@@ -8,17 +8,18 @@ from pathlib import Path
 from .backend import DeterministicBackend
 from .board import build_board_snapshot
 from .board_server import create_board_server
-from .codex_exec import CodexExecRunner
+from .executor import ClaudeCodeExecutor, CodexExecutor, StageExecutor
 from .execution_context import build_stage_execution_context
 from .gatekeeper import evaluate_candidate
 from .codex_skill_installer import install_codex_skill
 from .harness_paths import default_state_root
 from .intake import parse_intake_message
-from .interactive import CodexAlignmentRunner, CodexTechPlanRunner, DevController, DevControllerConfig, InteractivePrompter
+from .interactive import DevController, DevControllerConfig, ExecutorAlignmentRunner, ExecutorTechPlanRunner, InteractivePrompter
 from .models import Finding, GateResult, StageResultEnvelope, WorkflowSummary
 from .orchestrator import WorkflowOrchestrator
 from .panel import build_panel_snapshot, run_panel_server
 from .project_scaffold import scaffold_project_codex_files
+from .skill_registry import STAGES, SOURCE_LABELS, SkillRegistry
 from .stage_harness import StageHarness
 from .stage_contracts import build_stage_contract
 from .stage_machine import StageMachine
@@ -119,13 +120,64 @@ def build_parser() -> argparse.ArgumentParser:
     )
     dev_parser.add_argument("--message", help="Initial requirement. Prompt if omitted.")
     dev_parser.add_argument("--session-id", help="Existing session to resume.")
+    dev_parser.add_argument(
+        "--executor",
+        choices=["codex", "claude-code"],
+        default="codex",
+        help="AI executor for all interactive and stage prompts.",
+    )
+    dev_parser.add_argument("--product-executor", choices=["codex", "claude-code"], help="Executor for Product stage.")
+    dev_parser.add_argument("--dev-executor", choices=["codex", "claude-code"], help="Executor for Dev stage.")
+    dev_parser.add_argument("--qa-executor", choices=["codex", "claude-code"], help="Executor for QA stage.")
+    dev_parser.add_argument(
+        "--acceptance-executor",
+        choices=["codex", "claude-code"],
+        help="Executor for Acceptance stage.",
+    )
     dev_parser.add_argument("--codex-bin", default="codex", help="Path to codex executable.")
+    dev_parser.add_argument("--claude-bin", default="claude", help="Path to Claude Code executable.")
     dev_parser.add_argument("--model", default="", help="Optional model override.")
     dev_parser.add_argument("--sandbox", default="workspace-write", help="Codex sandbox mode.")
     dev_parser.add_argument("--approval", default="never", help="Codex approval policy.")
     dev_parser.add_argument("--profile", default="", help="Optional Codex config profile.")
+    dev_parser.add_argument(
+        "--with-skills",
+        action="append",
+        default=[],
+        help="Enable skills for this run, e.g. dev:plan,refactor-checklist or qa:security-audit.",
+    )
+    dev_parser.add_argument(
+        "--skip-skills",
+        action="append",
+        default=[],
+        help="Skip skills for this run, e.g. qa:security-audit.",
+    )
+    dev_parser.add_argument("--skills-empty", action="store_true", help="Run without skills for this invocation.")
     dev_parser.add_argument("--dry-run", action="store_true", help="Print plan without executing.")
     dev_parser.set_defaults(handler=_handle_dev)
+
+    skill_parser = subparsers.add_parser("skill", help="Inspect and manage AI_Team stage skills.")
+    skill_subparsers = skill_parser.add_subparsers(dest="skill_command", required=True)
+
+    skill_list_parser = skill_subparsers.add_parser("list", help="List available skills.")
+    skill_list_parser.add_argument("--stage", choices=list(STAGES), help="Filter by stage.")
+    skill_list_parser.add_argument("--source", choices=["builtin", "personal", "project"], help="Filter by source.")
+    skill_list_parser.set_defaults(handler=_handle_skill_list)
+
+    skill_show_parser = skill_subparsers.add_parser("show", help="Show a skill.")
+    skill_show_parser.add_argument("name", help="Skill name.")
+    skill_show_parser.add_argument("--stage", choices=list(STAGES), help="Resolve skill for a stage.")
+    skill_show_parser.set_defaults(handler=_handle_skill_show)
+
+    skill_preferences_parser = skill_subparsers.add_parser("preferences", help="Show or reset skill preferences.")
+    skill_preferences_parser.add_argument("--reset", action="store_true", help="Clear skill preferences.")
+    skill_preferences_parser.set_defaults(handler=_handle_skill_preferences)
+
+    skill_default_parser = skill_subparsers.add_parser("default", help="Set or reset a stage default skill list.")
+    skill_default_parser.add_argument("stage", choices=list(STAGES), help="Stage name.")
+    skill_default_parser.add_argument("skills", nargs="*", help="Default skill names.")
+    skill_default_parser.add_argument("--reset", action="store_true", help="Clear default skills for the stage.")
+    skill_default_parser.set_defaults(handler=_handle_skill_default)
 
     current_stage_parser = subparsers.add_parser(
         "current-stage",
@@ -476,38 +528,21 @@ def _handle_dev(args: argparse.Namespace) -> int:
     if args.dry_run:
         print("ai-team dev dry run")
         print(f"repo_root: {args.repo_root}")
+        print(f"executor: {args.executor}")
         print(f"codex_bin: {args.codex_bin}")
+        print(f"claude_bin: {args.claude_bin}")
         return 0
 
     store = StateStore(args.state_root)
-    codex_runner = CodexExecRunner()
-    alignment_runner = CodexAlignmentRunner(
-        repo_root=args.repo_root,
-        codex_runner=codex_runner,
-        codex_bin=args.codex_bin,
-        model=args.model,
-        sandbox=args.sandbox,
-        approval=args.approval,
-        profile=args.profile,
-    )
-    tech_plan_runner = CodexTechPlanRunner(
-        repo_root=args.repo_root,
-        codex_runner=codex_runner,
-        codex_bin=args.codex_bin,
-        model=args.model,
-        sandbox=args.sandbox,
-        approval=args.approval,
-        profile=args.profile,
-    )
+    default_executor = _build_executor(args, args.executor)
+    alignment_runner = ExecutorAlignmentRunner(repo_root=args.repo_root, executor=default_executor)
+    tech_plan_runner = ExecutorTechPlanRunner(repo_root=args.repo_root, executor=default_executor)
+    skill_registry = SkillRegistry(args.repo_root)
     stage_harness = StageHarness(
         repo_root=args.repo_root,
         state_store=store,
-        codex_runner=codex_runner,
-        codex_bin=args.codex_bin,
-        model=args.model,
-        sandbox=args.sandbox,
-        approval=args.approval,
-        profile=args.profile,
+        executor=default_executor,
+        stage_executors=_stage_executor_overrides(args),
     )
     controller = DevController(
         config=DevControllerConfig(
@@ -520,10 +555,113 @@ def _handle_dev(args: argparse.Namespace) -> int:
         alignment_runner=alignment_runner,
         tech_plan_runner=tech_plan_runner,
         stage_harness=stage_harness,
+        skill_registry=skill_registry,
+        skill_overrides=_resolve_skill_overrides(args, skill_registry),
+        skills_empty=args.skills_empty,
     )
     session_id = controller.run()
     print(f"session_id: {session_id}")
     print(f"panel: ai-team panel --session-id {session_id}")
+    return 0
+
+
+def _build_executor(args: argparse.Namespace, executor_name: str) -> StageExecutor:
+    if executor_name == "claude-code":
+        return ClaudeCodeExecutor(
+            claude_bin=args.claude_bin,
+            model=args.model,
+        )
+    return CodexExecutor(
+        repo_root=args.repo_root,
+        codex_bin=args.codex_bin,
+        model=args.model,
+        sandbox=args.sandbox,
+        approval=args.approval,
+        profile=args.profile,
+    )
+
+
+def _stage_executor_overrides(args: argparse.Namespace) -> dict[str, StageExecutor]:
+    overrides: dict[str, StageExecutor] = {}
+    for stage in ("Product", "Dev", "QA", "Acceptance"):
+        value = getattr(args, f"{stage.lower()}_executor", None)
+        if value:
+            overrides[stage] = _build_executor(args, value)
+    return overrides
+
+
+def _resolve_skill_overrides(args: argparse.Namespace, registry: SkillRegistry) -> dict[str, list[str]]:
+    if args.skills_empty:
+        return {}
+    if not args.with_skills and not args.skip_skills:
+        return {}
+
+    selected = {stage: registry.load_preferences().selected_for(stage) for stage in STAGES}
+    for stage, names in _parse_stage_skill_specs(args.with_skills).items():
+        selected[stage] = names
+    for stage, names in _parse_stage_skill_specs(args.skip_skills).items():
+        selected[stage] = [name for name in selected.get(stage, []) if name not in set(names)]
+    return selected
+
+
+def _parse_stage_skill_specs(specs: list[str]) -> dict[str, list[str]]:
+    parsed: dict[str, list[str]] = {}
+    for spec in specs:
+        if ":" not in spec:
+            raise SystemExit(f"Skill spec must be stage:name[,name]: {spec}")
+        stage_raw, names_raw = spec.split(":", 1)
+        stage = _normalize_stage_name(stage_raw)
+        names = [name.strip() for name in names_raw.split(",") if name.strip()]
+        parsed.setdefault(stage, []).extend(names)
+    return parsed
+
+
+def _normalize_stage_name(stage: str) -> str:
+    for known in STAGES:
+        if known.lower() == stage.lower():
+            return known
+    raise SystemExit(f"Unknown skill stage: {stage}")
+
+
+def _handle_skill_list(args: argparse.Namespace) -> int:
+    registry = SkillRegistry(args.repo_root)
+    for skill in registry.list_skills(stage=args.stage, source=args.source):
+        stages = ",".join(skill.stages)
+        print(f"{skill.name}\t{SOURCE_LABELS[skill.source]}\t{stages}\t{skill.description}")
+    return 0
+
+
+def _handle_skill_show(args: argparse.Namespace) -> int:
+    registry = SkillRegistry(args.repo_root)
+    skill = registry.get_skill(args.name, stage=args.stage)
+    if skill is None:
+        raise SystemExit(f"Skill not found: {args.name}")
+    print(f"name: {skill.name}")
+    print(f"source: {SOURCE_LABELS[skill.source]}")
+    print(f"stages: {', '.join(skill.stages)}")
+    print(f"path: {skill.path}")
+    print("")
+    print(skill.content)
+    return 0
+
+
+def _handle_skill_preferences(args: argparse.Namespace) -> int:
+    registry = SkillRegistry(args.repo_root)
+    if args.reset:
+        registry.reset_preferences()
+    assert registry.preference_path is not None
+    print(registry.preference_path.read_text() if registry.preference_path.exists() else "")
+    return 0
+
+
+def _handle_skill_default(args: argparse.Namespace) -> int:
+    registry = SkillRegistry(args.repo_root)
+    if args.reset:
+        registry.clear_default(args.stage)
+    else:
+        registry.set_default(args.stage, args.skills)
+    assert registry.preference_path is not None
+    print(registry.preference_path.read_text())
     return 0
 
 

@@ -91,7 +91,57 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn("--message", result.stdout)
         self.assertIn("--session-id", result.stdout)
+        self.assertIn("--executor", result.stdout)
+        self.assertIn("--claude-bin", result.stdout)
         self.assertIn("--codex-bin", result.stdout)
+        self.assertIn("--with-skills", result.stdout)
+
+    def test_skill_commands_list_builtin_skills(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "ai_company",
+                "--repo-root",
+                str(repo_root),
+                "skill",
+                "list",
+                "--stage",
+                "Dev",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("plan", result.stdout)
+        self.assertIn("built-in", result.stdout)
+
+    def test_skill_preferences_reset_creates_empty_preference_file(self) -> None:
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            repo_root = Path(temp_dir) / "repo"
+            repo_root.mkdir()
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ai_company",
+                    "--repo-root",
+                    str(repo_root),
+                    "skill",
+                    "preferences",
+                    "--reset",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("dev:", result.stdout)
+            self.assertTrue((repo_root / ".ai-team" / "skill-preferences.yaml").exists())
 
     def test_agent_run_accepts_raw_user_message(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]

@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 
 from ai_company.alignment import AlignmentCriterion, AlignmentDraft
 from ai_company.interactive import DevController, DevControllerConfig, InteractivePrompter
+from ai_company.skill_registry import SkillRegistry
 from ai_company.tech_plan import TechPlanDraft
 
 
@@ -148,6 +149,27 @@ class DevCommandTests(unittest.TestCase):
         self.assertEqual(alignment_runner.calls[1][2], "Add acceptance detail")
         self.assertEqual(len(tech_plan_runner.calls), 2)
         self.assertEqual(tech_plan_runner.calls[1][3], "Use existing module")
+
+    def test_skill_overrides_enable_stage_harness_skills(self) -> None:
+        from ai_company.state import StateStore
+
+        with TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            store = StateStore(repo_root / "state")
+            stage_harness = FakeStageHarness(store)
+            controller = DevController(
+                config=DevControllerConfig(repo_root=repo_root, state_store=store),
+                prompter=FakePrompter(["Requirement", "y", "y", "m"]),
+                alignment_runner=FakeAlignmentRunner(),
+                tech_plan_runner=FakeTechPlanRunner(),
+                stage_harness=stage_harness,
+                skill_registry=SkillRegistry(repo_root),
+                skill_overrides={"Dev": ["plan"]},
+            )
+
+            controller.run()
+
+        self.assertEqual(stage_harness.enabled_skills_by_stage["Dev"][0].name, "plan")
 
 
 if __name__ == "__main__":

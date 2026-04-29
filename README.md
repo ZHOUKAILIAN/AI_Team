@@ -85,6 +85,7 @@ ai-team
 - `ai-team board-snapshot`
 - `ai-team serve-board`
 - `ai-team review`
+- `ai-team skill list`
 
 ### 2. Session Runtime
 
@@ -220,6 +221,28 @@ ai-team dev
 ```
 
 `ai-team dev` prompts for the requirement, confirms acceptance criteria, asks for a technical plan confirmation, and then can delegate Product / Dev / QA / Acceptance execution through `codex exec` while preserving runtime gates.
+
+默认执行器是 Codex；也可以切到 Claude Code：
+
+```bash
+ai-team dev --executor claude-code
+```
+
+如果只想让某些阶段使用不同执行器：
+
+```bash
+ai-team dev --dev-executor codex --qa-executor claude-code
+```
+
+`ai-team dev` 支持在 Phase 2 技术方案确认后选择 stage skills。首次默认空选，后续会从 `.ai-team/skill-preferences.yaml` 读取上次偏好。
+
+```bash
+ai-team skill list
+ai-team skill show security-audit
+ai-team skill preferences
+ai-team dev --with-skills dev:plan --with-skills qa:security-audit
+ai-team dev --skills-empty
+```
 
 启动一个 session：
 

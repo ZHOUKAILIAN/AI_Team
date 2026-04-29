@@ -23,6 +23,8 @@ class DocsTests(unittest.TestCase):
         self.assertIn("CHANGELOG.md", readme)
         self.assertIn("ai-team start-session", readme)
         self.assertIn("ai-team dev", readme)
+        self.assertIn("ai-team skill list", readme)
+        self.assertIn("--executor claude-code", readme)
         self.assertIn("ai-team current-stage", readme)
         self.assertIn("ai-team build-stage-contract", readme)
         self.assertIn("ai-team submit-stage-result", readme)

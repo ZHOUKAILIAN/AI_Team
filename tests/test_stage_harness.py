@@ -4,21 +4,23 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from ai_company.alignment import AlignmentCriterion, AlignmentDraft, save_confirmed_alignment
-from ai_company.codex_exec import CodexExecResult
+from ai_company.executor import ExecutorResult
 from ai_company.models import StageContract
+from ai_company.skill_registry import Skill
 from ai_company.stage_harness import StageHarness, stage_prompt
 from ai_company.tech_plan import TechPlanDraft, save_confirmed_tech_plan
 
 
-class FakeRunner:
+class FakeExecutor:
     def __init__(self, last_message: str) -> None:
         self.last_message = last_message
         self.prompts = []
 
-    def run(self, config, prompt):
+    def execute(self, *, prompt, output_dir, stage):
         self.prompts.append(prompt)
-        config.output_last_message.write_text(self.last_message)
-        return CodexExecResult(0, "", "", self.last_message)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / f"{stage.lower()}_last_message.json").write_text(self.last_message)
+        return ExecutorResult(0, "", "", self.last_message)
 
 
 class StageHarnessTests(unittest.TestCase):
@@ -44,9 +46,11 @@ class StageHarnessTests(unittest.TestCase):
         self.assertIn("Don't gold-plate", prompt)
         self.assertIn("implementation.md", prompt)
         self.assertIn("self_verification", prompt)
+        self.assertIn("== UNIVERSAL PROTECTION ==", prompt)
         self.assertIn("== SCOPE ==", prompt)
         self.assertIn("== SECURITY ==", prompt)
         self.assertIn("== SELF-VERIFICATION ==", prompt)
+        self.assertIn("== STAGE CONTEXT ==", prompt)
         self.assertIn("== BOUNDARY ==", prompt)
         self.assertIn("OWASP top 10", prompt)
         self.assertIn("Never claim \"all tests pass\"", prompt)
@@ -98,6 +102,28 @@ class StageHarnessTests(unittest.TestCase):
         self.assertIn("Per-criterion pass/fail/blocked table", prompt)
         self.assertIn("the human decides", prompt)
 
+    def test_stage_prompt_injects_enabled_skills_between_role_and_context(self) -> None:
+        from ai_company.skill_registry import Skill
+
+        prompt = stage_prompt(
+            stage="Dev",
+            execution_context={"session_id": "s1", "stage": "Dev"},
+            contract=StageContract(session_id="s1", stage="Dev", goal="Implement", contract_id="dev"),
+            skills=[
+                Skill(
+                    name="plan",
+                    description="Plan first",
+                    content="# Plan\nMake a checklist.",
+                    source="builtin",
+                    path=Path("SKILL.md"),
+                )
+            ],
+        )
+
+        self.assertLess(prompt.index("== DEV ROLE =="), prompt.index("== ENABLED SKILLS =="))
+        self.assertLess(prompt.index("== ENABLED SKILLS =="), prompt.index("== STAGE CONTEXT =="))
+        self.assertIn("Make a checklist", prompt)
+
     def test_run_product_stage_submits_and_verifies_result(self) -> None:
         from ai_company.state import StateStore
 
@@ -142,16 +168,39 @@ class StageHarnessTests(unittest.TestCase):
                 ],
                 "summary": "Drafted PRD",
             }
-            runner = FakeRunner(json.dumps(bundle))
-            harness = StageHarness(repo_root=repo_root, state_store=store, codex_runner=runner)
+            skill_dir = Path(temp_dir) / "skill" / "cst"
+            skill_dir.mkdir(parents=True)
+            skill_path = skill_dir / "SKILL.md"
+            skill_path.write_text("# CST")
+            executor = FakeExecutor(json.dumps(bundle))
+            harness = StageHarness(
+                repo_root=repo_root,
+                state_store=store,
+                executor=executor,
+                enabled_skills_by_stage={
+                    "Product": [
+                        Skill(
+                            name="cst",
+                            description="Troubleshoot",
+                            content="# CST",
+                            source="personal",
+                            path=skill_path,
+                            delivery="sandbox",
+                        )
+                    ]
+                },
+            )
 
             record = harness.run_stage(session.session_id, "Product")
             summary = store.load_workflow_summary(session.session_id)
+            installed_skill = session.session_dir / "exec" / ".ai-team" / "skills" / "cst" / "SKILL.md"
+            installed_skill_exists = installed_skill.exists()
 
         self.assertEqual(record.stage, "Product")
         self.assertEqual(record.state, "PASSED")
         self.assertEqual(summary.current_state, "WaitForCEOApproval")
-        self.assertTrue(runner.prompts)
+        self.assertTrue(executor.prompts)
+        self.assertTrue(installed_skill_exists)
 
 
 if __name__ == "__main__":

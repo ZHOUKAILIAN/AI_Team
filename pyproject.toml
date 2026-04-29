@@ -23,6 +23,7 @@ include-package-data = true
 ai_company = [
     "acceptance_policy.json",
     "assets/roles/*/*.md",
+    "assets/skills/*/SKILL.md",
     "assets/codex_skill/ai-company-workflow/SKILL.md",
     "assets/codex_skill/ai-company-workflow/scripts/*.sh",
 ]
