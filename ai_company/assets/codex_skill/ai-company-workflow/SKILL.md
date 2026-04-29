@@ -38,11 +38,15 @@ Use this skill when the active workspace contains the AI_Team runtime or the ins
 
 - `scripts/company-run.sh`: skill-bundled bootstrap helper; the helper script only bootstraps a session and does not complete QA or Acceptance by itself.
 - project runtime helpers: optional workspace-local setup and session bootstrap helpers when the current workspace is the AI_Team runtime repository.
-- runtime CLI: exposes `ai-team` as the user-facing entrypoint for session bootstrap, state lookup, stage contract generation, stage result submission, and feedback recording.
+- runtime CLI: exposes `ai-team dev` for human terminal workflows, plus session bootstrap, state lookup, stage contract generation, stage result submission, and feedback recording.
 - generated local agents: optional Product, Dev, QA, and Acceptance agents for project-scoped execution.
 - generated local run skill: optional `ai-team-run` entrypoint for project-root workflow runs.
 
 Read available helper assets before choosing the bootstrap path. After bootstrap, continue the state machine in the current Codex session to produce the full artifact contract.
+
+## Terminal Usage
+
+For human-operated terminal workflows, prefer `ai-team dev`. It prompts for the requirement, confirms acceptance criteria, asks for technical plan confirmation, then can delegate Product / Dev / QA / Acceptance execution through `codex exec` while preserving runtime gates.
 
 ## Artifact Contract
 

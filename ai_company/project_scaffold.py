@@ -165,12 +165,22 @@ Best practice: invoke this skill only when Codex is opened at the target project
 - `scripts/company-init.sh`: local setup helper that generates `.codex/agents/` and `.agents/skills/ai-team-run/`; generated files stay out of git.
 - `scripts/company-run.sh`: local session bootstrap helper that prints `session_id`, `artifact_dir`, and `summary_path`.
 - `.codex/agents/`: local Product, Dev, QA, and Acceptance agents for this repository.
-- `ai-team`: runtime CLI backed by `ai_company/cli.py`, exposing the `ai-team start-session` bootstrap entrypoint.
+- `ai-team`: runtime CLI backed by `ai_company/cli.py`, exposing `ai-team dev` for human terminal workflows and `ai-team start-session` for explicit bootstrap.
 - `.ai-team/<session_id>/`: the session-scoped runtime directory; `artifact_dir` points here and session metadata lives beside the artifacts.
 - `ai-team status`: user-friendly project / role / status summary.
 - `ai-team panel` / `ai-team panel-snapshot`: read-only visibility tools for current action, blockers, evidence, and recent events.
 
 Read the available helper assets before choosing the bootstrap path.
+
+## Terminal Usage
+
+For human-operated terminal workflows, prefer:
+
+```bash
+ai-team dev
+```
+
+This confirms the requirement, confirms acceptance criteria, asks for a technical plan confirmation, and then preserves the runtime gates while delegating execution through `codex exec`.
 
 ## Workflow Contract
 

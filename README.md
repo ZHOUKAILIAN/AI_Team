@@ -68,6 +68,7 @@ ai-team
 
 已经落地的主要命令：
 
+- `ai-team dev`
 - `ai-team start-session`
 - `ai-team status`
 - `ai-team current-stage`
@@ -210,6 +211,15 @@ ai-team install-codex-skill
 ```bash
 pip install -e .
 ```
+
+### Interactive terminal workflow
+
+```bash
+cd /path/to/project
+ai-team dev
+```
+
+`ai-team dev` prompts for the requirement, confirms acceptance criteria, asks for a technical plan confirmation, and then can delegate Product / Dev / QA / Acceptance execution through `codex exec` while preserving runtime gates.
 
 启动一个 session：
 
