@@ -11,8 +11,8 @@ def local_temp_dir() -> Path:
 
 class StageContractTests(unittest.TestCase):
     def test_product_contract_contains_required_outputs_and_forbidden_actions(self) -> None:
-        from ai_company.stage_contracts import build_stage_contract
-        from ai_company.state import StateStore
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
 
         repo_root = Path(__file__).resolve().parents[1]
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
@@ -35,8 +35,8 @@ class StageContractTests(unittest.TestCase):
         self.assertIn("request", contract.input_artifacts)
 
     def test_product_contract_uses_requirements_approval_language(self) -> None:
-        from ai_company.stage_contracts import build_stage_contract
-        from ai_company.state import StateStore
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
 
         repo_root = Path(__file__).resolve().parents[1]
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
@@ -57,8 +57,8 @@ class StageContractTests(unittest.TestCase):
         self.assertNotIn("CEO approval", contract.goal)
 
     def test_qa_contract_requires_independent_evidence(self) -> None:
-        from ai_company.stage_contracts import build_stage_contract
-        from ai_company.state import StateStore
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
 
         repo_root = Path(__file__).resolve().parents[1]
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
@@ -82,9 +82,9 @@ class StageContractTests(unittest.TestCase):
         self.assertIn("command", contract.evidence_specs[0].allowed_kinds)
 
     def test_contract_role_context_includes_learned_context_memory_and_skill(self) -> None:
-        from ai_company.models import Finding
-        from ai_company.stage_contracts import build_stage_contract
-        from ai_company.state import StateStore
+        from agent_team.models import Finding
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
 
         repo_root = Path(__file__).resolve().parents[1]
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
@@ -116,10 +116,10 @@ class StageContractTests(unittest.TestCase):
         self.assertIn("Require visible empty-state evidence before reporting success.", contract.role_context)
 
     def test_dev_contract_references_latest_execution_context(self) -> None:
-        from ai_company.execution_context import build_stage_execution_context
-        from ai_company.models import EvidenceItem, StageResultEnvelope
-        from ai_company.stage_contracts import build_stage_contract
-        from ai_company.state import StateStore
+        from agent_team.execution_context import build_stage_execution_context
+        from agent_team.models import EvidenceItem, StageResultEnvelope
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
 
         repo_root = Path(__file__).resolve().parents[1]
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:

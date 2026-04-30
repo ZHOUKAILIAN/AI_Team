@@ -1,6 +1,6 @@
-# AI_Team CLI Runtime
+# Agent Team CLI Runtime
 
-`AI_Team` 是一个通过 CLI 暴露、对 AI 友好的工程化团队编排运行时。
+`Agent Team` 是一个通过 CLI 暴露、对 AI 友好的工程化团队编排运行时。
 
 它的目标不是做一组 prompt，也不是做一个只会演示流程的 skill 样例，而是做一个可以持续演进的 runtime：
 
@@ -20,11 +20,11 @@
 
 一句话定义：
 
-`AI_Team` 是一个 CLI-first 的 AI team orchestration runtime。
+`Agent Team` 是一个 CLI-first 的 AI team orchestration runtime。
 
 ## 核心目标
 
-- 通过 `ai-team` CLI 驱动整套流程
+- 通过 `agent-team` CLI 驱动整套流程
 - 内置一个可自我进化的产品-研发-测试-验收团队
 - 用状态机和 artifact contract 约束流程
 - 支持可扩展的角色、阶段、规则和学习回流
@@ -63,29 +63,29 @@ CLI 是用户和上层 AI 的统一入口。
 当前主入口是：
 
 ```bash
-ai-team
+agent-team
 ```
 
 已经落地的主要命令：
 
-- `ai-team dev`
-- `ai-team start-session`
-- `ai-team status`
-- `ai-team current-stage`
-- `ai-team resume`
-- `ai-team step`
-- `ai-team panel-snapshot`
-- `ai-team panel`
-- `ai-team build-stage-contract`
-- `ai-team acquire-stage-run`
-- `ai-team submit-stage-result`
-- `ai-team verify-stage-result`
-- `ai-team record-human-decision`
-- `ai-team record-feedback`
-- `ai-team board-snapshot`
-- `ai-team serve-board`
-- `ai-team review`
-- `ai-team skill list`
+- `agent-team dev`
+- `agent-team start-session`
+- `agent-team status`
+- `agent-team current-stage`
+- `agent-team resume`
+- `agent-team step`
+- `agent-team panel-snapshot`
+- `agent-team panel`
+- `agent-team build-stage-contract`
+- `agent-team acquire-stage-run`
+- `agent-team submit-stage-result`
+- `agent-team verify-stage-result`
+- `agent-team record-human-decision`
+- `agent-team record-feedback`
+- `agent-team board-snapshot`
+- `agent-team serve-board`
+- `agent-team review`
+- `agent-team skill list`
 
 ### 2. Session Runtime
 
@@ -120,13 +120,13 @@ worker 看到的是 stage contract，不是自由发挥的任务描述。
 - `Acceptance/`
 - `Ops/`
 - `SKILL.md`
-- `codex-skill/ai-company-workflow/`
+- `codex-skill/agent-team-workflow/`
 
 ## 当前已实现的运行时能力
 
 当前分支已经落地的能力包括：
 
-- 仓库内 `.ai-team/` 单目录状态
+- 仓库内 `.agent-team/` 单目录状态
 - 显式 stage machine
 - stage contract 生成
 - stage-run acquire / submit / verify 强制流转
@@ -137,26 +137,26 @@ worker 看到的是 stage contract，不是自由发挥的任务描述。
 - role memory 先用 CLI 关键词检索，再把命中的 raw/extracted/graph 片段压进 stage contract；隐含关系才需要后续 AI/图分析
 - 事件流驱动的 panel snapshot
 - 本地只读 Web panel
-- 可安装的 `ai-team` CLI
+- 可安装的 `agent-team` CLI
 
 当前默认状态目录：
 
 ```text
-<repo-root>/.ai-team/
+<repo-root>/.agent-team/
 ```
 
 session 文件集中在：
 
 ```text
-<repo-root>/.ai-team/<session_id>/
+<repo-root>/.agent-team/<session_id>/
 ```
 
-长期学习内容放在 `<repo-root>/.ai-team/memory/`。每个角色下同时保留兼容旧文件的 overlay，以及三层结构：
+长期学习内容放在 `<repo-root>/.agent-team/memory/`。每个角色下保留 memory overlay，以及三层结构：
 
 ```text
-<repo-root>/.ai-team/memory/<Role>/raw/findings.jsonl
-<repo-root>/.ai-team/memory/<Role>/extracted/{lessons,context_patch,skill_patch}.md
-<repo-root>/.ai-team/memory/<Role>/graph/relations.jsonl
+<repo-root>/.agent-team/memory/<Role>/raw/findings.jsonl
+<repo-root>/.agent-team/memory/<Role>/extracted/{lessons,context_patch,skill_patch}.md
+<repo-root>/.agent-team/memory/<Role>/graph/relations.jsonl
 ```
 
 runtime 不再默认拆出 repo 外的 `workspaces/`、`artifacts/`、`sessions/` 多层目录。
@@ -186,31 +186,31 @@ runtime 不再默认拆出 repo 外的 `workspaces/`、`artifacts/`、`sessions/
 安装最新版本：
 
 ```bash
-curl -fsSL https://github.com/ZHOUKAILIAN/ai-team-runtime/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/ZHOUKAILIAN/agent-team-runtime/releases/latest/download/install.sh | sh
 ```
 
 安装当前 beta 版本：
 
 ```bash
-curl -fsSL https://github.com/ZHOUKAILIAN/ai-team-runtime/releases/download/v0.2.0b3/install.sh | sh
+curl -fsSL https://github.com/ZHOUKAILIAN/agent-team-runtime/releases/download/v0.2.0b3/install.sh | sh
 ```
 
 安装固定版本：
 
 ```bash
-curl -fsSL https://github.com/ZHOUKAILIAN/ai-team-runtime/releases/download/v0.1.0/install.sh | sh
+curl -fsSL https://github.com/ZHOUKAILIAN/agent-team-runtime/releases/download/v0.1.0/install.sh | sh
 ```
 
 安装完成后，稳定命令入口是：
 
 ```bash
-~/.local/bin/ai-team
+~/.local/bin/agent-team
 ```
 
 如果你需要安装随包分发的 Codex skill：
 
 ```bash
-ai-team install-codex-skill
+agent-team install-codex-skill
 ```
 
 当前版本发布资产包括 `wheel`、源码包、`install.sh`、`SHA256SUMS` 和版本级 `CHANGELOG.md`。
@@ -225,67 +225,67 @@ pip install -e .
 
 ```bash
 cd /path/to/project
-ai-team dev
+agent-team dev
 ```
 
-`ai-team dev` prompts for the requirement, confirms acceptance criteria, asks for a technical plan confirmation, and then can delegate Product / Dev / QA / Acceptance execution through `codex exec` while preserving runtime gates.
+`agent-team dev` prompts for the requirement, confirms acceptance criteria, asks for a technical plan confirmation, and then can delegate Product / Dev / QA / Acceptance execution through `codex exec` while preserving runtime gates.
 
 默认执行器是 Codex；也可以切到 Claude Code：
 
 ```bash
-ai-team dev --executor claude-code
+agent-team dev --executor claude-code
 ```
 
 如果只想让某些阶段使用不同执行器：
 
 ```bash
-ai-team dev --dev-executor codex --qa-executor claude-code
+agent-team dev --dev-executor codex --qa-executor claude-code
 ```
 
-`ai-team dev` 支持在 Phase 2 技术方案确认后选择 stage skills。首次默认空选，后续会从 `.ai-team/skill-preferences.yaml` 读取上次偏好。
+`agent-team dev` 支持在 Phase 2 技术方案确认后选择 stage skills。首次默认空选，后续会从 `.agent-team/skill-preferences.yaml` 读取上次偏好。
 
 ```bash
-ai-team skill list
-ai-team skill show security-audit
-ai-team skill preferences
-ai-team dev --with-skills dev:plan --with-skills qa:security-audit
-ai-team dev --skills-empty
+agent-team skill list
+agent-team skill show security-audit
+agent-team skill preferences
+agent-team dev --with-skills dev:plan --with-skills qa:security-audit
+agent-team dev --skills-empty
 ```
 
 启动一个 session：
 
 ```bash
-ai-team run-requirement --message "执行这个需求：<你的需求>"
+agent-team run-requirement --message "执行这个需求：<你的需求>"
 ```
 
 默认 executor 是 `codex-exec`，runtime 会逐阶段调用 `codex exec`，并在每个阶段之后提交和验证 `StageResultEnvelope`。每个 stage-run 会生成 `<run_id>_trace.json`，记录不可跳过的 `contract_built`、`execution_context_built`、`stage_run_acquired`、`executor_started`、`executor_completed`、`result_submitted`、`gate_evaluated`、`state_advanced` 链路。Product 完成后默认停在 `WaitForCEOApproval`；如果你明确想让 runtime 自动进入 Dev，可以加：
 
 ```bash
-ai-team run-requirement --message "执行这个需求：<你的需求>" --auto-approve-product
+agent-team run-requirement --message "执行这个需求：<你的需求>" --auto-approve-product
 ```
 
 测试或离线演示可以用 deterministic executor：
 
 ```bash
-ai-team run-requirement --message "执行这个需求：<你的需求>" --executor dry-run
+agent-team run-requirement --message "执行这个需求：<你的需求>" --executor dry-run
 ```
 
 继续一个已经通过 PRD 审批的 session：
 
 ```bash
-ai-team run-requirement --session-id <session_id> --auto-approve-product
+agent-team run-requirement --session-id <session_id> --auto-approve-product
 ```
 
 查看当前阶段：
 
 ```bash
-ai-team current-stage --session-id <session_id>
+agent-team current-stage --session-id <session_id>
 ```
 
 查看当前下一步动作：
 
 ```bash
-ai-team step --session-id <session_id>
+agent-team step --session-id <session_id>
 ```
 
 `step` 会打印下一步动作以及当前 contract 的 `contract_id`、`required_outputs` 和 `required_evidence`。
@@ -293,45 +293,45 @@ ai-team step --session-id <session_id>
 查看用户友好的状态摘要：
 
 ```bash
-ai-team status --session-id <session_id>
+agent-team status --session-id <session_id>
 ```
 
-输出会同步展示当前项目、当前角色和当前状态；同一份内容也会写入 `.ai-team/<session_id>/status.md` 供复盘。
+输出会同步展示当前项目、当前角色和当前状态；同一份内容也会写入 `.agent-team/<session_id>/status.md` 供复盘。
 
 查看机器可读的 panel snapshot：
 
 ```bash
-ai-team panel-snapshot --session-id <session_id>
+agent-team panel-snapshot --session-id <session_id>
 ```
 
 打开本地只读 panel：
 
 ```bash
-ai-team panel --session-id <session_id> --port 8765
+agent-team panel --session-id <session_id> --port 8765
 ```
 
 生成阶段 contract：
 
 ```bash
-ai-team build-stage-contract --session-id <session_id> --stage Product
+agent-team build-stage-contract --session-id <session_id> --stage Product
 ```
 
 认领当前 stage run：
 
 ```bash
-ai-team acquire-stage-run --session-id <session_id> --stage Product
+agent-team acquire-stage-run --session-id <session_id> --stage Product
 ```
 
 提交阶段候选结果：
 
 ```bash
-ai-team submit-stage-result --session-id <session_id> --bundle /path/to/bundle.json
+agent-team submit-stage-result --session-id <session_id> --bundle /path/to/bundle.json
 ```
 
 验证候选结果并决定是否推进 workflow：
 
 ```bash
-ai-team verify-stage-result --session-id <session_id>
+agent-team verify-stage-result --session-id <session_id>
 ```
 
 候选 bundle 里的 `evidence` 必须是结构化对象，runtime 会按 contract 的 `evidence_specs` 校验证据名称、类型和必填字段。
@@ -339,33 +339,33 @@ ai-team verify-stage-result --session-id <session_id>
 记录人工决策：
 
 ```bash
-ai-team record-human-decision --session-id <session_id> --decision go
+agent-team record-human-decision --session-id <session_id> --decision go
 ```
 
 把人工反馈同时作为 rework 决策回流到目标阶段：
 
 ```bash
-ai-team record-feedback --session-id <session_id> --source-stage Acceptance --target-stage Dev --issue "<issue>" --apply-rework
+agent-team record-feedback --session-id <session_id> --source-stage Acceptance --target-stage Dev --issue "<issue>" --apply-rework
 ```
 
 输出只读看板 JSON：
 
 ```bash
-ai-team board-snapshot --all-workspaces
+agent-team board-snapshot --all-workspaces
 ```
 
 启动本地只读看板：
 
 ```bash
-ai-team serve-board --all-workspaces --port 8765 --poll-interval 5
+agent-team serve-board --all-workspaces --port 8765 --poll-interval 5
 ```
 
 只读看板只观察 runtime state，不提供 approve、verify、submit、rework 等写操作。
 
 在 `Codex App` 里运行时，推荐把这套系统理解成：
 
-- `ai-team` 负责控流程、发 contract、认领 run、收 candidate bundle、做 gate 验证、记状态
-- `ai-team panel` 把当前 action、阻塞原因、证据缺口和最近 timeline 可视化出来
+- `agent-team` 负责控流程、发 contract、认领 run、收 candidate bundle、做 gate 验证、记状态
+- `agent-team panel` 把当前 action、阻塞原因、证据缺口和最近 timeline 可视化出来
 - Codex 负责按当前 stage contract 执行真实工作并提交结果
 - 当前能稳定支持“最小 harness 循环”，还不是一条命令全自动跑完所有角色
 
@@ -373,7 +373,7 @@ ai-team serve-board --all-workspaces --port 8765 --poll-interval 5
 
 核心目录：
 
-- `ai_company/`
+- `agent_team/`
   - 当前 runtime 核心实现
 - `Product/`, `Dev/`, `QA/`, `Acceptance/`, `Ops/`
   - 角色资产
@@ -386,18 +386,18 @@ ai-team serve-board --all-workspaces --port 8765 --poll-interval 5
 - `tests/`
   - 运行时、文档和打包测试
 
-虽然当前内部包名还是 `ai_company`，但对外产品定义已经切到 `AI_Team CLI Runtime`。后续如果继续推进，会再单独做一次运行时包名迁移。
+内部 Python 包名和模块入口均为 `agent_team`，对外 CLI 入口为 `agent-team`。
 
 ## 核心文档
 
-- [运行时设计](docs/workflow-specs/2026-04-11-ai-team-cli-runtime-design.md)
-- [当前流程说明](docs/workflow-specs/2026-04-11-ai-team-cli-runtime-flow.md)
-- [CLI 使用说明](docs/workflow-specs/2026-04-11-ai-team-cli-runtime-usage.md)
+- [运行时设计](docs/workflow-specs/2026-04-11-agent-team-cli-runtime-design.md)
+- [当前流程说明](docs/workflow-specs/2026-04-11-agent-team-cli-runtime-flow.md)
+- [CLI 使用说明](docs/workflow-specs/2026-04-11-agent-team-cli-runtime-usage.md)
 - [变更记录](CHANGELOG.md)
-- [版本发布页](https://github.com/ZHOUKAILIAN/AI_Team/releases)
-- [Codex 运行 Help](docs/workflow-specs/2026-04-11-ai-team-codex-cli-help.md)
-- [Codex Harness 方案](docs/workflow-specs/2026-04-11-ai-team-codex-harness-solution.md)
-- [Skill 接入说明](docs/workflow-specs/2026-04-11-ai-team-skill-integration.md)
+- [版本发布页](https://github.com/ZHOUKAILIAN/agent-team-runtime/releases)
+- [Codex 运行 Help](docs/workflow-specs/2026-04-11-agent-team-codex-cli-help.md)
+- [Codex Harness 方案](docs/workflow-specs/2026-04-11-agent-team-codex-harness-solution.md)
+- [Skill 接入说明](docs/workflow-specs/2026-04-11-agent-team-skill-integration.md)
 
 ## 当前原则
 
@@ -410,4 +410,4 @@ ai-team serve-board --all-workspaces --port 8765 --poll-interval 5
 
 ## 一句话总结
 
-`AI_Team` 现在应该被理解成一个面向 AI 的 CLI 编排运行时，而不是一个“会写代码的 prompt 套装”。
+`Agent Team` 现在应该被理解成一个面向 AI 的 CLI 编排运行时，而不是一个“会写代码的 prompt 套装”。

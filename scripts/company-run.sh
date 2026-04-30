@@ -9,42 +9,42 @@ fi
 RAW_MESSAGE="$*"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-AI_TEAM_EXECUTOR="${AI_TEAM_EXECUTOR:-codex-exec}"
+AGENT_TEAM_EXECUTOR="${AGENT_TEAM_EXECUTOR:-codex-exec}"
 
-AI_TEAM_ARGS=(
+AGENT_TEAM_ARGS=(
   --repo-root "${REPO_ROOT}"
   run-requirement
   --message "${RAW_MESSAGE}"
-  --executor "${AI_TEAM_EXECUTOR}"
+  --executor "${AGENT_TEAM_EXECUTOR}"
 )
 
-if [[ -n "${AI_TEAM_EXECUTOR_COMMAND:-}" ]]; then
-  AI_TEAM_ARGS+=(--executor-command "${AI_TEAM_EXECUTOR_COMMAND}")
+if [[ -n "${AGENT_TEAM_EXECUTOR_COMMAND:-}" ]]; then
+  AGENT_TEAM_ARGS+=(--executor-command "${AGENT_TEAM_EXECUTOR_COMMAND}")
 fi
-if [[ -n "${AI_TEAM_AUTO_APPROVE_PRODUCT:-}" ]]; then
-  AI_TEAM_ARGS+=(--auto-approve-product)
+if [[ -n "${AGENT_TEAM_AUTO_APPROVE_PRODUCT:-}" ]]; then
+  AGENT_TEAM_ARGS+=(--auto-approve-product)
 fi
-if [[ -n "${AI_TEAM_AUTO_FINAL_DECISION:-}" ]]; then
-  AI_TEAM_ARGS+=(--auto-final-decision "${AI_TEAM_AUTO_FINAL_DECISION}")
+if [[ -n "${AGENT_TEAM_AUTO_FINAL_DECISION:-}" ]]; then
+  AGENT_TEAM_ARGS+=(--auto-final-decision "${AGENT_TEAM_AUTO_FINAL_DECISION}")
 fi
-if [[ -n "${AI_TEAM_JUDGE:-}" ]]; then
-  AI_TEAM_ARGS+=(--judge "${AI_TEAM_JUDGE}")
+if [[ -n "${AGENT_TEAM_JUDGE:-}" ]]; then
+  AGENT_TEAM_ARGS+=(--judge "${AGENT_TEAM_JUDGE}")
 fi
-if [[ -n "${AI_TEAM_CODEX_MODEL:-}" ]]; then
-  AI_TEAM_ARGS+=(--codex-model "${AI_TEAM_CODEX_MODEL}")
+if [[ -n "${AGENT_TEAM_CODEX_MODEL:-}" ]]; then
+  AGENT_TEAM_ARGS+=(--codex-model "${AGENT_TEAM_CODEX_MODEL}")
 fi
-if [[ -n "${AI_TEAM_CODEX_SANDBOX:-}" ]]; then
-  AI_TEAM_ARGS+=(--codex-sandbox "${AI_TEAM_CODEX_SANDBOX}")
+if [[ -n "${AGENT_TEAM_CODEX_SANDBOX:-}" ]]; then
+  AGENT_TEAM_ARGS+=(--codex-sandbox "${AGENT_TEAM_CODEX_SANDBOX}")
 fi
-if [[ -n "${AI_TEAM_CODEX_APPROVAL_POLICY:-}" ]]; then
-  AI_TEAM_ARGS+=(--codex-approval-policy "${AI_TEAM_CODEX_APPROVAL_POLICY}")
+if [[ -n "${AGENT_TEAM_CODEX_APPROVAL_POLICY:-}" ]]; then
+  AGENT_TEAM_ARGS+=(--codex-approval-policy "${AGENT_TEAM_CODEX_APPROVAL_POLICY}")
 fi
 
 cd "${REPO_ROOT}"
-if [[ -f "${REPO_ROOT}/ai_company/cli.py" ]]; then
-  python3 -m ai_company "${AI_TEAM_ARGS[@]}"
-elif command -v ai-team >/dev/null 2>&1; then
-  ai-team "${AI_TEAM_ARGS[@]}"
+if [[ -f "${REPO_ROOT}/agent_team/cli.py" ]]; then
+  python3 -m agent_team "${AGENT_TEAM_ARGS[@]}"
+elif command -v agent-team >/dev/null 2>&1; then
+  agent-team "${AGENT_TEAM_ARGS[@]}"
 else
-  python3 -m ai_company "${AI_TEAM_ARGS[@]}"
+  python3 -m agent_team "${AGENT_TEAM_ARGS[@]}"
 fi

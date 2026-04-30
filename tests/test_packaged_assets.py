@@ -5,11 +5,11 @@ from tempfile import TemporaryDirectory
 
 class PackagedAssetTests(unittest.TestCase):
     def test_copy_packaged_codex_skill_tree(self) -> None:
-        from ai_company.packaged_assets import copy_packaged_tree
+        from agent_team.packaged_assets import copy_packaged_tree
 
         with TemporaryDirectory() as temp_dir:
             target = Path(temp_dir) / "installed-skill"
-            written = copy_packaged_tree(("codex_skill", "ai-company-workflow"), target)
+            written = copy_packaged_tree(("codex_skill", "agent-team-workflow"), target)
 
             self.assertTrue((target / "SKILL.md").exists())
             self.assertTrue((target / "scripts" / "company-run.sh").exists())

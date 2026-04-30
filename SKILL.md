@@ -1,14 +1,14 @@
 ---
-name: ai-company-workflow
+name: agent-team-workflow
 version: 1.0.0
-description: Use when the user wants to run a requirement through the AI_Team single-session workflow, especially with /company-run or equivalent natural-language workflow triggers.
+description: Use when the user wants to run a requirement through the Agent Team single-session workflow, especially with /company-run or equivalent natural-language workflow triggers.
 ---
 
-# AI_Team Workflow
+# Agent Team Workflow
 
 ## Goal
 
-Run one requirement through the AI_Team handoff model without collapsing the work into a single Dev-only execution path.
+Run one requirement through the Agent Team handoff model without collapsing the work into a single Dev-only execution path.
 
 The authoritative state model is:
 
@@ -20,32 +20,32 @@ Product owns the PRD, Dev owns implementation, QA owns independent verification,
 
 - `/company-run <requirement>`
 - `执行这个需求：<需求内容>`
-- `按 AI Company 流程跑这个需求：<需求内容>`
-- `按 AI Company 流程执行：<需求内容>`
-- `Run this requirement through the AI Company workflow: <requirement>`
+- `按 Agent Team 流程跑这个需求：<需求内容>`
+- `按 Agent Team 流程执行：<需求内容>`
+- `Run this requirement through the Agent Team workflow: <requirement>`
 - `Execute this requirement: <requirement>`
 
-Use this skill only for AI_Team workflow execution. Do not use it for one-off code edits that the user did not ask to run through the multi-role workflow.
+Use this skill only for Agent Team workflow execution. Do not use it for one-off code edits that the user did not ask to run through the multi-role workflow.
 
 ## Workflow Isolation Contract
 
-- AI_Team is the stage controller for the active session.
+- Agent Team is the stage controller for the active session.
 - Generic methodology skills may assist inside a stage.
-- Generic methodology skills must not change the AI_Team stage order, skip CEO approval, replace QA with Dev self-verification, replace Acceptance with code review, or add a mandatory planning gate after an approved PRD already exists.
+- Generic methodology skills must not change the Agent Team stage order, skip CEO approval, replace QA with Dev self-verification, replace Acceptance with code review, or add a mandatory planning gate after an approved PRD already exists.
 - Role-specific skills define stage goals, required artifacts, boundaries, and completion signals.
 - The workflow stops at `WaitForCEOApproval` after Product and at `WaitForHumanDecision` after Acceptance until the human gives the next decision.
 
 ## Available assets
 
 - `./scripts/company-init.sh`: project-scoped setup helper for local Codex agents and the local run skill.
-- `./scripts/company-run.sh`: runtime-driver helper for this repository; by default it calls `ai-team run-requirement` with the `codex-exec` executor.
+- `./scripts/company-run.sh`: runtime-driver helper for this repository; by default it calls `agent-team run-requirement` with the `codex-exec` executor.
 - `.codex/agents/*.toml`: generated local agents for Product, Dev, QA, and Acceptance.
-- `.agents/skills/ai-team-run/SKILL.md`: generated local run skill for project-root execution.
-- `ai-team`: user-facing CLI entrypoint backed by `ai_company/cli.py`; the CLI owns runtime-driver execution, session bootstrap, state lookup, stage contract generation, stage result submission, verification, and feedback recording.
-- `.ai-team/<session_id>/`: session-scoped handoff artifacts, journals, findings, stage metadata, events, and `review.md`.
-- `.ai-team/<session_id>/stage_runs/<run_id>_trace.json`: non-skippable runtime trace for `contract -> context -> acquire -> execute -> submit -> verify -> advance`.
-- `.ai-team/memory/`: learned role memory with three layers: `raw/` original findings, `extracted/` lessons/context/skill patches, and `graph/` relation edges.
-- `docs/workflow-specs/2026-04-11-ai-team-codex-cli-help.md`: Codex-oriented runtime operation help for the CLI harness loop.
+- `.agents/skills/agent-team-run/SKILL.md`: generated local run skill for project-root execution.
+- `agent-team`: user-facing CLI entrypoint backed by `agent_team/cli.py`; the CLI owns runtime-driver execution, session bootstrap, state lookup, stage contract generation, stage result submission, verification, and feedback recording.
+- `.agent-team/<session_id>/`: session-scoped handoff artifacts, journals, findings, stage metadata, events, and `review.md`.
+- `.agent-team/<session_id>/stage_runs/<run_id>_trace.json`: non-skippable runtime trace for `contract -> context -> acquire -> execute -> submit -> verify -> advance`.
+- `.agent-team/memory/`: learned role memory with three layers: `raw/` original findings, `extracted/` lessons/context/skill patches, and `graph/` relation edges.
+- `docs/workflow-specs/2026-04-11-agent-team-codex-cli-help.md`: Codex-oriented runtime operation help for the CLI harness loop.
 
 The helper scripts must prefer `run-requirement` over conversational follow-through. deterministic runtime output is workflow metadata only, not real QA/Acceptance evidence. Runtime completion requires the stage-run trace to include every required step in order.
 
@@ -90,11 +90,11 @@ Every active session maintains these artifacts under the provided session artifa
 - Dev handoff is complete when `implementation.md` contains change summary, changed files, self-verification evidence, commands executed, command result summary, known limitations, QA regression checklist, and rework mapping when applicable.
 - QA handoff is complete when `qa_report.md` maps PRD criteria to independently rerun evidence and records `passed`, `failed`, or `blocked`.
 - Acceptance handoff is complete when `acceptance_report.md` records `recommended_go`, `recommended_no_go`, or `blocked`, and any declared review contract is satisfied or explicitly blocked.
-- The AI_Team workflow is not done until the human records the Go/No-Go decision.
+- The Agent Team workflow is not done until the human records the Go/No-Go decision.
 
 ## Continue after runtime driver bootstrap:
 
-- use `ai-team run-requirement --session-id <id>` to continue an existing session after human approval
+- use `agent-team run-requirement --session-id <id>` to continue an existing session after human approval
 - inspect and implement in the real repository through the active stage executor
 - execute real verification against the runnable path when feasible
 - collect concrete evidence for QA and Acceptance decisions through stage-result evidence

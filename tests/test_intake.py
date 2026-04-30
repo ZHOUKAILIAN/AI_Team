@@ -3,7 +3,7 @@ import unittest
 
 class IntakeTests(unittest.TestCase):
     def test_extracts_structured_acceptance_contract_for_figma_review(self) -> None:
-        from ai_company.intake import parse_intake_message
+        from agent_team.intake import parse_intake_message
 
         intake = parse_intake_message(
             (
@@ -30,7 +30,7 @@ class IntakeTests(unittest.TestCase):
         self.assertEqual(len(intake.contract.acceptance_criteria), 3)
 
     def test_infers_figma_review_contract_from_generic_figma_1to1_request(self) -> None:
-        from ai_company.intake import parse_intake_message
+        from agent_team.intake import parse_intake_message
 
         intake = parse_intake_message(
             (
@@ -50,7 +50,7 @@ class IntakeTests(unittest.TestCase):
         self.assertIn("page_root_recursive_audit", intake.contract.required_evidence)
 
     def test_plain_figma_reference_does_not_force_review_contract(self) -> None:
-        from ai_company.intake import parse_intake_message
+        from agent_team.intake import parse_intake_message
 
         intake = parse_intake_message(
             "执行这个需求：根据 Figma 设计实现一个活动报名按钮，保持现有业务交互不变。"
@@ -61,11 +61,11 @@ class IntakeTests(unittest.TestCase):
         self.assertEqual(intake.contract.required_evidence, [])
 
     def test_figma_node_restoration_request_triggers_visual_review_contract(self) -> None:
-        from ai_company.intake import parse_intake_message
+        from agent_team.intake import parse_intake_message
 
         intake = parse_intake_message(
             (
-                "用 AI_Team 修改：1. 运动统计周维度中，本周和上周不要显示时间段，只显示本周和上周。"
+                "用 Agent Team 修改：1. 运动统计周维度中，本周和上周不要显示时间段，只显示本周和上周。"
                 "2. 还原 Figma 我的页统计相关节点 2411:3042、2411:3049、2411:3080，修正当前样式。"
             )
         )
@@ -80,37 +80,37 @@ class IntakeTests(unittest.TestCase):
         self.assertIn("page_root_recursive_audit", intake.contract.required_evidence)
 
     def test_extracts_request_from_chinese_trigger(self) -> None:
-        from ai_company.intake import extract_request_from_message
+        from agent_team.intake import extract_request_from_message
 
         request = extract_request_from_message("执行这个需求：做一个任务管理器")
 
         self.assertEqual(request, "做一个任务管理器")
 
     def test_extracts_request_from_workflow_trigger(self) -> None:
-        from ai_company.intake import extract_request_from_message
+        from agent_team.intake import extract_request_from_message
 
-        request = extract_request_from_message("按 AI Company 流程跑这个需求：支持 QA 反向纠偏")
+        request = extract_request_from_message("按 Agent Team 流程跑这个需求：支持 QA 反向纠偏")
 
         self.assertEqual(request, "支持 QA 反向纠偏")
 
     def test_extracts_request_from_english_trigger(self) -> None:
-        from ai_company.intake import extract_request_from_message
+        from agent_team.intake import extract_request_from_message
 
         request = extract_request_from_message(
-            "Run this requirement through the AI Company workflow: add audit trails"
+            "Run this requirement through the Agent Team workflow: add audit trails"
         )
 
         self.assertEqual(request, "add audit trails")
 
     def test_returns_original_message_when_no_trigger_matches(self) -> None:
-        from ai_company.intake import extract_request_from_message
+        from agent_team.intake import extract_request_from_message
 
         request = extract_request_from_message("做一个可追溯的 agent 流程")
 
         self.assertEqual(request, "做一个可追溯的 agent 流程")
 
     def test_explicit_host_environment_permission_is_detected(self) -> None:
-        from ai_company.intake import parse_intake_message
+        from agent_team.intake import parse_intake_message
 
         intake = parse_intake_message(
             "执行这个需求：做视觉验收。允许重启微信开发者工具并修改本机配置用于验收。"

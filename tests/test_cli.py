@@ -29,7 +29,7 @@ def evidence(name: str, *, kind: str = "report", summary: str = "Evidence provid
 class CliTests(unittest.TestCase):
     def test_cli_without_command_exits_with_argparse_error_instead_of_traceback(self) -> None:
         result = subprocess.run(
-            [sys.executable, "-m", "ai_company"],
+            [sys.executable, "-m", "agent_team"],
             capture_output=True,
             text=True,
             check=False,
@@ -41,7 +41,7 @@ class CliTests(unittest.TestCase):
 
     def test_cli_help_exits_successfully(self) -> None:
         result = subprocess.run(
-            [sys.executable, "-m", "ai_company", "--help"],
+            [sys.executable, "-m", "agent_team", "--help"],
             capture_output=True,
             text=True,
             check=False,
@@ -60,7 +60,7 @@ class CliTests(unittest.TestCase):
 
     def test_cli_help_lists_readonly_board_commands(self) -> None:
         result = subprocess.run(
-            [sys.executable, "-m", "ai_company", "--help"],
+            [sys.executable, "-m", "agent_team", "--help"],
             capture_output=True,
             text=True,
             check=False,
@@ -72,7 +72,7 @@ class CliTests(unittest.TestCase):
 
     def test_cli_help_lists_dev_command(self) -> None:
         result = subprocess.run(
-            [sys.executable, "-m", "ai_company", "--help"],
+            [sys.executable, "-m", "agent_team", "--help"],
             capture_output=True,
             text=True,
             check=False,
@@ -83,7 +83,7 @@ class CliTests(unittest.TestCase):
 
     def test_dev_help_exits_successfully(self) -> None:
         result = subprocess.run(
-            [sys.executable, "-m", "ai_company", "dev", "--help"],
+            [sys.executable, "-m", "agent_team", "dev", "--help"],
             capture_output=True,
             text=True,
             check=False,
@@ -103,7 +103,7 @@ class CliTests(unittest.TestCase):
             [
                 sys.executable,
                 "-m",
-                "ai_company",
+                "agent_team",
                 "--repo-root",
                 str(repo_root),
                 "skill",
@@ -128,7 +128,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "skill",
@@ -142,7 +142,7 @@ class CliTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0)
             self.assertIn("dev:", result.stdout)
-            self.assertTrue((repo_root / ".ai-team" / "skill-preferences.yaml").exists())
+            self.assertTrue((repo_root / ".agent-team" / "skill-preferences.yaml").exists())
 
     def test_agent_run_accepts_raw_user_message(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
@@ -152,7 +152,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -172,13 +172,13 @@ class CliTests(unittest.TestCase):
 
     def test_run_and_agent_run_help_describe_demo_deterministic_commands(self) -> None:
         run_help = subprocess.run(
-            [sys.executable, "-m", "ai_company", "run", "--help"],
+            [sys.executable, "-m", "agent_team", "run", "--help"],
             capture_output=True,
             text=True,
             check=False,
         )
         agent_run_help = subprocess.run(
-            [sys.executable, "-m", "ai_company", "agent-run", "--help"],
+            [sys.executable, "-m", "agent_team", "agent-run", "--help"],
             capture_output=True,
             text=True,
             check=False,
@@ -198,7 +198,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -237,7 +237,7 @@ class CliTests(unittest.TestCase):
 
     def test_start_session_help_describes_session_scaffold_command(self) -> None:
         result = subprocess.run(
-            [sys.executable, "-m", "ai_company", "start-session", "--help"],
+            [sys.executable, "-m", "agent_team", "start-session", "--help"],
             capture_output=True,
             text=True,
             check=False,
@@ -245,7 +245,7 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0)
         self.assertIn(
-            "Create a session scaffold for the single-session AI_Team workflow.",
+            "Create a session scaffold for the single-session Agent Team workflow.",
             result.stdout,
         )
 
@@ -257,7 +257,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -293,7 +293,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -332,7 +332,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -363,10 +363,10 @@ class CliTests(unittest.TestCase):
             worker_path = Path(temp_dir) / "stage_worker.py"
             worker_path.write_text(
                 "import json, os\n"
-                "contract = json.loads(open(os.environ['AI_TEAM_CONTRACT_PATH']).read())\n"
+                "contract = json.loads(open(os.environ['AGENT_TEAM_CONTRACT_PATH']).read())\n"
                 "payload = {\n"
-                "  'session_id': os.environ['AI_TEAM_SESSION_ID'],\n"
-                "  'stage': os.environ['AI_TEAM_STAGE'],\n"
+                "  'session_id': os.environ['AGENT_TEAM_SESSION_ID'],\n"
+                "  'stage': os.environ['AGENT_TEAM_STAGE'],\n"
                 "  'status': 'completed',\n"
                 "  'artifact_name': contract['required_outputs'][0],\n"
                 "  'artifact_content': '# PRD\\n\\n## Acceptance Criteria\\n- Command executor ran.\\n',\n"
@@ -375,13 +375,13 @@ class CliTests(unittest.TestCase):
                 "  'evidence': [{'name': 'explicit_acceptance_criteria', 'kind': 'report', 'summary': 'criteria present'}],\n"
                 "  'summary': 'command executor completed Product'\n"
                 "}\n"
-                "open(os.environ['AI_TEAM_RESULT_BUNDLE'], 'w').write(json.dumps(payload))\n"
+                "open(os.environ['AGENT_TEAM_RESULT_BUNDLE'], 'w').write(json.dumps(payload))\n"
             )
             result = subprocess.run(
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -405,7 +405,7 @@ class CliTests(unittest.TestCase):
             session_id = dict(line.split(": ", 1) for line in output_lines)["session_id"]
             self.assertIn("Command executor ran.", (Path(temp_dir) / session_id / "prd.md").read_text())
 
-    def test_start_session_uses_repo_local_ai_team_state_root_by_default(self) -> None:
+    def test_start_session_uses_repo_local_agent_team_state_root_by_default(self) -> None:
         raw_message = "执行这个需求：做一个 harness-first workflow"
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
@@ -415,7 +415,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "start-session",
@@ -430,7 +430,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0)
             output_lines = [line for line in result.stdout.splitlines() if ":" in line]
             artifact_dir = Path(dict(line.split(": ", 1) for line in output_lines)["artifact_dir"])
-            self.assertEqual(artifact_dir.parent, repo_root / ".ai-team")
+            self.assertEqual(artifact_dir.parent, repo_root / ".agent-team")
             self.assertTrue(artifact_dir.exists())
 
     def test_current_stage_prints_session_summary_fields(self) -> None:
@@ -442,7 +442,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -463,7 +463,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -483,19 +483,19 @@ class CliTests(unittest.TestCase):
             self.assertIn("human_decision: pending", result.stdout)
 
     def test_board_snapshot_outputs_all_workspace_board_json(self) -> None:
-        from ai_company.workspace_metadata import refresh_workspace_metadata
+        from agent_team.workspace_metadata import refresh_workspace_metadata
 
         repo_root = Path(__file__).resolve().parents[1]
 
         with TemporaryDirectory(dir=local_temp_dir()) as codex_home:
             env = os.environ.copy()
             env["CODEX_HOME"] = codex_home
-            state_root = Path(codex_home) / "ai-team" / "workspaces" / "cli-board-test"
+            state_root = Path(codex_home) / "agent-team" / "workspaces" / "cli-board-test"
             start_result = subprocess.run(
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -516,7 +516,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "board-snapshot",
@@ -543,7 +543,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -564,7 +564,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -589,12 +589,12 @@ class CliTests(unittest.TestCase):
         raw_message = "执行这个需求：做一个可查询状态的 workflow"
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
-            state_root = Path(temp_dir) / ".ai-team"
+            state_root = Path(temp_dir) / ".agent-team"
             bootstrap = subprocess.run(
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -615,7 +615,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -644,7 +644,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -665,7 +665,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -689,8 +689,8 @@ class CliTests(unittest.TestCase):
             self.assertIn("contract_id", payload)
 
     def test_build_execution_context_outputs_dev_context_json(self) -> None:
-        from ai_company.models import EvidenceItem, StageResultEnvelope
-        from ai_company.state import StateStore
+        from agent_team.models import EvidenceItem, StageResultEnvelope
+        from agent_team.state import StateStore
 
         repo_root = Path(__file__).resolve().parents[1]
 
@@ -728,7 +728,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -758,7 +758,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -780,7 +780,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -820,7 +820,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -847,7 +847,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -869,7 +869,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -891,7 +891,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -931,7 +931,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -954,7 +954,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -979,7 +979,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1001,7 +1001,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1022,7 +1022,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1061,7 +1061,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1082,7 +1082,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1107,7 +1107,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1129,7 +1129,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1157,7 +1157,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1179,7 +1179,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1200,7 +1200,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1227,7 +1227,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1249,7 +1249,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1288,7 +1288,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1315,7 +1315,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1337,7 +1337,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1359,7 +1359,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1398,7 +1398,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1439,7 +1439,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1462,7 +1462,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1487,7 +1487,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1510,7 +1510,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1532,7 +1532,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1571,7 +1571,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1592,7 +1592,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1611,7 +1611,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1638,8 +1638,8 @@ class CliTests(unittest.TestCase):
             self.assertIn("Verify the harness.", context_payload["approved_prd_summary"])
 
     def test_record_human_decision_rejects_agent_initiated_session(self) -> None:
-        from ai_company.models import WorkflowSummary
-        from ai_company.state import StateStore
+        from agent_team.models import WorkflowSummary
+        from agent_team.state import StateStore
 
         repo_root = Path(__file__).resolve().parents[1]
 
@@ -1663,7 +1663,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1690,7 +1690,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1720,7 +1720,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1742,7 +1742,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1802,8 +1802,8 @@ class CliTests(unittest.TestCase):
             self.assertEqual(len(session_payload["feedback_records"]), 1)
 
     def test_record_feedback_can_apply_rework_decision_in_same_command(self) -> None:
-        from ai_company.models import WorkflowSummary
-        from ai_company.state import StateStore
+        from agent_team.models import WorkflowSummary
+        from agent_team.state import StateStore
 
         repo_root = Path(__file__).resolve().parents[1]
 
@@ -1830,7 +1830,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1867,7 +1867,7 @@ class CliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -1884,33 +1884,33 @@ class CliTests(unittest.TestCase):
             self.assertIn("agents_dir:", result.stdout)
             self.assertIn("run_skill:", result.stdout)
             self.assertIn("generated_files: 5", result.stdout)
-            self.assertIn(".agents/skills/ai-team-run/SKILL.md", result.stdout)
+            self.assertIn(".agents/skills/agent-team-run/SKILL.md", result.stdout)
             self.assertIn("project_root:", result.stdout)
             self.assertIn("recommended_context:", result.stdout)
-            self.assertIn("recommended_run_entry: $ai-team-run", result.stdout)
-            self.assertNotIn("$ai-team-init", result.stdout)
-            self.assertIn("$ai-team-run", result.stdout)
+            self.assertIn("recommended_run_entry: $agent-team-run", result.stdout)
+            self.assertNotIn("$agent-team-init", result.stdout)
+            self.assertIn("$agent-team-run", result.stdout)
             self.assertIn("manual_init_fallback:", result.stdout)
             self.assertIn("manual_run_fallback:", result.stdout)
-            self.assertTrue((repo_root / ".codex" / "agents" / "ai_team_product.toml").exists())
-            self.assertTrue((repo_root / ".codex" / "agents" / "ai_team_dev.toml").exists())
-            self.assertTrue((repo_root / ".codex" / "agents" / "ai_team_qa.toml").exists())
-            self.assertTrue((repo_root / ".codex" / "agents" / "ai_team_acceptance.toml").exists())
-            self.assertTrue((repo_root / ".agents" / "skills" / "ai-team-run" / "SKILL.md").exists())
+            self.assertTrue((repo_root / ".codex" / "agents" / "agent_team_product.toml").exists())
+            self.assertTrue((repo_root / ".codex" / "agents" / "agent_team_dev.toml").exists())
+            self.assertTrue((repo_root / ".codex" / "agents" / "agent_team_qa.toml").exists())
+            self.assertTrue((repo_root / ".codex" / "agents" / "agent_team_acceptance.toml").exists())
+            self.assertTrue((repo_root / ".agents" / "skills" / "agent-team-run" / "SKILL.md").exists())
             self.assertFalse((repo_root / ".codex" / "config.toml").exists())
-            product_agent_lines = (repo_root / ".codex" / "agents" / "ai_team_product.toml").read_text().splitlines()
-            product_agent = (repo_root / ".codex" / "agents" / "ai_team_product.toml").read_text()
+            product_agent_lines = (repo_root / ".codex" / "agents" / "agent_team_product.toml").read_text().splitlines()
+            product_agent = (repo_root / ".codex" / "agents" / "agent_team_product.toml").read_text()
             agent_names = {
                 path.stem: tomllib.loads(path.read_text()).get("name")
-                for path in (repo_root / ".codex" / "agents").glob("ai_team_*.toml")
+                for path in (repo_root / ".codex" / "agents").glob("agent_team_*.toml")
             }
             self.assertEqual(
                 agent_names,
                 {
-                    "ai_team_product": "ai_team_product",
-                    "ai_team_dev": "ai_team_dev",
-                    "ai_team_qa": "ai_team_qa",
-                    "ai_team_acceptance": "ai_team_acceptance",
+                    "agent_team_product": "agent_team_product",
+                    "agent_team_dev": "agent_team_dev",
+                    "agent_team_qa": "agent_team_qa",
+                    "agent_team_acceptance": "agent_team_acceptance",
                 },
             )
             self.assertIn('developer_instructions = """', product_agent_lines)

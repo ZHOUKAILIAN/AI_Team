@@ -3,7 +3,7 @@ import unittest
 
 class StagePolicyTests(unittest.TestCase):
     def test_default_policy_registry_returns_product_requirements_approval_policy(self) -> None:
-        from ai_company.stage_policies import default_policy_registry
+        from agent_team.stage_policies import default_policy_registry
 
         policy = default_policy_registry().get("Product")
 
@@ -13,13 +13,13 @@ class StagePolicyTests(unittest.TestCase):
         self.assertIn("explicit_acceptance_criteria", [spec.name for spec in policy.evidence_specs])
 
     def test_policy_can_compile_to_stage_contract(self) -> None:
-        from ai_company.stage_policies import default_policy_registry
+        from agent_team.stage_policies import default_policy_registry
 
         contract = default_policy_registry().build_contract(
             session_id="session-1",
             stage="Dev",
             contract_id="contract-dev",
-            input_artifacts={"request": ".ai-team/session/request.md"},
+            input_artifacts={"request": ".agent-team/session/request.md"},
             role_context="Dev role context",
         )
 

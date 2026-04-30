@@ -27,7 +27,7 @@ def evidence(name: str, *, kind: str = "artifact", summary: str = "Evidence prov
 
 class JudgeStageResultCliTests(unittest.TestCase):
     def test_resolve_openai_oa_header_defaults_to_user_agent(self) -> None:
-        from ai_company.cli import _resolve_openai_oa_header
+        from agent_team.cli import _resolve_openai_oa_header
 
         args = argparse.Namespace(
             openai_oa=None,
@@ -37,7 +37,7 @@ class JudgeStageResultCliTests(unittest.TestCase):
         self.assertEqual(_resolve_openai_oa_header(args), "AI-Team-Runtime/0.1")
 
     def test_resolve_openai_oa_header_prefers_explicit_value(self) -> None:
-        from ai_company.cli import _resolve_openai_oa_header
+        from agent_team.cli import _resolve_openai_oa_header
 
         args = argparse.Namespace(
             openai_oa="proxy-specific-oa",
@@ -54,7 +54,7 @@ class JudgeStageResultCliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -76,7 +76,7 @@ class JudgeStageResultCliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -115,7 +115,7 @@ class JudgeStageResultCliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -136,7 +136,7 @@ class JudgeStageResultCliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -171,7 +171,7 @@ class JudgeStageResultCliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -193,7 +193,7 @@ class JudgeStageResultCliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -215,7 +215,7 @@ class JudgeStageResultCliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -251,7 +251,7 @@ class JudgeStageResultCliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -272,7 +272,7 @@ class JudgeStageResultCliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -302,7 +302,7 @@ class JudgeStageResultCliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -324,7 +324,7 @@ class JudgeStageResultCliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -346,7 +346,7 @@ class JudgeStageResultCliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -381,7 +381,7 @@ class JudgeStageResultCliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -402,7 +402,7 @@ class JudgeStageResultCliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -430,7 +430,7 @@ class JudgeStageResultCliTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",

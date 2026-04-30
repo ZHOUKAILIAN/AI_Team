@@ -12,12 +12,12 @@ def local_temp_dir() -> Path:
 
 class PanelTests(unittest.TestCase):
     def test_list_panel_sessions_moves_done_sessions_into_archive(self) -> None:
-        from ai_company.panel import list_panel_sessions
-        from ai_company.state import StateStore
+        from agent_team.panel import list_panel_sessions
+        from agent_team.state import StateStore
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             project_root = Path(temp_dir) / "crewpals-mp"
-            root = project_root / ".ai-team"
+            root = project_root / ".agent-team"
             store = StateStore(root)
             active_session = store.create_session("active task")
             archived_session = store.create_session("approved task")
@@ -36,13 +36,13 @@ class PanelTests(unittest.TestCase):
             self.assertTrue(sessions["archived"][0]["archived"])
 
     def test_panel_snapshot_combines_summary_contract_events_and_artifacts(self) -> None:
-        from ai_company.models import AcceptanceContract
-        from ai_company.panel import build_panel_snapshot
-        from ai_company.state import StateStore
+        from agent_team.models import AcceptanceContract
+        from agent_team.panel import build_panel_snapshot
+        from agent_team.state import StateStore
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             project_root = Path(temp_dir) / "crewpals-mp"
-            root = project_root / ".ai-team"
+            root = project_root / ".agent-team"
             store = StateStore(root)
             session = store.create_session(
                 "restore a Figma screen 1:1",
@@ -80,11 +80,11 @@ class PanelTests(unittest.TestCase):
             self.assertEqual(snapshot["events"][0]["kind"], "session_created")
 
     def test_render_panel_html_contains_live_snapshot_regions(self) -> None:
-        from ai_company.panel import render_panel_html
+        from agent_team.panel import render_panel_html
 
         html = render_panel_html()
 
-        self.assertIn("AI_Team Runtime Panel", html)
+        self.assertIn("Agent Team Runtime Panel", html)
         self.assertIn("/api/session", html)
         self.assertIn("Project", html)
         self.assertIn("Role", html)
@@ -94,11 +94,11 @@ class PanelTests(unittest.TestCase):
         self.assertIn("Archived", html)
 
     def test_state_store_writes_user_friendly_status_markdown(self) -> None:
-        from ai_company.state import StateStore
+        from agent_team.state import StateStore
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             project_root = Path(temp_dir) / "crewpals-mp"
-            root = project_root / ".ai-team"
+            root = project_root / ".agent-team"
             store = StateStore(root)
             session = store.create_session("demo task")
 
@@ -106,14 +106,14 @@ class PanelTests(unittest.TestCase):
 
             self.assertTrue(status_path.exists())
             status_text = status_path.read_text()
-            self.assertIn("# AI_Team Status", status_text)
+            self.assertIn("# Agent Team Status", status_text)
             self.assertIn("- project: crewpals-mp", status_text)
             self.assertIn("- role: Intake", status_text)
             self.assertIn("- status: in_progress", status_text)
             self.assertIn("session_created", status_text)
 
     def test_state_store_writes_session_events_jsonl(self) -> None:
-        from ai_company.state import StateStore
+        from agent_team.state import StateStore
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             root = Path(temp_dir)

@@ -106,5 +106,5 @@ Date: 2026-04-17
 继续运行：
 
 ```bash
-/tmp/ai-team-runtime-enforced-venv/bin/python -m unittest tests.test_board_server
+/tmp/agent-team-runtime-enforced-venv/bin/python -m unittest tests.test_board_server
 ```

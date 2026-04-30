@@ -3,7 +3,7 @@ import unittest
 
 class WorkflowSummaryTests(unittest.TestCase):
     def test_render_workflow_summary_includes_ordered_core_fields_and_paths(self) -> None:
-        from ai_company.workflow_summary import WorkflowSummary, render_workflow_summary
+        from agent_team.workflow_summary import WorkflowSummary, render_workflow_summary
 
         summary = WorkflowSummary(
             session_id="session-123",

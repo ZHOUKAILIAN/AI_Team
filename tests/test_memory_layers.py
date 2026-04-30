@@ -12,8 +12,8 @@ def local_temp_dir() -> Path:
 
 class MemoryLayerTests(unittest.TestCase):
     def test_apply_learning_writes_raw_extracted_and_graph_layers(self) -> None:
-        from ai_company.models import Finding
-        from ai_company.state import StateStore
+        from agent_team.models import Finding
+        from agent_team.state import StateStore
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             root = Path(temp_dir)
@@ -50,9 +50,9 @@ class MemoryLayerTests(unittest.TestCase):
         self.assertIn("issue->required_evidence", {record["edge"] for record in graph_records})
 
     def test_keyword_retrieval_searches_memory_layers_before_graph_reasoning(self) -> None:
-        from ai_company.memory_layers import retrieve_role_memory
-        from ai_company.models import Finding
-        from ai_company.state import StateStore
+        from agent_team.memory_layers import retrieve_role_memory
+        from agent_team.models import Finding
+        from agent_team.state import StateStore
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             root = Path(temp_dir)
@@ -78,9 +78,9 @@ class MemoryLayerTests(unittest.TestCase):
         self.assertIn("pagination retry", "\n".join(match.preview.lower() for match in result.matches))
 
     def test_stage_contract_includes_retrieved_memory_section(self) -> None:
-        from ai_company.models import Finding
-        from ai_company.stage_contracts import build_stage_contract
-        from ai_company.state import StateStore
+        from agent_team.models import Finding
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
 
         repo_root = Path(__file__).resolve().parents[1]
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:

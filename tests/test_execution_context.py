@@ -12,10 +12,10 @@ def local_temp_dir() -> Path:
 
 class ExecutionContextTests(unittest.TestCase):
     def test_build_dev_execution_context_uses_approved_prd_and_contract(self) -> None:
-        from ai_company.execution_context import build_stage_execution_context
-        from ai_company.models import AcceptanceContract
-        from ai_company.stage_contracts import build_stage_contract
-        from ai_company.state import StateStore
+        from agent_team.execution_context import build_stage_execution_context
+        from agent_team.models import AcceptanceContract
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
 
         repo_root = Path(__file__).resolve().parents[1]
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
@@ -58,10 +58,10 @@ class ExecutionContextTests(unittest.TestCase):
         self.assertIn("Dev/context.md", context.repo_context_summary)
 
     def test_build_dev_execution_context_includes_actionable_findings(self) -> None:
-        from ai_company.execution_context import build_stage_execution_context
-        from ai_company.models import Finding
-        from ai_company.stage_contracts import build_stage_contract
-        from ai_company.state import StateStore
+        from agent_team.execution_context import build_stage_execution_context
+        from agent_team.models import Finding
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
 
         repo_root = Path(__file__).resolve().parents[1]
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
@@ -99,9 +99,9 @@ class ExecutionContextTests(unittest.TestCase):
         self.assertEqual(context.actionable_findings[0].target_stage, "Dev")
 
     def test_state_store_persists_execution_context_by_stage_and_round(self) -> None:
-        from ai_company.execution_context import build_stage_execution_context
-        from ai_company.stage_contracts import build_stage_contract
-        from ai_company.state import StateStore
+        from agent_team.execution_context import build_stage_execution_context
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
 
         repo_root = Path(__file__).resolve().parents[1]
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
@@ -131,7 +131,7 @@ class ExecutionContextTests(unittest.TestCase):
         self.assertEqual(loaded["stage"], "Dev")
 
     def _record_product_artifact(self, store, session_id: str) -> None:
-        from ai_company.models import EvidenceItem, StageResultEnvelope
+        from agent_team.models import EvidenceItem, StageResultEnvelope
 
         session = store.load_session(session_id)
         result = StageResultEnvelope(

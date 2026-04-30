@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from ai_company.executor import ClaudeCodeExecutor, CodexExecutor, ExecutorResult, StageExecutor, _extract_last_message
+from agent_team.executor import ClaudeCodeExecutor, CodexExecutor, ExecutorResult, StageExecutor, _extract_last_message
 
 
 class ExecutorTests(unittest.TestCase):
@@ -23,21 +23,38 @@ class ExecutorTests(unittest.TestCase):
         self.assertIn("--json", command)
         self.assertIn("--output-last-message", command)
         self.assertIn("/tmp/last.json", command)
+        self.assertIn("--ignore-rules", command)
+        self.assertIn("--disable", command)
+        self.assertIn("plugins", command)
+        self.assertIn("--ephemeral", command)
         self.assertIn("--model", command)
         self.assertIn("gpt-5.5", command)
         self.assertIn("--sandbox", command)
         self.assertIn("workspace-write", command)
-        self.assertIn("--ask-for-approval", command)
-        self.assertIn("never", command)
+        self.assertIn("-c", command)
+        self.assertIn('approval_policy="never"', command)
         self.assertIn("--profile", command)
         self.assertIn("default", command)
         self.assertEqual(command[-1], "Prompt")
 
+    def test_codex_executor_uses_prompt_protection_flags_by_default(self) -> None:
+        executor = CodexExecutor(repo_root=Path("/repo"))
+
+        command = executor.build_command(prompt="Prompt", output_path=Path("/tmp/last.json"))
+
+        self.assertIn("--ignore-rules", command)
+        self.assertIn("--disable", command)
+        self.assertIn("plugins", command)
+        self.assertNotIn("--ignore-user-config", command)
+
     def test_codex_executor_reads_last_message(self) -> None:
         calls = []
 
-        def fake_run(command, *, capture_output, text, check):
+        def fake_run(command, *, capture_output, text, check, env=None, stdin=None):
             calls.append(command)
+            self.assertIsNotNone(env)
+            self.assertIn("CODEX_HOME", env)
+            self.assertIs(stdin, subprocess.DEVNULL)
             output_path = Path(command[command.index("--output-last-message") + 1])
             output_path.write_text('{"status":"completed"}')
             return subprocess.CompletedProcess(command, 0, stdout="{}", stderr="")

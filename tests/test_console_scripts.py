@@ -19,8 +19,8 @@ class ConsoleScriptTests(unittest.TestCase):
 
         scripts = payload["project"]["scripts"]
 
-        self.assertEqual(scripts["ai-team"], "ai_company.cli:main")
-        self.assertNotIn("ai-team-harness", scripts)
+        self.assertEqual(scripts["agent-team"], "agent_team.cli:main")
+        self.assertNotIn("agent-team-harness", scripts)
 
     def test_installed_cli_entrypoints_run_help_without_python_module_command(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
@@ -42,17 +42,17 @@ class ConsoleScriptTests(unittest.TestCase):
                 text=True,
             )
 
-            ai_team_help = subprocess.run(
-                [str(venv_dir / "bin" / "ai-team"), "--help"],
+            agent_team_help = subprocess.run(
+                [str(venv_dir / "bin" / "agent-team"), "--help"],
                 cwd=repo_root,
                 capture_output=True,
                 text=True,
                 check=False,
             )
-        self.assertEqual(ai_team_help.returncode, 0, ai_team_help.stderr)
-        self.assertIn("run-requirement", ai_team_help.stdout)
-        self.assertIn("start-session", ai_team_help.stdout)
-        self.assertIn("current-stage", ai_team_help.stdout)
+        self.assertEqual(agent_team_help.returncode, 0, agent_team_help.stderr)
+        self.assertIn("run-requirement", agent_team_help.stdout)
+        self.assertIn("start-session", agent_team_help.stdout)
+        self.assertIn("current-stage", agent_team_help.stdout)
 
     def test_built_wheel_installs_and_runs_help(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
@@ -86,7 +86,7 @@ class ConsoleScriptTests(unittest.TestCase):
             )
 
             help_result = subprocess.run(
-                [str(venv_dir / "bin" / "ai-team"), "--help"],
+                [str(venv_dir / "bin" / "agent-team"), "--help"],
                 cwd=repo_root,
                 capture_output=True,
                 text=True,

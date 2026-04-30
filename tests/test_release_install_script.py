@@ -39,17 +39,17 @@ def build_fake_release_fixture(*, root: Path, repo_root: Path, version: str, bro
         "import sys\n\n"
         "def main() -> int:\n"
         "    if '--help' in sys.argv:\n"
-        f"        print('fake ai-team {version}')\n"
+        f"        print('fake agent-team {version}')\n"
         f"        return {exit_code}\n"
         "    return 0\n"
     )
     (project_root / "pyproject.toml").write_text(
         "[project]\n"
-        "name = 'ai-company'\n"
+        "name = 'agent-team'\n"
         f"version = '{version}'\n"
         "requires-python = '>=3.13'\n\n"
         "[project.scripts]\n"
-        "ai-team = 'fake_pkg.cli:main'\n\n"
+        "agent-team = 'fake_pkg.cli:main'\n\n"
         "[build-system]\n"
         "requires = ['setuptools>=68']\n"
         "build-backend = 'setuptools.build_meta'\n\n"
@@ -93,7 +93,7 @@ def render_install_script(repo_root: Path, wheel_name: str) -> str:
             sys.executable,
             "scripts/release/render_install_script.py",
             "--repo",
-            "ZHOUKAILIAN/AI_Team",
+            "ZHOUKAILIAN/agent-team-runtime",
             "--tag",
             "v0.1.0",
             "--version",
@@ -125,11 +125,11 @@ class ReleaseInstallScriptTests(unittest.TestCase):
             install_script.chmod(0o755)
 
             env = os.environ.copy()
-            env["AI_TEAM_INSTALL_DIR"] = str(install_root)
-            env["AI_TEAM_BIN_DIR"] = str(bin_dir)
+            env["AGENT_TEAM_INSTALL_DIR"] = str(install_root)
+            env["AGENT_TEAM_BIN_DIR"] = str(bin_dir)
 
             with release_server(release_dir) as base_url:
-                env["AI_TEAM_RELEASE_BASE_URL"] = base_url
+                env["AGENT_TEAM_RELEASE_BASE_URL"] = base_url
                 result = subprocess.run(
                     ["sh", str(install_script)],
                     cwd=repo_root,
@@ -149,16 +149,16 @@ class ReleaseInstallScriptTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(os.readlink(install_root / "current"), str(install_root / "versions" / "0.1.0"))
-            self.assertTrue((bin_dir / "ai-team").exists())
+            self.assertTrue((bin_dir / "agent-team").exists())
 
             help_result = subprocess.run(
-                [str(bin_dir / "ai-team"), "--help"],
+                [str(bin_dir / "agent-team"), "--help"],
                 capture_output=True,
                 text=True,
                 check=False,
             )
             self.assertEqual(help_result.returncode, 0, help_result.stderr)
-            self.assertIn("fake ai-team 0.1.0", help_result.stdout)
+            self.assertIn("fake agent-team 0.1.0", help_result.stdout)
             self.assertEqual(reinstall_result.returncode, 0, reinstall_result.stderr)
             self.assertIn("already installed", reinstall_result.stdout)
 
@@ -172,24 +172,24 @@ class ReleaseInstallScriptTests(unittest.TestCase):
             bin_dir = temp_root / "bin"
             old_version_dir = install_root / "versions" / "0.0.9" / "venv" / "bin"
             old_version_dir.mkdir(parents=True)
-            old_binary = old_version_dir / "ai-team"
+            old_binary = old_version_dir / "agent-team"
             old_binary.write_text("#!/usr/bin/env bash\nexit 0\n")
             old_binary.chmod(0o755)
             (install_root / "current").parent.mkdir(parents=True, exist_ok=True)
             (install_root / "current").symlink_to(install_root / "versions" / "0.0.9")
             bin_dir.mkdir()
-            (bin_dir / "ai-team").symlink_to(install_root / "current" / "venv" / "bin" / "ai-team")
+            (bin_dir / "agent-team").symlink_to(install_root / "current" / "venv" / "bin" / "agent-team")
 
             install_script = temp_root / "install.sh"
             install_script.write_text(render_install_script(repo_root, wheel_name))
             install_script.chmod(0o755)
 
             env = os.environ.copy()
-            env["AI_TEAM_INSTALL_DIR"] = str(install_root)
-            env["AI_TEAM_BIN_DIR"] = str(bin_dir)
+            env["AGENT_TEAM_INSTALL_DIR"] = str(install_root)
+            env["AGENT_TEAM_BIN_DIR"] = str(bin_dir)
 
             with release_server(release_dir) as base_url:
-                env["AI_TEAM_RELEASE_BASE_URL"] = base_url
+                env["AGENT_TEAM_RELEASE_BASE_URL"] = base_url
                 result = subprocess.run(
                     ["sh", str(install_script)],
                     cwd=repo_root,

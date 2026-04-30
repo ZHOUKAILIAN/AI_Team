@@ -12,11 +12,11 @@ def local_temp_dir() -> Path:
 
 class WorkspaceMetadataTests(unittest.TestCase):
     def test_refresh_workspace_metadata_writes_repo_and_worktree_identity(self) -> None:
-        from ai_company.workspace_metadata import refresh_workspace_metadata
+        from agent_team.workspace_metadata import refresh_workspace_metadata
 
         repo_root = Path(__file__).resolve().parents[1]
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
-            state_root = Path(temp_dir) / "ai-team-runtime-test"
+            state_root = Path(temp_dir) / "agent-team-runtime-test"
 
             metadata = refresh_workspace_metadata(state_root=state_root, repo_root=repo_root)
 
@@ -31,7 +31,7 @@ class WorkspaceMetadataTests(unittest.TestCase):
             self.assertIn("updated_at", payload)
 
     def test_load_workspace_metadata_falls_back_to_state_root_name(self) -> None:
-        from ai_company.workspace_metadata import load_workspace_metadata
+        from agent_team.workspace_metadata import load_workspace_metadata
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             state_root = Path(temp_dir) / "legacy-workspace-123"

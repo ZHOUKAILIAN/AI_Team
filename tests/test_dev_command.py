@@ -3,10 +3,10 @@ from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from ai_company.alignment import AlignmentCriterion, AlignmentDraft
-from ai_company.interactive import DevController, DevControllerConfig, InteractivePrompter
-from ai_company.skill_registry import SkillRegistry
-from ai_company.tech_plan import TechPlanDraft
+from agent_team.alignment import AlignmentCriterion, AlignmentDraft
+from agent_team.interactive import DevController, DevControllerConfig, InteractivePrompter
+from agent_team.skill_registry import SkillRegistry
+from agent_team.tech_plan import TechPlanDraft
 
 
 class FakePrompter(InteractivePrompter):
@@ -43,7 +43,7 @@ class FakeTechPlanRunner:
         self.calls.append((alignment, repo_structure, previous_plan, user_revision))
         return TechPlanDraft(
             approach_summary="Use existing patterns.",
-            affected_modules=["ai_company/example.py"],
+            affected_modules=["agent_team/example.py"],
             dependencies=[],
             implementation_steps=["Write code", "Run tests"],
             risks=["Low risk"],
@@ -75,7 +75,7 @@ class FakeStageHarness:
 
 class DevCommandTests(unittest.TestCase):
     def test_confirmed_y_runs_agent_chain_and_auto_approves_product(self) -> None:
-        from ai_company.state import StateStore
+        from agent_team.state import StateStore
 
         with TemporaryDirectory() as temp_dir:
             store = StateStore(Path(temp_dir) / "state")
@@ -98,7 +98,7 @@ class DevCommandTests(unittest.TestCase):
         self.assertEqual(summary.human_decision, "go")
 
     def test_manual_decision_saves_session_without_running_agents(self) -> None:
-        from ai_company.state import StateStore
+        from agent_team.state import StateStore
 
         with TemporaryDirectory() as temp_dir:
             store = StateStore(Path(temp_dir) / "state")
@@ -117,7 +117,7 @@ class DevCommandTests(unittest.TestCase):
         self.assertEqual(stage_harness.stages, [])
 
     def test_edit_reruns_alignment_and_tech_plan(self) -> None:
-        from ai_company.state import StateStore
+        from agent_team.state import StateStore
 
         with TemporaryDirectory() as temp_dir:
             store = StateStore(Path(temp_dir) / "state")
@@ -151,7 +151,7 @@ class DevCommandTests(unittest.TestCase):
         self.assertEqual(tech_plan_runner.calls[1][3], "Use existing module")
 
     def test_skill_overrides_enable_stage_harness_skills(self) -> None:
-        from ai_company.state import StateStore
+        from agent_team.state import StateStore
 
         with TemporaryDirectory() as temp_dir:
             repo_root = Path(temp_dir)
@@ -170,6 +170,33 @@ class DevCommandTests(unittest.TestCase):
             controller.run()
 
         self.assertEqual(stage_harness.enabled_skills_by_stage["Dev"][0].name, "plan")
+
+    def test_capture_repo_structure_excludes_generated_and_dependency_dirs(self) -> None:
+        from agent_team.state import StateStore
+
+        with TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            (repo_root / "todo.py").write_text("")
+            (repo_root / ".venv" / "lib" / "python" / "site-packages").mkdir(parents=True)
+            (repo_root / ".venv" / "lib" / "python" / "site-packages" / "noise.py").write_text("")
+            (repo_root / "node_modules" / "pkg").mkdir(parents=True)
+            (repo_root / "node_modules" / "pkg" / "index.js").write_text("")
+            (repo_root / ".agent-team").mkdir()
+            (repo_root / ".agent-team" / "session.json").write_text("")
+            controller = DevController(
+                config=DevControllerConfig(repo_root=repo_root, state_store=StateStore(repo_root / "state")),
+                prompter=FakePrompter([]),
+                alignment_runner=FakeAlignmentRunner(),
+                tech_plan_runner=FakeTechPlanRunner(),
+                stage_harness=FakeStageHarness(StateStore(repo_root / "state")),
+            )
+
+            structure = controller._capture_repo_structure()
+
+        self.assertIn("todo.py", structure)
+        self.assertNotIn(".venv", structure)
+        self.assertNotIn("node_modules", structure)
+        self.assertNotIn(".agent-team", structure)
 
 
 if __name__ == "__main__":

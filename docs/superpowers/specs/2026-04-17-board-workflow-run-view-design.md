@@ -191,5 +191,5 @@ Artifacts 区域继续保留，但改成 supporting section：
 继续使用：
 
 ```bash
-/tmp/ai-team-runtime-enforced-venv/bin/python -m unittest tests.test_board_server
+/tmp/agent-team-runtime-enforced-venv/bin/python -m unittest tests.test_board_server
 ```

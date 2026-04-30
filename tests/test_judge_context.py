@@ -3,9 +3,9 @@ import unittest
 
 class JudgeContextTests(unittest.TestCase):
     def test_compact_prioritizes_policy_contract_evidence_and_indexes_artifact(self) -> None:
-        from ai_company.judge_context import build_judge_context_compact
-        from ai_company.models import EvidenceItem, GateResult, StageResultEnvelope
-        from ai_company.stage_policies import default_policy_registry
+        from agent_team.judge_context import build_judge_context_compact
+        from agent_team.models import EvidenceItem, GateResult, StageResultEnvelope
+        from agent_team.stage_policies import default_policy_registry
 
         registry = default_policy_registry()
         policy = registry.get("Acceptance")
@@ -13,7 +13,7 @@ class JudgeContextTests(unittest.TestCase):
             session_id="session-1",
             stage="Acceptance",
             contract_id="contract-acceptance",
-            input_artifacts={"prd": ".ai-team/session/prd.md"},
+            input_artifacts={"prd": ".agent-team/session/prd.md"},
         )
         result = StageResultEnvelope(
             session_id="session-1",
@@ -27,7 +27,7 @@ class JudgeContextTests(unittest.TestCase):
                     name="product_level_validation",
                     kind="artifact",
                     summary="Screenshot and visual diff reviewed.",
-                    artifact_path=".ai-team/session/target.png",
+                    artifact_path=".agent-team/session/target.png",
                 )
             ],
         )

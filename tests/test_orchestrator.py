@@ -12,10 +12,10 @@ def local_temp_dir() -> Path:
 
 class OrchestratorTests(unittest.TestCase):
     def test_review_completion_gate_blocks_visual_review_without_required_artifacts(self) -> None:
-        from ai_company.intake import parse_intake_message
-        from ai_company.models import StageOutput
-        from ai_company.orchestrator import WorkflowOrchestrator
-        from ai_company.state import StateStore
+        from agent_team.intake import parse_intake_message
+        from agent_team.models import StageOutput
+        from agent_team.orchestrator import WorkflowOrchestrator
+        from agent_team.state import StateStore
 
         class ReviewBackend:
             supports_rework_routing = True
@@ -77,10 +77,10 @@ class OrchestratorTests(unittest.TestCase):
             self.assertIn("blocked_reason: Review completion gate is incomplete", summary)
 
     def test_review_completion_gate_passes_when_acceptance_outputs_required_artifacts(self) -> None:
-        from ai_company.intake import parse_intake_message
-        from ai_company.models import StageOutput
-        from ai_company.orchestrator import WorkflowOrchestrator
-        from ai_company.state import StateStore
+        from agent_team.intake import parse_intake_message
+        from agent_team.models import StageOutput
+        from agent_team.orchestrator import WorkflowOrchestrator
+        from agent_team.state import StateStore
 
         class ReviewBackend:
             supports_rework_routing = True
@@ -153,9 +153,9 @@ class OrchestratorTests(unittest.TestCase):
             self.assertEqual(result.acceptance_status, "recommended_go")
 
     def test_orchestrator_records_stage_events_for_panel_timeline(self) -> None:
-        from ai_company.models import StageOutput
-        from ai_company.orchestrator import WorkflowOrchestrator
-        from ai_company.state import StateStore
+        from agent_team.models import StageOutput
+        from agent_team.orchestrator import WorkflowOrchestrator
+        from agent_team.state import StateStore
 
         class TimelineBackend:
             supports_rework_routing = True
@@ -196,10 +196,10 @@ class OrchestratorTests(unittest.TestCase):
             self.assertEqual(events[-1]["kind"], "workflow_waiting_human_decision")
 
     def test_generic_figma_1to1_request_triggers_review_completion_gate(self) -> None:
-        from ai_company.intake import parse_intake_message
-        from ai_company.models import StageOutput
-        from ai_company.orchestrator import WorkflowOrchestrator
-        from ai_company.state import StateStore
+        from agent_team.intake import parse_intake_message
+        from agent_team.models import StageOutput
+        from agent_team.orchestrator import WorkflowOrchestrator
+        from agent_team.state import StateStore
 
         class ReviewBackend:
             supports_rework_routing = True
@@ -259,10 +259,10 @@ class OrchestratorTests(unittest.TestCase):
             self.assertIn("review_completion_gate", review)
 
     def test_environment_gate_blocks_host_config_changes_without_explicit_approval(self) -> None:
-        from ai_company.intake import parse_intake_message
-        from ai_company.models import StageOutput
-        from ai_company.orchestrator import WorkflowOrchestrator
-        from ai_company.state import StateStore
+        from agent_team.intake import parse_intake_message
+        from agent_team.models import StageOutput
+        from agent_team.orchestrator import WorkflowOrchestrator
+        from agent_team.state import StateStore
 
         class ReviewBackend:
             supports_rework_routing = True
@@ -307,9 +307,9 @@ class OrchestratorTests(unittest.TestCase):
             self.assertIn("explicit user approval", summary)
 
     def test_acceptance_findings_route_back_to_dev_until_acceptance_passes(self) -> None:
-        from ai_company.models import Finding, StageOutput
-        from ai_company.orchestrator import WorkflowOrchestrator
-        from ai_company.state import StateStore
+        from agent_team.models import Finding, StageOutput
+        from agent_team.orchestrator import WorkflowOrchestrator
+        from agent_team.state import StateStore
 
         class SequencedBackend:
             supports_rework_routing = True
@@ -393,9 +393,9 @@ class OrchestratorTests(unittest.TestCase):
             self.assertIn('"round_index": 2', session_payload)
 
     def test_downstream_findings_create_learning_records(self) -> None:
-        from ai_company.backend import StaticBackend
-        from ai_company.orchestrator import WorkflowOrchestrator
-        from ai_company.state import StateStore
+        from agent_team.backend import StaticBackend
+        from agent_team.orchestrator import WorkflowOrchestrator
+        from agent_team.state import StateStore
 
         repo_root = Path(__file__).resolve().parents[1]
 
@@ -432,9 +432,9 @@ class OrchestratorTests(unittest.TestCase):
             self.assertTrue((state_root / result.session_id / "review.md").exists())
 
     def test_workflow_summary_reflects_progress_and_final_status(self) -> None:
-        from ai_company.backend import StaticBackend
-        from ai_company.orchestrator import WorkflowOrchestrator
-        from ai_company.state import StateStore
+        from agent_team.backend import StaticBackend
+        from agent_team.orchestrator import WorkflowOrchestrator
+        from agent_team.state import StateStore
 
         repo_root = Path(__file__).resolve().parents[1]
 
@@ -476,9 +476,9 @@ class OrchestratorTests(unittest.TestCase):
             self.assertIn("- acceptance_status: recommended_no_go", summary)
 
     def test_review_includes_workflow_status_from_orchestrator_run(self) -> None:
-        from ai_company.backend import StaticBackend
-        from ai_company.orchestrator import WorkflowOrchestrator
-        from ai_company.state import StateStore
+        from agent_team.backend import StaticBackend
+        from agent_team.orchestrator import WorkflowOrchestrator
+        from agent_team.state import StateStore
 
         repo_root = Path(__file__).resolve().parents[1]
 
@@ -521,9 +521,9 @@ class OrchestratorTests(unittest.TestCase):
             self.assertIn("qa_round: 1", review)
 
     def test_acceptance_failure_creates_rework_learning_for_dev(self) -> None:
-        from ai_company.backend import StaticBackend
-        from ai_company.orchestrator import WorkflowOrchestrator
-        from ai_company.state import StateStore
+        from agent_team.backend import StaticBackend
+        from agent_team.orchestrator import WorkflowOrchestrator
+        from agent_team.state import StateStore
 
         repo_root = Path(__file__).resolve().parents[1]
 
@@ -551,9 +551,9 @@ class OrchestratorTests(unittest.TestCase):
             self.assertIn("empty-state UX", learned_memory)
 
     def test_qa_findings_increment_rework_round(self) -> None:
-        from ai_company.backend import StaticBackend
-        from ai_company.orchestrator import WorkflowOrchestrator
-        from ai_company.state import StateStore
+        from agent_team.backend import StaticBackend
+        from agent_team.orchestrator import WorkflowOrchestrator
+        from agent_team.state import StateStore
 
         repo_root = Path(__file__).resolve().parents[1]
 
@@ -586,9 +586,9 @@ class OrchestratorTests(unittest.TestCase):
             self.assertIn("qa_round: 1", review)
 
     def test_visual_acceptance_findings_require_runtime_visual_evidence(self) -> None:
-        from ai_company.backend import StaticBackend
-        from ai_company.orchestrator import WorkflowOrchestrator
-        from ai_company.state import StateStore
+        from agent_team.backend import StaticBackend
+        from agent_team.orchestrator import WorkflowOrchestrator
+        from agent_team.state import StateStore
 
         repo_root = Path(__file__).resolve().parents[1]
 

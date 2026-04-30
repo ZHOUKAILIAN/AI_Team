@@ -10,7 +10,7 @@ class ReleaseToolingTests(unittest.TestCase):
         repo_root = Path(__file__).resolve().parents[1]
         with TemporaryDirectory() as temp_dir:
             pyproject = Path(temp_dir) / "pyproject.toml"
-            pyproject.write_text('[project]\nname = "ai-company"\nversion = "0.1.0"\n')
+            pyproject.write_text('[project]\nname = "agent-team"\nversion = "0.1.0"\n')
 
             result = subprocess.run(
                 [
@@ -34,7 +34,7 @@ class ReleaseToolingTests(unittest.TestCase):
         repo_root = Path(__file__).resolve().parents[1]
         with TemporaryDirectory() as temp_dir:
             pyproject = Path(temp_dir) / "pyproject.toml"
-            pyproject.write_text('[project]\nname = "ai-company"\nversion = "0.2.0b1"\n')
+            pyproject.write_text('[project]\nname = "agent-team"\nversion = "0.2.0b1"\n')
 
             result = subprocess.run(
                 [
@@ -120,13 +120,13 @@ class ReleaseToolingTests(unittest.TestCase):
                 sys.executable,
                 "scripts/release/render_install_script.py",
                 "--repo",
-                "ZHOUKAILIAN/AI_Team",
+                "ZHOUKAILIAN/agent-team-runtime",
                 "--tag",
                 "v0.1.0",
                 "--version",
                 "0.1.0",
                 "--wheel",
-                "ai_company-0.1.0-py3-none-any.whl",
+                "agent_team-0.1.0-py3-none-any.whl",
             ],
             cwd=repo_root,
             capture_output=True,
@@ -135,8 +135,8 @@ class ReleaseToolingTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('AI_TEAM_RELEASE_TAG="${AI_TEAM_RELEASE_TAG:-v0.1.0}"', result.stdout)
-        self.assertIn("ai_company-0.1.0-py3-none-any.whl", result.stdout)
+        self.assertIn('AGENT_TEAM_RELEASE_TAG="${AGENT_TEAM_RELEASE_TAG:-v0.1.0}"', result.stdout)
+        self.assertIn("agent_team-0.1.0-py3-none-any.whl", result.stdout)
 
 
 if __name__ == "__main__":

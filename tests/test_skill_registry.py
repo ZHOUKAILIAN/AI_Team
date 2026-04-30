@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from ai_company.skill_registry import SkillPreferences, SkillRegistry, skill_injection_text
+from agent_team.skill_registry import SkillPreferences, SkillRegistry, skill_injection_text
 
 
 class SkillRegistryTests(unittest.TestCase):
@@ -55,7 +55,7 @@ stage: QA
 # CST
 """
             )
-            with patch.dict(os.environ, {"AI_TEAM_SKILL_PATH": personal_dir}):
+            with patch.dict(os.environ, {"AGENT_TEAM_SKILL_PATH": personal_dir}):
                 registry = SkillRegistry(Path(temp_dir))
                 skills = registry.list_skills(stage="QA", source="personal")
 
@@ -96,7 +96,7 @@ stage: QA
     def test_load_preferences_accepts_inline_yaml_lists(self) -> None:
         with TemporaryDirectory() as temp_dir:
             repo_root = Path(temp_dir)
-            pref_path = repo_root / ".ai-team" / "skill-preferences.yaml"
+            pref_path = repo_root / ".agent-team" / "skill-preferences.yaml"
             pref_path.parent.mkdir()
             pref_path.write_text(
                 """initialized: true

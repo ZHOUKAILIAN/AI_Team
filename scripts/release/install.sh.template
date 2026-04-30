@@ -1,14 +1,14 @@
 #!/bin/sh
 set -eu
 
-AI_TEAM_REPO="${AI_TEAM_REPO:-{{ repo }}}"
-AI_TEAM_RELEASE_TAG="${AI_TEAM_RELEASE_TAG:-{{ tag }}}"
-AI_TEAM_VERSION="${AI_TEAM_VERSION:-{{ version }}}"
-AI_TEAM_WHEEL="${AI_TEAM_WHEEL:-{{ wheel }}}"
-AI_TEAM_RELEASE_BASE_URL="${AI_TEAM_RELEASE_BASE_URL:-https://github.com/${AI_TEAM_REPO}/releases/download/${AI_TEAM_RELEASE_TAG}}"
-AI_TEAM_INSTALL_DIR="${AI_TEAM_INSTALL_DIR:-${HOME}/.local/share/ai-team}"
-AI_TEAM_BIN_DIR="${AI_TEAM_BIN_DIR:-${HOME}/.local/bin}"
-AI_TEAM_FORCE="${AI_TEAM_FORCE:-0}"
+AGENT_TEAM_REPO="${AGENT_TEAM_REPO:-{{ repo }}}"
+AGENT_TEAM_RELEASE_TAG="${AGENT_TEAM_RELEASE_TAG:-{{ tag }}}"
+AGENT_TEAM_VERSION="${AGENT_TEAM_VERSION:-{{ version }}}"
+AGENT_TEAM_WHEEL="${AGENT_TEAM_WHEEL:-{{ wheel }}}"
+AGENT_TEAM_RELEASE_BASE_URL="${AGENT_TEAM_RELEASE_BASE_URL:-https://github.com/${AGENT_TEAM_REPO}/releases/download/${AGENT_TEAM_RELEASE_TAG}}"
+AGENT_TEAM_INSTALL_DIR="${AGENT_TEAM_INSTALL_DIR:-${HOME}/.local/share/agent-team}"
+AGENT_TEAM_BIN_DIR="${AGENT_TEAM_BIN_DIR:-${HOME}/.local/bin}"
+AGENT_TEAM_FORCE="${AGENT_TEAM_FORCE:-0}"
 
 fail() {
   printf '%s\n' "error: $*" >&2
@@ -49,10 +49,10 @@ verify_checksum() {
 }
 
 current_version() {
-  if [ ! -L "${AI_TEAM_INSTALL_DIR}/current" ]; then
+  if [ ! -L "${AGENT_TEAM_INSTALL_DIR}/current" ]; then
     return
   fi
-  current_target="$(readlink "${AI_TEAM_INSTALL_DIR}/current")"
+  current_target="$(readlink "${AGENT_TEAM_INSTALL_DIR}/current")"
   basename "$current_target"
 }
 
@@ -60,8 +60,8 @@ need_command python3
 need_command curl
 check_python_version
 
-if [ "${AI_TEAM_FORCE}" != "1" ] && [ "$(current_version || true)" = "${AI_TEAM_VERSION}" ]; then
-  printf '%s\n' "AI_Team ${AI_TEAM_VERSION} is already installed."
+if [ "${AGENT_TEAM_FORCE}" != "1" ] && [ "$(current_version || true)" = "${AGENT_TEAM_VERSION}" ]; then
+  printf '%s\n' "Agent Team ${AGENT_TEAM_VERSION} is already installed."
   exit 0
 fi
 
@@ -76,33 +76,33 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
-mkdir -p "${AI_TEAM_INSTALL_DIR}/versions" "${AI_TEAM_BIN_DIR}"
+mkdir -p "${AGENT_TEAM_INSTALL_DIR}/versions" "${AGENT_TEAM_BIN_DIR}"
 
-curl -fsSL "${AI_TEAM_RELEASE_BASE_URL}/${AI_TEAM_WHEEL}" -o "${tmp_dir}/${AI_TEAM_WHEEL}" || fail "failed to download ${AI_TEAM_WHEEL}"
-curl -fsSL "${AI_TEAM_RELEASE_BASE_URL}/SHA256SUMS" -o "${tmp_dir}/SHA256SUMS" || fail "failed to download SHA256SUMS"
-verify_checksum "${tmp_dir}/${AI_TEAM_WHEEL}" "${tmp_dir}/SHA256SUMS"
+curl -fsSL "${AGENT_TEAM_RELEASE_BASE_URL}/${AGENT_TEAM_WHEEL}" -o "${tmp_dir}/${AGENT_TEAM_WHEEL}" || fail "failed to download ${AGENT_TEAM_WHEEL}"
+curl -fsSL "${AGENT_TEAM_RELEASE_BASE_URL}/SHA256SUMS" -o "${tmp_dir}/SHA256SUMS" || fail "failed to download SHA256SUMS"
+verify_checksum "${tmp_dir}/${AGENT_TEAM_WHEEL}" "${tmp_dir}/SHA256SUMS"
 
-version_dir="${AI_TEAM_INSTALL_DIR}/versions/${AI_TEAM_VERSION}"
+version_dir="${AGENT_TEAM_INSTALL_DIR}/versions/${AGENT_TEAM_VERSION}"
 candidate_root="$version_dir"
 rm -rf "$candidate_root"
 mkdir -p "$candidate_root"
 
 python3 -m venv "${candidate_root}/venv" || fail "failed to create virtual environment"
-"${candidate_root}/venv/bin/python" -m pip install --no-index "${tmp_dir}/${AI_TEAM_WHEEL}" || fail "failed to install ${AI_TEAM_WHEEL}"
-"${candidate_root}/venv/bin/ai-team" --help >/dev/null || fail "candidate ${AI_TEAM_VERSION} failed smoke check"
+"${candidate_root}/venv/bin/python" -m pip install --no-index "${tmp_dir}/${AGENT_TEAM_WHEEL}" || fail "failed to install ${AGENT_TEAM_WHEEL}"
+"${candidate_root}/venv/bin/agent-team" --help >/dev/null || fail "candidate ${AGENT_TEAM_VERSION} failed smoke check"
 
 cat > "${candidate_root}/install-manifest.json" <<EOF
 {
-  "repo": "${AI_TEAM_REPO}",
-  "release_tag": "${AI_TEAM_RELEASE_TAG}",
-  "version": "${AI_TEAM_VERSION}",
-  "wheel": "${AI_TEAM_WHEEL}"
+  "repo": "${AGENT_TEAM_REPO}",
+  "release_tag": "${AGENT_TEAM_RELEASE_TAG}",
+  "version": "${AGENT_TEAM_VERSION}",
+  "wheel": "${AGENT_TEAM_WHEEL}"
 }
 EOF
 
-ln -sfn "$version_dir" "${AI_TEAM_INSTALL_DIR}/current"
-ln -sfn "${AI_TEAM_INSTALL_DIR}/current/venv/bin/ai-team" "${AI_TEAM_BIN_DIR}/ai-team"
+ln -sfn "$version_dir" "${AGENT_TEAM_INSTALL_DIR}/current"
+ln -sfn "${AGENT_TEAM_INSTALL_DIR}/current/venv/bin/agent-team" "${AGENT_TEAM_BIN_DIR}/agent-team"
 candidate_root=""
 
-printf '%s\n' "Installed AI_Team ${AI_TEAM_VERSION}."
-printf '%s\n' "Command: ${AI_TEAM_BIN_DIR}/ai-team"
+printf '%s\n' "Installed Agent Team ${AGENT_TEAM_VERSION}."
+printf '%s\n' "Command: ${AGENT_TEAM_BIN_DIR}/agent-team"

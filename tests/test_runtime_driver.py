@@ -14,7 +14,7 @@ def local_temp_dir() -> Path:
 
 class RuntimeDriverSchemaTests(unittest.TestCase):
     def test_stage_result_schema_is_strict_for_codex_structured_output(self) -> None:
-        from ai_company.runtime_driver import _stage_result_schema
+        from agent_team.runtime_driver import _stage_result_schema
 
         def assert_strict_objects(schema: dict[str, object], path: str) -> None:
             if schema.get("type") == "object":
@@ -40,7 +40,7 @@ class RuntimeDriverTraceTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "ai_company",
+                    "agent_team",
                     "--repo-root",
                     str(repo_root),
                     "--state-root",
@@ -79,7 +79,7 @@ class RuntimeDriverTraceTests(unittest.TestCase):
         self.assertTrue(all(step["status"] == "ok" for step in trace["steps"]))
 
     def test_runtime_trace_validator_blocks_missing_required_steps(self) -> None:
-        from ai_company.runtime_driver import REQUIRED_PASS_TRACE_STEPS, _validate_runtime_trace
+        from agent_team.runtime_driver import REQUIRED_PASS_TRACE_STEPS, _validate_runtime_trace
 
         trace = [{"step": step, "status": "ok"} for step in REQUIRED_PASS_TRACE_STEPS[:-1]]
         result = _validate_runtime_trace(trace, required_steps=REQUIRED_PASS_TRACE_STEPS)

@@ -1,7 +1,7 @@
 [project]
-name = "ai-company"
+name = "agent-team-runtime"
 version = "0.2.0b3"
-description = "Local workflow engine for a one-person AI company."
+description = "CLI-first AI agent team orchestration runtime."
 readme = "README.md"
 requires-python = ">=3.13"
 
@@ -9,21 +9,21 @@ requires-python = ">=3.13"
 openai-sandbox = ["openai-agents[docker]"]
 
 [project.scripts]
-ai-team = "ai_company.cli:main"
+agent-team = "agent_team.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["ai_company"]
+packages = ["agent_team"]
 include-package-data = true
 
 [tool.setuptools.package-data]
-ai_company = [
+agent_team = [
     "acceptance_policy.json",
     "assets/roles/*/*.md",
     "assets/skills/*/SKILL.md",
-    "assets/codex_skill/ai-company-workflow/SKILL.md",
-    "assets/codex_skill/ai-company-workflow/scripts/*.sh",
+    "assets/codex_skill/agent-team-workflow/SKILL.md",
+    "assets/codex_skill/agent-team-workflow/scripts/*.sh",
 ]

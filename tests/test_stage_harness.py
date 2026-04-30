@@ -3,12 +3,12 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from ai_company.alignment import AlignmentCriterion, AlignmentDraft, save_confirmed_alignment
-from ai_company.executor import ExecutorResult
-from ai_company.models import StageContract
-from ai_company.skill_registry import Skill
-from ai_company.stage_harness import StageHarness, stage_prompt
-from ai_company.tech_plan import TechPlanDraft, save_confirmed_tech_plan
+from agent_team.alignment import AlignmentCriterion, AlignmentDraft, save_confirmed_alignment
+from agent_team.executor import ExecutorResult
+from agent_team.models import StageContract
+from agent_team.skill_registry import Skill
+from agent_team.stage_harness import StageHarness, stage_prompt
+from agent_team.tech_plan import TechPlanDraft, save_confirmed_tech_plan
 
 
 class FakeExecutor:
@@ -62,7 +62,7 @@ class StageHarnessTests(unittest.TestCase):
             execution_context={"session_id": "s1", "stage": "QA"},
             contract=StageContract(session_id="s1", stage="QA", goal="Verify", contract_id="qa"),
             dev_implementation_md="# Implementation",
-            dev_changed_files="ai_company/foo.py\n---\ncontent",
+            dev_changed_files="agent_team/foo.py\n---\ncontent",
         )
 
         self.assertIn("CLEAN sandbox", prompt)
@@ -103,7 +103,7 @@ class StageHarnessTests(unittest.TestCase):
         self.assertIn("the human decides", prompt)
 
     def test_stage_prompt_injects_enabled_skills_between_role_and_context(self) -> None:
-        from ai_company.skill_registry import Skill
+        from agent_team.skill_registry import Skill
 
         prompt = stage_prompt(
             stage="Dev",
@@ -125,7 +125,7 @@ class StageHarnessTests(unittest.TestCase):
         self.assertIn("Make a checklist", prompt)
 
     def test_run_product_stage_submits_and_verifies_result(self) -> None:
-        from ai_company.state import StateStore
+        from agent_team.state import StateStore
 
         with TemporaryDirectory() as temp_dir:
             repo_root = Path(temp_dir) / "repo"
@@ -140,7 +140,7 @@ class StageHarnessTests(unittest.TestCase):
             )
             tech_plan = TechPlanDraft(
                 approach_summary="Do the thing with minimal changes.",
-                affected_modules=["ai_company/example.py"],
+                affected_modules=["agent_team/example.py"],
                 dependencies=[],
                 implementation_steps=["Write the PRD"],
                 risks=[],
@@ -193,7 +193,7 @@ class StageHarnessTests(unittest.TestCase):
 
             record = harness.run_stage(session.session_id, "Product")
             summary = store.load_workflow_summary(session.session_id)
-            installed_skill = session.session_dir / "exec" / ".ai-team" / "skills" / "cst" / "SKILL.md"
+            installed_skill = session.session_dir / "exec" / ".agent-team" / "skills" / "cst" / "SKILL.md"
             installed_skill_exists = installed_skill.exists()
 
         self.assertEqual(record.stage, "Product")

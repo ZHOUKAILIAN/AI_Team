@@ -3,8 +3,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from ai_company.alignment import AlignmentCriterion, AlignmentDraft
-from ai_company.tech_plan import (
+from agent_team.alignment import AlignmentCriterion, AlignmentDraft
+from agent_team.tech_plan import (
     TechPlanDraft,
     load_confirmed_tech_plan,
     parse_tech_plan_json,

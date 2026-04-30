@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from ai_company.alignment import (
+from agent_team.alignment import (
     AlignmentCriterion,
     AlignmentDraft,
     acceptance_criteria_strings,
