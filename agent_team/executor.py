@@ -64,7 +64,7 @@ class CodexExecutor:
         if self.sandbox:
             command.extend(["--sandbox", self.sandbox])
         if self.approval:
-            command.extend(["--ask-for-approval", self.approval])
+            command.extend(["-c", f'approval_policy="{self.approval}"'])
         if self.profile:
             command.extend(["--profile", self.profile])
         command.append(prompt)

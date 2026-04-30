@@ -412,8 +412,8 @@ class CodexExecTests(unittest.TestCase):
         self.assertIn("gpt-5.5", command)
         self.assertIn("--sandbox", command)
         self.assertIn("workspace-write", command)
-        self.assertIn("--ask-for-approval", command)
-        self.assertIn("never", command)
+        self.assertIn("-c", command)
+        self.assertIn('approval_policy="never"', command)
         self.assertIn("--profile", command)
         self.assertIn("default", command)
         self.assertEqual(command[-1], "Prompt")
@@ -502,7 +502,7 @@ class CodexExecConfig:
         if self.sandbox:
             command.extend(["--sandbox", self.sandbox])
         if self.approval:
-            command.extend(["--ask-for-approval", self.approval])
+            command.extend(["-c", f'approval_policy="{self.approval}"'])
         if self.profile:
             command.extend(["--profile", self.profile])
         command.append(prompt)
