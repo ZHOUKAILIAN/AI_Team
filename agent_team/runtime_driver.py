@@ -48,7 +48,7 @@ class RuntimeDriverOptions:
     openai_api_key: str | None = None
     openai_base_url: str | None = None
     openai_proxy_url: str | None = None
-    openai_user_agent: str = "AI-Team-Runtime/0.1"
+    openai_user_agent: str = "Agent-Team-Runtime/0.1"
     openai_oa: str | None = None
     codex_model: str = ""
     codex_sandbox: str = "workspace-write"

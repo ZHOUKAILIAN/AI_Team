@@ -2,14 +2,13 @@
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: company-run.sh '<raw user message>'" >&2
-  exit 2
+  echo "Usage: agent-team-run.sh '<raw user message>'" >&2
+  exit 1
 fi
 
 RAW_MESSAGE="$*"
-REPO_ROOT="$(pwd)"
-CODEX_HOME_DIR="${CODEX_HOME:-${HOME}/.codex}"
-VENDOR_DIR="${AGENT_TEAM_VENDOR_DIR:-${CODEX_HOME_DIR}/vendor/agent-team}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 AGENT_TEAM_EXECUTOR="${AGENT_TEAM_EXECUTOR:-codex-exec}"
 
 AGENT_TEAM_ARGS=(
@@ -41,8 +40,9 @@ if [[ -n "${AGENT_TEAM_CODEX_APPROVAL_POLICY:-}" ]]; then
   AGENT_TEAM_ARGS+=(--codex-approval-policy "${AGENT_TEAM_CODEX_APPROVAL_POLICY}")
 fi
 
-if [[ -f "${VENDOR_DIR}/agent_team/cli.py" ]]; then
-  PYTHONPATH="${VENDOR_DIR}${PYTHONPATH:+:${PYTHONPATH}}" python3 -m agent_team "${AGENT_TEAM_ARGS[@]}"
+cd "${REPO_ROOT}"
+if [[ -f "${REPO_ROOT}/agent_team/cli.py" ]]; then
+  python3 -m agent_team "${AGENT_TEAM_ARGS[@]}"
 elif command -v agent-team >/dev/null 2>&1; then
   agent-team "${AGENT_TEAM_ARGS[@]}"
 else

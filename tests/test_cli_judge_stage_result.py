@@ -31,17 +31,17 @@ class JudgeStageResultCliTests(unittest.TestCase):
 
         args = argparse.Namespace(
             openai_oa=None,
-            openai_user_agent="AI-Team-Runtime/0.1",
+            openai_user_agent="Agent-Team-Runtime/0.1",
         )
 
-        self.assertEqual(_resolve_openai_oa_header(args), "AI-Team-Runtime/0.1")
+        self.assertEqual(_resolve_openai_oa_header(args), "Agent-Team-Runtime/0.1")
 
     def test_resolve_openai_oa_header_prefers_explicit_value(self) -> None:
         from agent_team.cli import _resolve_openai_oa_header
 
         args = argparse.Namespace(
             openai_oa="proxy-specific-oa",
-            openai_user_agent="AI-Team-Runtime/0.1",
+            openai_user_agent="Agent-Team-Runtime/0.1",
         )
 
         self.assertEqual(_resolve_openai_oa_header(args), "proxy-specific-oa")

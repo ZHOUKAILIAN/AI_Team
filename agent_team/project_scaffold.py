@@ -160,10 +160,16 @@ Best practice: invoke this skill only when Codex is opened at the target project
 - Generic methodology skills must not change the Agent Team stage order, approval gates, or artifact ownership.
 - Generic methodology skills must not replace QA with Dev self-verification or replace Acceptance with code review.
 
+## Compatibility
+
+- Agent Team is opt-in. Use it when the work should be routed through the Product -> Dev -> QA -> Acceptance handoff.
+- Ordinary AI Q&A style development stays valid for one-off edits, investigations, and ad hoc work that do not need the session/state-machine layer.
+- If a change is already running inside an Agent Team session, write progress and evidence back to the session artifacts instead of treating ad hoc chat notes as the source of truth.
+
 ## Available assets
 
-- `scripts/company-init.sh`: local setup helper that generates `.codex/agents/` and `.agents/skills/agent-team-run/`; generated files stay out of git.
-- `scripts/company-run.sh`: local runtime-driver helper that calls `agent-team run-requirement` and prints `session_id`, `artifact_dir`, and `summary_path`.
+- `scripts/agent-team-init.sh`: local setup helper that generates `.codex/agents/` and `.agents/skills/agent-team-run/`; generated files stay out of git.
+- `scripts/agent-team-run.sh`: local runtime-driver helper that calls `agent-team run-requirement` and prints `session_id`, `artifact_dir`, and `summary_path`.
 - `.codex/agents/`: local Product, Dev, QA, and Acceptance agents for this repository.
 - `agent-team`: runtime CLI backed by `agent_team/cli.py`, exposing `agent-team dev` for human terminal workflows and `agent-team start-session` for explicit bootstrap.
 - `.agent-team/<session_id>/`: the session-scoped runtime directory; `artifact_dir` points here and session metadata lives beside the artifacts.

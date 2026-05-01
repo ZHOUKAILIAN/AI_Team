@@ -9,6 +9,7 @@ from typing import Any
 
 from .judge_context import ArtifactRef
 from .models import AcceptanceContract, Finding, StageContract
+from .project_structure import detect_project_structure, resolve_role_context_paths
 from .state import StateStore
 
 MAX_EXECUTION_CONTEXT_TOKENS = 24_000
@@ -232,16 +233,21 @@ def _constraints_from_contract(contract: AcceptanceContract | None) -> list[str]
 
 
 def _repo_context_summary(*, repo_root: Path, stage: str) -> str:
-    role_dir = repo_root / stage
-    files = [
-        role_dir / "context.md",
-        role_dir / "memory.md",
-        role_dir / "SKILL.md",
-    ]
+    structure = detect_project_structure(repo_root)
+    role_paths = resolve_role_context_paths(repo_root, stage)
+    files = [role_paths.context_path, role_paths.memory_path, role_paths.guidance_path]
     present = [str(path.relative_to(repo_root)) for path in files if path.exists()]
-    if not present:
-        return f"No repo-local role files found for {stage}."
-    return "Repo-local role files available: " + ", ".join(present)
+    details = []
+    if structure.doc_map:
+        details.append(
+            "doc map: "
+            + ", ".join(f"{key}={value}" for key, value in sorted(structure.doc_map.items()))
+        )
+    if present:
+        details.append(f"{role_paths.source} role files: " + ", ".join(present))
+    if not details:
+        return f"No repo-local Agent Team context files found for {stage}."
+    return " | ".join(details)
 
 
 def _digest_text(value: str) -> str:

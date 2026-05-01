@@ -1,0 +1,14 @@
+{
+  "name": "agent-team-runtime-monorepo",
+  "private": true,
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "dev:web": "npm --workspace apps/web run dev",
+    "build:web": "npm --workspace apps/web run build",
+    "copy:web": "python3 -m agent_team.web_assets copy",
+    "build": "npm run build:web && npm run copy:web",
+    "typecheck:web": "npm --workspace apps/web run typecheck"
+  }
+}

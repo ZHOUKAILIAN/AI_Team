@@ -4,6 +4,7 @@ from pathlib import Path
 
 from .models import RoleProfile
 from .packaged_assets import packaged_text
+from .project_structure import resolve_role_context_paths
 
 DEFAULT_ROLE_NAMES = ("Product", "Dev", "QA", "Acceptance", "Ops")
 
@@ -16,12 +17,13 @@ def load_role_profiles(
     profiles: dict[str, RoleProfile] = {}
 
     for role_name in role_names:
-        role_dir = repo_root / role_name
-        context_path = role_dir / "context.md"
-        memory_path = role_dir / "memory.md"
-        skill_path = role_dir / "SKILL.md"
+        paths = resolve_role_context_paths(repo_root, role_name)
+        role_dir = paths.role_dir
+        context_path = paths.context_path
+        memory_path = paths.memory_path
+        skill_path = paths.guidance_path
         learning_dir = (state_root / "memory" / role_name) if state_root else None
-        if role_dir.exists():
+        if paths.source != "packaged":
             base_context_text = _read_text(context_path)
             base_memory_text = _read_text(memory_path)
             base_skill_text = _read_text(skill_path)

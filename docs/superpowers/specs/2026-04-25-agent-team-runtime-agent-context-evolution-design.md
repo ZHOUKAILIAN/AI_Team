@@ -262,7 +262,7 @@ CodexStageExecutor
 | `api_key` | OpenAI 或中转 API key |
 | `base_url` | 兼容 OpenAI API 的中转地址 |
 | `proxy_url` | 例如 `http://127.0.0.1:7897` |
-| `user_agent` | 默认 `AI-Team-Runtime/0.1` |
+| `user_agent` | 默认 `Agent-Team-Runtime/0.1` |
 | `oa_header` | 中转需要的 `oa` header，默认等于 user agent |
 
 这部分应抽到通用 `OpenAIClientConfig`，judge 和 executor 共用。

@@ -31,7 +31,7 @@
   Responsibility: define the real state-machine workflow that runs in the active Codex session.
 - Modify: `codex-skill/agent-team-workflow/SKILL.md`
   Responsibility: mirror the root skill so installed sessions behave the same way.
-- Modify: `codex-skill/agent-team-workflow/scripts/company-run.sh`
+- Modify: `codex-skill/agent-team-workflow/scripts/agent-team-run.sh`
   Responsibility: bootstrap a workflow session instead of executing the deterministic backend as if it were real QA/Acceptance.
 
 ### Tests
@@ -380,7 +380,7 @@ git commit -m "feat: add workflow session bootstrap command"
 **Files:**
 - Modify: `SKILL.md`
 - Modify: `codex-skill/agent-team-workflow/SKILL.md`
-- Modify: `codex-skill/agent-team-workflow/scripts/company-run.sh`
+- Modify: `codex-skill/agent-team-workflow/scripts/agent-team-run.sh`
 - Modify: `tests/test_skill_package.py`
 
 - [ ] **Step 1: Write the failing tests**
@@ -404,7 +404,7 @@ class SkillPackageTests(unittest.TestCase):
 
     def test_helper_script_bootstraps_session_instead_of_running_deterministic_backend(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
-        helper_script = repo_root / "codex-skill" / "agent-team-workflow" / "scripts" / "company-run.sh"
+        helper_script = repo_root / "codex-skill" / "agent-team-workflow" / "scripts" / "agent-team-run.sh"
         content = helper_script.read_text()
 
         self.assertIn("start-session", content)
@@ -449,7 +449,7 @@ Then execute the workflow in the current Codex session using the artifact contra
 Do not treat deterministic runtime output as real QA or Acceptance evidence.
 ```
 
-Update `codex-skill/agent-team-workflow/scripts/company-run.sh`:
+Update `codex-skill/agent-team-workflow/scripts/agent-team-run.sh`:
 
 ```bash
 cd "${RUNTIME_DIR}"
@@ -464,7 +464,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add SKILL.md codex-skill/agent-team-workflow/SKILL.md codex-skill/agent-team-workflow/scripts/company-run.sh tests/test_skill_package.py
+git add SKILL.md codex-skill/agent-team-workflow/SKILL.md codex-skill/agent-team-workflow/scripts/agent-team-run.sh tests/test_skill_package.py
 git commit -m "feat: rewrite workflow skills for single-session execution"
 ```
 

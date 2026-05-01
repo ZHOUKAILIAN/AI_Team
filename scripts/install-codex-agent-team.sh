@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if ! command -v git >/dev/null 2>&1; then
-  echo "git is required to install agent-team-workflow" >&2
+  echo "git is required to install Agent Team runtime" >&2
   exit 1
 fi
 
@@ -27,7 +27,4 @@ else
   git clone --depth 1 "${REPO_URL}" "${VENDOR_DIR}"
 fi
 
-"${VENDOR_DIR}/scripts/install-codex-skill.sh"
-
 echo "Installed vendored Agent Team runtime to ${VENDOR_DIR}"
-echo "Installed agent-team-workflow skill to ${CODEX_HOME_DIR}/skills/agent-team-workflow"

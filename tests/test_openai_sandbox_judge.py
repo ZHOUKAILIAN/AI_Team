@@ -92,7 +92,7 @@ class OpenAISandboxJudgeTests(unittest.TestCase):
         self.assertEqual(calls[0]["api_key"], "sk-test")
         self.assertEqual(calls[0]["base_url"], "https://example.test/v1")
         self.assertEqual(calls[0]["proxy_url"], "http://127.0.0.1:7897")
-        self.assertEqual(calls[0]["user_agent"], "AI-Team-Runtime/0.1")
+        self.assertEqual(calls[0]["user_agent"], "Agent-Team-Runtime/0.1")
         self.assertEqual(calls[0]["oa_header"], "oa-test")
         self.assertIn("read-only", calls[0]["prompt"])
         self.assertIn("JudgeResult", calls[0]["prompt"])
@@ -273,7 +273,7 @@ class OpenAISandboxJudgeTests(unittest.TestCase):
                 api_key="sk-test",
                 base_url="https://example.test/v1",
                 proxy_url="http://127.0.0.1:7897",
-                user_agent="AI-Team-Runtime/0.1",
+                user_agent="Agent-Team-Runtime/0.1",
                 oa_header="oa-test",
             )
 
@@ -285,7 +285,7 @@ class OpenAISandboxJudgeTests(unittest.TestCase):
             self.assertEqual(calls["run_config"].model_provider.openai_client.base_url, "https://example.test/v1")
             self.assertEqual(
                 calls["run_config"].model_provider.openai_client.default_headers["User-Agent"],
-                "AI-Team-Runtime/0.1",
+                "Agent-Team-Runtime/0.1",
             )
             self.assertEqual(
                 calls["run_config"].model_provider.openai_client.default_headers["oa"],

@@ -6,7 +6,7 @@
 
 ## [0.2.0b3] - 2026-04-26
 
-- Fixed the packaged global `company-run.sh` helper so it runs against the current workspace repo root instead of requiring repo-local role directories or switching into the runtime vendor checkout.
+- Fixed the packaged global `agent-team-run.sh` helper so it runs against the current workspace repo root instead of requiring repo-local role directories or switching into the runtime vendor checkout.
 
 ## [0.2.0b2] - 2026-04-26
 

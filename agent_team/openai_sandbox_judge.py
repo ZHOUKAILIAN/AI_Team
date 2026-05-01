@@ -8,7 +8,7 @@ from .gate_evaluator import JudgeResult
 from .models import Finding
 
 SUPPORTED_VERDICTS = {"pass", "rework", "blocked", "needs_human"}
-DEFAULT_OPENAI_USER_AGENT = "AI-Team-Runtime/0.1"
+DEFAULT_OPENAI_USER_AGENT = "Agent-Team-Runtime/0.1"
 
 
 class OpenAISandboxJudgeUnavailable(RuntimeError):

@@ -7,18 +7,17 @@ from pathlib import Path
 
 from .backend import DeterministicBackend
 from .board import build_board_snapshot
-from .board_server import create_board_server
 from .executor import ClaudeCodeExecutor, CodexExecutor, StageExecutor
 from .execution_context import build_stage_execution_context
 from .gatekeeper import evaluate_candidate
-from .codex_skill_installer import install_codex_skill
 from .harness_paths import default_state_root
 from .intake import parse_intake_message
 from .interactive import DevController, DevControllerConfig, ExecutorAlignmentRunner, ExecutorTechPlanRunner, InteractivePrompter
 from .models import Finding, GateResult, StageResultEnvelope, WorkflowSummary
 from .orchestrator import WorkflowOrchestrator
-from .panel import build_panel_snapshot, run_panel_server
+from .panel import build_panel_snapshot
 from .project_scaffold import scaffold_project_codex_files
+from .project_structure import ensure_project_structure
 from .skill_registry import STAGES, SOURCE_LABELS, SkillRegistry
 from .stage_harness import StageHarness
 from .stage_contracts import build_stage_contract
@@ -66,11 +65,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     codex_init_parser.set_defaults(handler=_handle_codex_init)
 
-    install_skill_parser = subparsers.add_parser(
-        "install-codex-skill",
-        help="Install the packaged agent-team-workflow skill into CODEX_HOME.",
+    project_init_parser = subparsers.add_parser(
+        "init-project-structure",
+        help="Create or refresh the project-level Agent Team doc structure and doc map.",
+        description=(
+            "Create or refresh the project-level Agent Team doc structure and doc map. "
+            "Use this when a repository does not yet have a clear docs structure."
+        ),
     )
-    install_skill_parser.set_defaults(handler=_handle_install_codex_skill)
+    project_init_parser.set_defaults(handler=_handle_init_project_structure)
 
     run_parser = subparsers.add_parser(
         "run",
@@ -170,7 +173,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_requirement_parser.add_argument("--openai-api-key")
     run_requirement_parser.add_argument("--openai-base-url")
     run_requirement_parser.add_argument("--openai-proxy-url")
-    run_requirement_parser.add_argument("--openai-user-agent", default="AI-Team-Runtime/0.1")
+    run_requirement_parser.add_argument("--openai-user-agent", default="Agent-Team-Runtime/0.1")
     run_requirement_parser.add_argument("--openai-oa")
     run_requirement_parser.add_argument("--codex-model", default="", help="Optional model for codex-exec.")
     run_requirement_parser.add_argument(
@@ -347,8 +350,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     verify_result_parser.add_argument(
         "--openai-user-agent",
-        default="AI-Team-Runtime/0.1",
-        help="User-Agent for OpenAI-compatible requests. Defaults to AI-Team-Runtime/0.1.",
+        default="Agent-Team-Runtime/0.1",
+        help="User-Agent for OpenAI-compatible requests. Defaults to Agent-Team-Runtime/0.1.",
     )
     verify_result_parser.add_argument(
         "--openai-oa",
@@ -393,8 +396,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     judge_result_parser.add_argument(
         "--openai-user-agent",
-        default="AI-Team-Runtime/0.1",
-        help="User-Agent for OpenAI-compatible requests. Defaults to AI-Team-Runtime/0.1.",
+        default="Agent-Team-Runtime/0.1",
+        help="User-Agent for OpenAI-compatible requests. Defaults to Agent-Team-Runtime/0.1.",
     )
     judge_result_parser.add_argument(
         "--openai-oa",
@@ -547,16 +550,18 @@ def _handle_codex_init(args: argparse.Namespace) -> int:
     print(f"generated_files: {len(written_paths)}")
     print("recommended_context: open Codex at the project root before using the local Agent Team run skill")
     print("recommended_run_entry: $agent-team-run")
-    print(f"manual_init_fallback: {args.repo_root / 'scripts' / 'company-init.sh'}")
-    print(f"manual_run_fallback: {args.repo_root / 'scripts' / 'company-run.sh'} \"<your message>\"")
+    print(f"manual_init_fallback: {args.repo_root / 'scripts' / 'agent-team-init.sh'}")
+    print(f"manual_run_fallback: {args.repo_root / 'scripts' / 'agent-team-run.sh'} \"<your message>\"")
     return 0
 
 
-def _handle_install_codex_skill(args: argparse.Namespace) -> int:
-    del args
-    target = install_codex_skill()
-    print(f"installed_skill: {target / 'SKILL.md'}")
-    print(f"installed_helper: {target / 'scripts' / 'company-run.sh'}")
+def _handle_init_project_structure(args: argparse.Namespace) -> int:
+    structure = ensure_project_structure(args.repo_root)
+    print(f"repo_root: {structure.repo_root}")
+    print(f"project_root: {structure.project_root}")
+    print(f"doc_map_path: {structure.doc_map_path}")
+    print(f"used_default_docs: {structure.used_default_docs}")
+    print(f"doc_map: {json.dumps(structure.doc_map, ensure_ascii=False, sort_keys=True)}")
     return 0
 
 
@@ -1334,15 +1339,14 @@ def _handle_board_snapshot(args: argparse.Namespace) -> int:
 def _handle_serve_board(args: argparse.Namespace) -> int:
     if not args.all_workspaces:
         raise SystemExit("serve-board currently requires --all-workspaces.")
-    server = create_board_server(host=args.host, port=args.port)
-    print(f"board_url: http://{args.host}:{server.server_address[1]}")
+    from .web_server import run_console_server
+
     print(f"poll_interval_seconds: {args.poll_interval}")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        return 0
-    finally:
-        server.server_close()
+    run_console_server(
+        host=args.host,
+        port=args.port,
+        default_route="/projects",
+    )
     return 0
 
 
@@ -1406,14 +1410,17 @@ def _handle_status(args: argparse.Namespace) -> int:
 
 
 def _handle_panel(args: argparse.Namespace) -> int:
+    from .web_server import run_console_server
+
     store = StateStore(args.state_root)
-    run_panel_server(
-        store,
-        session_id=args.session_id,
+    run_console_server(
+        store=store,
+        default_session_id=args.session_id,
         repo_root=args.repo_root,
         host=args.host,
         port=args.port,
         open_browser=args.open_browser,
+        default_route="/projects",
     )
     return 0
 

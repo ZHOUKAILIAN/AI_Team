@@ -775,7 +775,7 @@ OPENAI_API_KEY=... .venv/bin/agent-team --state-root /tmp/agent-team-demo verify
 
 `--openai-api-key` 和 `--openai-base-url` 不传时，Agents SDK 继续按环境变量解析，例如
 `OPENAI_API_KEY` / `OPENAI_BASE_URL`。如果网络需要本地代理，可以显式传
-`--openai-proxy-url "http://127.0.0.1:7897"`。judge runtime 默认使用 `AI-Team-Runtime/0.1`
+`--openai-proxy-url "http://127.0.0.1:7897"`。judge runtime 默认使用 `Agent-Team-Runtime/0.1`
 作为 User-Agent，避免部分 OpenAI-compatible 网关对 `OpenAI/Python ...` 默认 SDK 标识做 WAF 拦截。
 `oa` header 默认会继承 `--openai-user-agent`，这样像 `ai.smartingredients.my` 这类依赖自定义 header 的中转，
 不需要每次手动再传一遍。如果你的中转要求一个与 User-Agent 不同的 `oa` 值，再显式传
