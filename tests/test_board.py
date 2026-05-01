@@ -11,14 +11,14 @@ def local_temp_dir() -> Path:
 
 class BoardSnapshotTests(unittest.TestCase):
     def test_board_snapshot_groups_sessions_by_project_and_worktree(self) -> None:
-        from ai_company.board import build_board_snapshot
-        from ai_company.state import StateStore
-        from ai_company.workspace_metadata import refresh_workspace_metadata
+        from agent_team.board import build_board_snapshot
+        from agent_team.state import StateStore
+        from agent_team.workspace_metadata import refresh_workspace_metadata
 
         repo_root = Path(__file__).resolve().parents[1]
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             codex_home = Path(temp_dir)
-            state_root = codex_home / "ai-team" / "workspaces" / "ai-team-runtime-abc"
+            state_root = codex_home / "agent-team" / "workspaces" / "agent-team-runtime-abc"
             store = StateStore(state_root)
             session = store.create_session("build readonly board")
             refresh_workspace_metadata(state_root=state_root, repo_root=repo_root)
@@ -36,14 +36,14 @@ class BoardSnapshotTests(unittest.TestCase):
             self.assertEqual(worktree["sessions"][0]["current_state"], "Intake")
 
     def test_board_snapshot_includes_active_stage_run_summary(self) -> None:
-        from ai_company.board import build_board_snapshot
-        from ai_company.state import StateStore
-        from ai_company.workspace_metadata import refresh_workspace_metadata
+        from agent_team.board import build_board_snapshot
+        from agent_team.state import StateStore
+        from agent_team.workspace_metadata import refresh_workspace_metadata
 
         repo_root = Path(__file__).resolve().parents[1]
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             codex_home = Path(temp_dir)
-            state_root = codex_home / "ai-team" / "workspaces" / "ai-team-runtime-abc"
+            state_root = codex_home / "agent-team" / "workspaces" / "agent-team-runtime-abc"
             store = StateStore(state_root)
             session = store.create_session("build readonly board")
             store.create_stage_run(
@@ -67,12 +67,12 @@ class BoardSnapshotTests(unittest.TestCase):
             )
 
     def test_board_snapshot_falls_back_for_legacy_workspace_without_metadata(self) -> None:
-        from ai_company.board import build_board_snapshot
-        from ai_company.state import StateStore
+        from agent_team.board import build_board_snapshot
+        from agent_team.state import StateStore
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             codex_home = Path(temp_dir)
-            state_root = codex_home / "ai-team" / "workspaces" / "legacy-workspace-123"
+            state_root = codex_home / "agent-team" / "workspaces" / "legacy-workspace-123"
             StateStore(state_root).create_session("legacy session")
 
             snapshot = build_board_snapshot(codex_home=codex_home)
@@ -82,12 +82,12 @@ class BoardSnapshotTests(unittest.TestCase):
             self.assertEqual(snapshot["projects"][0]["worktrees"][0]["branch"], "")
 
     def test_artifact_path_must_be_under_discovered_state_roots(self) -> None:
-        from ai_company.board import BoardSnapshot, is_allowed_artifact_path
-        from ai_company.state import StateStore
+        from agent_team.board import BoardSnapshot, is_allowed_artifact_path
+        from agent_team.state import StateStore
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             codex_home = Path(temp_dir)
-            state_root = codex_home / "ai-team" / "workspaces" / "workspace-a"
+            state_root = codex_home / "agent-team" / "workspaces" / "workspace-a"
             store = StateStore(state_root)
             session = store.create_session("artifact safety")
             request_path = session.artifact_dir / "request.md"

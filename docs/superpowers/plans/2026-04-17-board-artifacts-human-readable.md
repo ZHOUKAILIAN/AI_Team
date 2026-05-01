@@ -12,7 +12,7 @@
 
 ## File Structure
 
-- Modify: `ai_company/board_assets.py`
+- Modify: `agent_team/board_assets.py`
   - Add artifact metadata mapping helpers.
   - Render artifact cards by group.
   - Update preview header when an artifact is selected.
@@ -23,7 +23,7 @@
 
 **Files:**
 - Modify: `tests/test_board_server.py`
-- Modify: `ai_company/board_assets.py`
+- Modify: `agent_team/board_assets.py`
 
 - [ ] **Step 1: Write failing HTML assertions**
 
@@ -42,14 +42,14 @@ self.assertIn("预览内容", html)
 Run:
 
 ```bash
-/tmp/ai-team-runtime-enforced-venv/bin/python -m unittest tests.test_board_server.BoardServerTests.test_board_server_serves_html_and_board_json
+/tmp/agent-team-runtime-enforced-venv/bin/python -m unittest tests.test_board_server.BoardServerTests.test_board_server_serves_html_and_board_json
 ```
 
 Expected: fail because the HTML still renders a raw artifact path list.
 
 - [ ] **Step 3: Implement artifact card rendering**
 
-In `ai_company/board_assets.py`:
+In `agent_team/board_assets.py`:
 
 - Replace the raw `Object.entries(session.artifact_paths || {})` list with `renderArtifactSections(session)`.
 - Add `artifactMetadataFor(key, path)` returning category, title, description, filename, and path.
@@ -62,7 +62,7 @@ In `ai_company/board_assets.py`:
 Run:
 
 ```bash
-/tmp/ai-team-runtime-enforced-venv/bin/python -m unittest tests.test_board_server
+/tmp/agent-team-runtime-enforced-venv/bin/python -m unittest tests.test_board_server
 ```
 
 Expected: `OK`.
@@ -70,7 +70,7 @@ Expected: `OK`.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add ai_company/board_assets.py tests/test_board_server.py
+git add agent_team/board_assets.py tests/test_board_server.py
 git commit -m "feat: render readable board artifacts"
 ```
 
@@ -79,6 +79,6 @@ git commit -m "feat: render readable board artifacts"
 After implementation, run:
 
 ```bash
-/tmp/ai-team-runtime-enforced-venv/bin/python -m unittest tests.test_board_server
+/tmp/agent-team-runtime-enforced-venv/bin/python -m unittest tests.test_board_server
 git diff --check
 ```

@@ -8,7 +8,7 @@ class RecordingJudge:
         self.calls = []
 
     def judge(self, context):
-        from ai_company.gate_evaluator import JudgeResult
+        from agent_team.gate_evaluator import JudgeResult
 
         self.calls.append(context)
         return JudgeResult(
@@ -24,10 +24,10 @@ class GateEvaluatorTests(unittest.TestCase):
         from pathlib import Path
         from tempfile import TemporaryDirectory
 
-        from ai_company.gate_evaluator import GateEvaluator
-        from ai_company.models import EvidenceItem, StageResultEnvelope
-        from ai_company.stage_policies import default_policy_registry
-        from ai_company.state import StateStore
+        from agent_team.gate_evaluator import GateEvaluator
+        from agent_team.models import EvidenceItem, StageResultEnvelope
+        from agent_team.stage_policies import default_policy_registry
+        from agent_team.state import StateStore
 
         with TemporaryDirectory() as temp_dir:
             store = StateStore(Path(temp_dir))
@@ -74,10 +74,10 @@ class GateEvaluatorTests(unittest.TestCase):
         from pathlib import Path
         from tempfile import TemporaryDirectory
 
-        from ai_company.gate_evaluator import GateEvaluator
-        from ai_company.models import StageResultEnvelope
-        from ai_company.stage_policies import default_policy_registry
-        from ai_company.state import StateStore
+        from agent_team.gate_evaluator import GateEvaluator
+        from agent_team.models import StageResultEnvelope
+        from agent_team.stage_policies import default_policy_registry
+        from agent_team.state import StateStore
 
         with TemporaryDirectory() as temp_dir:
             store = StateStore(Path(temp_dir))
@@ -119,10 +119,10 @@ class GateEvaluatorTests(unittest.TestCase):
         from pathlib import Path
         from tempfile import TemporaryDirectory
 
-        from ai_company.gate_evaluator import GateEvaluator
-        from ai_company.models import EvidenceItem, StageResultEnvelope
-        from ai_company.stage_policies import default_policy_registry
-        from ai_company.state import StateStore
+        from agent_team.gate_evaluator import GateEvaluator
+        from agent_team.models import EvidenceItem, StageResultEnvelope
+        from agent_team.stage_policies import default_policy_registry
+        from agent_team.state import StateStore
 
         with TemporaryDirectory() as temp_dir:
             store = StateStore(Path(temp_dir))

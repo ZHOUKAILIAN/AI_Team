@@ -2,18 +2,18 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add the first local runtime slice for stage policies, judge context compaction, and gate decisions so AI_Team can later plug in OpenAI Agents SDK SandboxAgent for independent judging.
+**Goal:** Add the first local runtime slice for stage policies, judge context compaction, and gate decisions so Agent Team can later plug in OpenAI Agents SDK SandboxAgent for independent judging.
 
 **Architecture:** Keep runtime state control local and deterministic. Add `StagePolicy` as the source of stage standards, `JudgeContextCompact` as the read-only judge input package, and `GateEvaluator` as the merger of hard gates plus judge verdicts. Do not import OpenAI Agents SDK in this slice; expose a small judge interface that a later SandboxAgent adapter can implement.
 
-**Tech Stack:** Python 3.13 dataclasses, `unittest`, existing `ai_company.models`, existing `ai_company.gatekeeper.evaluate_candidate`.
+**Tech Stack:** Python 3.13 dataclasses, `unittest`, existing `agent_team.models`, existing `agent_team.gatekeeper.evaluate_candidate`.
 
 ---
 
 ### Task 1: Stage Policy Registry
 
 **Files:**
-- Create: `ai_company/stage_policies.py`
+- Create: `agent_team/stage_policies.py`
 - Test: `tests/test_stage_policies.py`
 
 - [ ] **Step 1: Write failing tests**
@@ -24,7 +24,7 @@ import unittest
 
 class StagePolicyTests(unittest.TestCase):
     def test_default_policy_registry_returns_product_requirements_approval_policy(self) -> None:
-        from ai_company.stage_policies import default_policy_registry
+        from agent_team.stage_policies import default_policy_registry
 
         policy = default_policy_registry().get("Product")
 
@@ -34,13 +34,13 @@ class StagePolicyTests(unittest.TestCase):
         self.assertIn("explicit_acceptance_criteria", [spec.name for spec in policy.evidence_specs])
 
     def test_policy_can_compile_to_stage_contract(self) -> None:
-        from ai_company.stage_policies import default_policy_registry
+        from agent_team.stage_policies import default_policy_registry
 
         contract = default_policy_registry().build_contract(
             session_id="session-1",
             stage="Dev",
             contract_id="contract-dev",
-            input_artifacts={"request": ".ai-team/session/request.md"},
+            input_artifacts={"request": ".agent-team/session/request.md"},
             role_context="Dev role context",
         )
 
@@ -58,11 +58,11 @@ if __name__ == "__main__":
 
 Run: `python3 -m unittest tests.test_stage_policies`
 
-Expected: FAIL with `ModuleNotFoundError: No module named 'ai_company.stage_policies'`.
+Expected: FAIL with `ModuleNotFoundError: No module named 'agent_team.stage_policies'`.
 
 - [ ] **Step 3: Implement minimal policy registry**
 
-Create `StagePolicy`, `PolicyRegistry`, and `default_policy_registry()` in `ai_company/stage_policies.py`. Default policies must cover `Product`, `Dev`, `QA`, and `Acceptance`, and compile to the existing `StageContract` model.
+Create `StagePolicy`, `PolicyRegistry`, and `default_policy_registry()` in `agent_team/stage_policies.py`. Default policies must cover `Product`, `Dev`, `QA`, and `Acceptance`, and compile to the existing `StageContract` model.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -73,7 +73,7 @@ Expected: OK.
 ### Task 2: Judge Context Compact
 
 **Files:**
-- Create: `ai_company/judge_context.py`
+- Create: `agent_team/judge_context.py`
 - Test: `tests/test_judge_context.py`
 
 - [ ] **Step 1: Write failing tests**
@@ -84,9 +84,9 @@ import unittest
 
 class JudgeContextTests(unittest.TestCase):
     def test_compact_prioritizes_policy_contract_evidence_and_indexes_artifact(self) -> None:
-        from ai_company.judge_context import build_judge_context_compact
-        from ai_company.models import EvidenceItem, GateResult, StageResultEnvelope
-        from ai_company.stage_policies import default_policy_registry
+        from agent_team.judge_context import build_judge_context_compact
+        from agent_team.models import EvidenceItem, GateResult, StageResultEnvelope
+        from agent_team.stage_policies import default_policy_registry
 
         registry = default_policy_registry()
         policy = registry.get("Acceptance")
@@ -94,7 +94,7 @@ class JudgeContextTests(unittest.TestCase):
             session_id="session-1",
             stage="Acceptance",
             contract_id="contract-acceptance",
-            input_artifacts={"prd": ".ai-team/session/prd.md"},
+            input_artifacts={"prd": ".agent-team/session/prd.md"},
         )
         result = StageResultEnvelope(
             session_id="session-1",
@@ -108,7 +108,7 @@ class JudgeContextTests(unittest.TestCase):
                     name="product_level_validation",
                     kind="artifact",
                     summary="Screenshot and visual diff reviewed.",
-                    artifact_path=".ai-team/session/target.png",
+                    artifact_path=".agent-team/session/target.png",
                 )
             ],
         )
@@ -149,7 +149,7 @@ if __name__ == "__main__":
 
 Run: `python3 -m unittest tests.test_judge_context`
 
-Expected: FAIL with `ModuleNotFoundError: No module named 'ai_company.judge_context'`.
+Expected: FAIL with `ModuleNotFoundError: No module named 'agent_team.judge_context'`.
 
 - [ ] **Step 3: Implement compact builder**
 
@@ -164,7 +164,7 @@ Expected: OK.
 ### Task 3: Gate Evaluator With Judge Interface
 
 **Files:**
-- Create: `ai_company/gate_evaluator.py`
+- Create: `agent_team/gate_evaluator.py`
 - Test: `tests/test_gate_evaluator.py`
 
 - [ ] **Step 1: Write failing tests**
@@ -180,7 +180,7 @@ class RecordingJudge:
         self.calls = []
 
     def judge(self, context):
-        from ai_company.gate_evaluator import JudgeResult
+        from agent_team.gate_evaluator import JudgeResult
 
         self.calls.append(context)
         return JudgeResult(
@@ -196,10 +196,10 @@ class GateEvaluatorTests(unittest.TestCase):
         from pathlib import Path
         from tempfile import TemporaryDirectory
 
-        from ai_company.gate_evaluator import GateEvaluator
-        from ai_company.models import EvidenceItem, StageResultEnvelope
-        from ai_company.stage_policies import default_policy_registry
-        from ai_company.state import StateStore
+        from agent_team.gate_evaluator import GateEvaluator
+        from agent_team.models import EvidenceItem, StageResultEnvelope
+        from agent_team.stage_policies import default_policy_registry
+        from agent_team.state import StateStore
 
         with TemporaryDirectory() as temp_dir:
             store = StateStore(Path(temp_dir))
@@ -246,10 +246,10 @@ class GateEvaluatorTests(unittest.TestCase):
         from pathlib import Path
         from tempfile import TemporaryDirectory
 
-        from ai_company.gate_evaluator import GateEvaluator
-        from ai_company.models import StageResultEnvelope
-        from ai_company.stage_policies import default_policy_registry
-        from ai_company.state import StateStore
+        from agent_team.gate_evaluator import GateEvaluator
+        from agent_team.models import StageResultEnvelope
+        from agent_team.stage_policies import default_policy_registry
+        from agent_team.state import StateStore
 
         with TemporaryDirectory() as temp_dir:
             store = StateStore(Path(temp_dir))
@@ -291,10 +291,10 @@ class GateEvaluatorTests(unittest.TestCase):
         from pathlib import Path
         from tempfile import TemporaryDirectory
 
-        from ai_company.gate_evaluator import GateEvaluator
-        from ai_company.models import EvidenceItem, StageResultEnvelope
-        from ai_company.stage_policies import default_policy_registry
-        from ai_company.state import StateStore
+        from agent_team.gate_evaluator import GateEvaluator
+        from agent_team.models import EvidenceItem, StageResultEnvelope
+        from agent_team.stage_policies import default_policy_registry
+        from agent_team.state import StateStore
 
         with TemporaryDirectory() as temp_dir:
             store = StateStore(Path(temp_dir))
@@ -347,7 +347,7 @@ if __name__ == "__main__":
 
 Run: `python3 -m unittest tests.test_gate_evaluator`
 
-Expected: FAIL with `ModuleNotFoundError: No module named 'ai_company.gate_evaluator'`.
+Expected: FAIL with `ModuleNotFoundError: No module named 'agent_team.gate_evaluator'`.
 
 - [ ] **Step 3: Implement evaluator**
 
@@ -374,7 +374,7 @@ Expected: OK.
 
 Run: `python3 -m unittest discover -s tests`
 
-Expected: Existing worktree-specific failure may remain in `test_status_prints_user_friendly_project_role_and_status`, because it expects `project: ai-team-runtime` while the worktree directory is `orchestration-options-comparison`.
+Expected: Existing worktree-specific failure may remain in `test_status_prints_user_friendly_project_role_and_status`, because it expects `project: agent-team-runtime` while the worktree directory is `orchestration-options-comparison`.
 
 - [ ] **Step 3: Run whitespace check**
 

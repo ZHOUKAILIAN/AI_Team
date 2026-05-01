@@ -3,7 +3,7 @@ import unittest
 
 class ReviewTests(unittest.TestCase):
     def test_review_includes_artifact_diff_and_improvement_proposals(self) -> None:
-        from ai_company.review import build_session_review
+        from agent_team.review import build_session_review
 
         review = build_session_review(
             stage_artifacts={
@@ -26,8 +26,8 @@ class ReviewTests(unittest.TestCase):
         self.assertIn("proposed_context_update", review)
 
     def test_review_includes_workflow_status_when_summary_provided(self) -> None:
-        from ai_company.models import WorkflowSummary
-        from ai_company.review import build_session_review
+        from agent_team.models import WorkflowSummary
+        from agent_team.review import build_session_review
 
         review = build_session_review(
             stage_artifacts={

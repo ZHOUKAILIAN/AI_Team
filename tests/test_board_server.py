@@ -16,14 +16,14 @@ def local_temp_dir() -> Path:
 
 class BoardServerTests(unittest.TestCase):
     def test_board_server_serves_html_and_board_json(self) -> None:
-        from ai_company.board_server import create_board_server
-        from ai_company.state import StateStore
-        from ai_company.workspace_metadata import refresh_workspace_metadata
+        from agent_team.board_server import create_board_server
+        from agent_team.state import StateStore
+        from agent_team.workspace_metadata import refresh_workspace_metadata
 
         repo_root = Path(__file__).resolve().parents[1]
         with TemporaryDirectory(dir=local_temp_dir()) as codex_home:
             codex_home_path = Path(codex_home)
-            state_root = codex_home_path / "ai-team" / "workspaces" / "workspace-a"
+            state_root = codex_home_path / "agent-team" / "workspaces" / "workspace-a"
             StateStore(state_root).create_session("serve board")
             refresh_workspace_metadata(state_root=state_root, repo_root=repo_root)
             server = create_board_server(host="127.0.0.1", port=0, codex_home=codex_home_path)
@@ -38,7 +38,7 @@ class BoardServerTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=5)
 
-            self.assertIn("AI_Team Read-Only Board", html)
+            self.assertIn("Agent Team Read-Only Board", html)
             self.assertIn("fetch('/api/board')", html)
             self.assertIn("let currentFilter = 'all';", html)
             self.assertIn("function renderFilters", html)
@@ -59,14 +59,14 @@ class BoardServerTests(unittest.TestCase):
             self.assertEqual(payload["stats"]["sessions"], 1)
 
     def test_board_server_rejects_artifact_paths_outside_state_roots(self) -> None:
-        from ai_company.board_server import create_board_server
-        from ai_company.state import StateStore
-        from ai_company.workspace_metadata import refresh_workspace_metadata
+        from agent_team.board_server import create_board_server
+        from agent_team.state import StateStore
+        from agent_team.workspace_metadata import refresh_workspace_metadata
 
         repo_root = Path(__file__).resolve().parents[1]
         with TemporaryDirectory(dir=local_temp_dir()) as codex_home:
             codex_home_path = Path(codex_home)
-            state_root = codex_home_path / "ai-team" / "workspaces" / "workspace-a"
+            state_root = codex_home_path / "agent-team" / "workspaces" / "workspace-a"
             session = StateStore(state_root).create_session("serve board")
             refresh_workspace_metadata(state_root=state_root, repo_root=repo_root)
             server = create_board_server(host="127.0.0.1", port=0, codex_home=codex_home_path)

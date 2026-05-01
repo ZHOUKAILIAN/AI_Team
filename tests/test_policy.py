@@ -4,7 +4,7 @@ from pathlib import Path
 
 class PolicyTests(unittest.TestCase):
     def test_default_acceptance_policy_requires_visual_evidence_for_page_root_parity(self) -> None:
-        from ai_company.acceptance_policy import load_acceptance_policy
+        from agent_team.acceptance_policy import load_acceptance_policy
 
         policy = load_acceptance_policy()
         profile = policy["evidence_profiles"]["page_root_visual_parity"]
@@ -16,7 +16,7 @@ class PolicyTests(unittest.TestCase):
         self.assertIn("0.5px", profile["completion_signal"])
 
     def test_default_acceptance_policy_excludes_wechat_native_capsule_from_business_diff(self) -> None:
-        from ai_company.acceptance_policy import load_acceptance_policy
+        from agent_team.acceptance_policy import load_acceptance_policy
 
         policy = load_acceptance_policy()
         exclusion = policy["native_node_exclusions"][0]

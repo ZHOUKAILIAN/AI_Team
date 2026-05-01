@@ -1,12 +1,16 @@
 .test_tmp/
+.DS_Store
 .venv/
 .superpowers/
 .worktrees/
 __pycache__/
 *.pyc
-ai_company.egg-info/
+node_modules/
+agent_team.egg-info/
+agent_team_runtime.egg-info/
+build/
 dist/
 .codex/
 .agents/
 
-.ai-team/
+.agent-team/

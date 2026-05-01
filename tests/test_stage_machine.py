@@ -3,8 +3,8 @@ import unittest
 
 class StageMachineTests(unittest.TestCase):
     def test_product_result_moves_to_wait_for_ceo_approval(self) -> None:
-        from ai_company.models import StageResultEnvelope, WorkflowSummary
-        from ai_company.stage_machine import StageMachine
+        from agent_team.models import StageResultEnvelope, WorkflowSummary
+        from agent_team.stage_machine import StageMachine
 
         summary = WorkflowSummary(
             session_id="session-1",
@@ -27,8 +27,8 @@ class StageMachineTests(unittest.TestCase):
         self.assertEqual(updated.prd_status, "drafted")
 
     def test_wait_for_ceo_approval_rejects_plain_advance(self) -> None:
-        from ai_company.models import StageResultEnvelope, WorkflowSummary
-        from ai_company.stage_machine import StageMachine, StageTransitionError
+        from agent_team.models import StageResultEnvelope, WorkflowSummary
+        from agent_team.stage_machine import StageMachine, StageTransitionError
 
         summary = WorkflowSummary(
             session_id="session-1",
@@ -48,8 +48,8 @@ class StageMachineTests(unittest.TestCase):
             StageMachine().advance(summary=summary, stage_result=result)
 
     def test_human_go_decision_moves_from_ceo_wait_to_dev(self) -> None:
-        from ai_company.models import WorkflowSummary
-        from ai_company.stage_machine import StageMachine
+        from agent_team.models import WorkflowSummary
+        from agent_team.stage_machine import StageMachine
 
         summary = WorkflowSummary(
             session_id="session-1",
@@ -65,8 +65,8 @@ class StageMachineTests(unittest.TestCase):
         self.assertEqual(updated.human_decision, "go")
 
     def test_human_rework_decision_routes_to_target_stage(self) -> None:
-        from ai_company.models import WorkflowSummary
-        from ai_company.stage_machine import StageMachine
+        from agent_team.models import WorkflowSummary
+        from agent_team.stage_machine import StageMachine
 
         summary = WorkflowSummary(
             session_id="session-1",
@@ -87,8 +87,8 @@ class StageMachineTests(unittest.TestCase):
         self.assertEqual(updated.human_decision, "rework")
 
     def test_acceptance_result_resets_human_decision_for_final_go_no_go(self) -> None:
-        from ai_company.models import StageResultEnvelope, WorkflowSummary
-        from ai_company.stage_machine import StageMachine
+        from agent_team.models import StageResultEnvelope, WorkflowSummary
+        from agent_team.stage_machine import StageMachine
 
         summary = WorkflowSummary(
             session_id="session-1",

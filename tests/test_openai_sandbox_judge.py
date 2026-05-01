@@ -6,8 +6,8 @@ import unittest
 
 class OpenAISandboxJudgeTests(unittest.TestCase):
     def test_unavailable_runtime_without_injected_runner_reports_clear_hint(self) -> None:
-        from ai_company.gate_evaluator import JudgeResult
-        from ai_company.openai_sandbox_judge import OpenAISandboxJudge, OpenAISandboxJudgeUnavailable
+        from agent_team.gate_evaluator import JudgeResult
+        from agent_team.openai_sandbox_judge import OpenAISandboxJudge, OpenAISandboxJudgeUnavailable
 
         class EmptyContext:
             def to_dict(self):
@@ -26,7 +26,7 @@ class OpenAISandboxJudgeTests(unittest.TestCase):
         )
 
     def test_injected_runner_receives_read_only_prompt_and_parses_dict_result(self) -> None:
-        from ai_company.openai_sandbox_judge import OpenAISandboxJudge
+        from agent_team.openai_sandbox_judge import OpenAISandboxJudge
 
         calls = []
 
@@ -92,14 +92,14 @@ class OpenAISandboxJudgeTests(unittest.TestCase):
         self.assertEqual(calls[0]["api_key"], "sk-test")
         self.assertEqual(calls[0]["base_url"], "https://example.test/v1")
         self.assertEqual(calls[0]["proxy_url"], "http://127.0.0.1:7897")
-        self.assertEqual(calls[0]["user_agent"], "AI-Team-Runtime/0.1")
+        self.assertEqual(calls[0]["user_agent"], "Agent Team-Runtime/0.1")
         self.assertEqual(calls[0]["oa_header"], "oa-test")
         self.assertIn("read-only", calls[0]["prompt"])
         self.assertIn("JudgeResult", calls[0]["prompt"])
         self.assertIn('"hard_gate_result"', calls[0]["prompt"])
 
     def test_injected_runner_can_return_json_string(self) -> None:
-        from ai_company.openai_sandbox_judge import OpenAISandboxJudge
+        from agent_team.openai_sandbox_judge import OpenAISandboxJudge
 
         class Context:
             def to_dict(self):
@@ -125,7 +125,7 @@ class OpenAISandboxJudgeTests(unittest.TestCase):
         self.assertEqual(result.reasons, ["All criteria met."])
 
     def test_parser_converts_finding_payloads(self) -> None:
-        from ai_company.openai_sandbox_judge import parse_judge_result
+        from agent_team.openai_sandbox_judge import parse_judge_result
 
         result = parse_judge_result(
             {
@@ -148,7 +148,7 @@ class OpenAISandboxJudgeTests(unittest.TestCase):
         self.assertEqual(result.findings[0].issue, "CTA button is misaligned.")
 
     def test_invalid_verdict_is_rejected(self) -> None:
-        from ai_company.openai_sandbox_judge import OpenAISandboxJudge
+        from agent_team.openai_sandbox_judge import OpenAISandboxJudge
 
         class Context:
             def to_dict(self):
@@ -174,7 +174,7 @@ class OpenAISandboxJudgeTests(unittest.TestCase):
         self.assertIn("Unsupported judge verdict", str(raised.exception))
 
     def test_sdk_runner_uses_official_docker_sandbox_run_config_shape(self) -> None:
-        from ai_company.openai_sandbox_judge import _run_with_openai_agents_sdk
+        from agent_team.openai_sandbox_judge import _run_with_openai_agents_sdk
 
         calls = {}
         original_modules = dict(sys.modules)
@@ -273,7 +273,7 @@ class OpenAISandboxJudgeTests(unittest.TestCase):
                 api_key="sk-test",
                 base_url="https://example.test/v1",
                 proxy_url="http://127.0.0.1:7897",
-                user_agent="AI-Team-Runtime/0.1",
+                user_agent="Agent Team-Runtime/0.1",
                 oa_header="oa-test",
             )
 
@@ -285,7 +285,7 @@ class OpenAISandboxJudgeTests(unittest.TestCase):
             self.assertEqual(calls["run_config"].model_provider.openai_client.base_url, "https://example.test/v1")
             self.assertEqual(
                 calls["run_config"].model_provider.openai_client.default_headers["User-Agent"],
-                "AI-Team-Runtime/0.1",
+                "Agent Team-Runtime/0.1",
             )
             self.assertEqual(
                 calls["run_config"].model_provider.openai_client.default_headers["oa"],

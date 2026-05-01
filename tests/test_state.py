@@ -13,8 +13,8 @@ def local_temp_dir() -> Path:
 
 class StateTests(unittest.TestCase):
     def test_state_store_persists_acceptance_contract_and_review_templates(self) -> None:
-        from ai_company.models import AcceptanceContract
-        from ai_company.state import StateStore
+        from agent_team.models import AcceptanceContract
+        from agent_team.state import StateStore
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             root = Path(temp_dir)
@@ -51,7 +51,7 @@ class StateTests(unittest.TestCase):
             self.assertIn("Pending review execution", deviation_checklist_path.read_text())
 
     def test_state_store_initializes_session_and_artifacts(self) -> None:
-        from ai_company.state import StateStore
+        from agent_team.state import StateStore
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             store = StateStore(Path(temp_dir))
@@ -73,7 +73,7 @@ class StateTests(unittest.TestCase):
             self.assertIn("- workflow_summary:", summary_text)
 
     def test_state_store_creates_unique_session_ids_for_same_request(self) -> None:
-        from ai_company.state import StateStore
+        from agent_team.state import StateStore
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             store = StateStore(Path(temp_dir))
@@ -83,8 +83,8 @@ class StateTests(unittest.TestCase):
             self.assertNotEqual(first.session_id, second.session_id)
 
     def test_apply_learning_ignores_unknown_target_stage(self) -> None:
-        from ai_company.models import Finding
-        from ai_company.state import StateStore
+        from agent_team.models import Finding
+        from agent_team.state import StateStore
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             root = Path(temp_dir)
@@ -101,8 +101,8 @@ class StateTests(unittest.TestCase):
             self.assertFalse((root / "memory" / ".." / ".." / "outside").exists())
 
     def test_apply_learning_writes_standardized_overlay_sections(self) -> None:
-        from ai_company.models import Finding
-        from ai_company.state import StateStore
+        from agent_team.models import Finding
+        from agent_team.state import StateStore
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             root = Path(temp_dir)
@@ -132,8 +132,8 @@ class StateTests(unittest.TestCase):
             self.assertIn("Completion signal:", skill_patch)
 
     def test_record_stage_preserves_round_archives_and_latest_artifact(self) -> None:
-        from ai_company.models import SessionRecord, StageOutput
-        from ai_company.state import StateStore
+        from agent_team.models import SessionRecord, StageOutput
+        from agent_team.state import StateStore
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             root = Path(temp_dir)
@@ -180,7 +180,7 @@ class StateTests(unittest.TestCase):
             self.assertEqual(round_two.round_index, 2)
 
     def test_load_role_profiles_reads_context_and_memory(self) -> None:
-        from ai_company.roles import load_role_profiles
+        from agent_team.roles import load_role_profiles
 
         repo_root = Path(__file__).resolve().parents[1]
 
@@ -194,7 +194,7 @@ class StateTests(unittest.TestCase):
             self.assertIn("Initialized memory system", roles["Product"].effective_memory_text)
 
     def test_load_role_profiles_uses_packaged_assets_when_repo_roles_are_missing(self) -> None:
-        from ai_company.roles import load_role_profiles
+        from agent_team.roles import load_role_profiles
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             temp_root = Path(temp_dir)
@@ -210,13 +210,13 @@ class StateTests(unittest.TestCase):
             self.assertIn("Product Manager Onboarding Manual", roles["Product"].effective_context_text)
 
     def test_artifact_name_for_dev_stage_is_implementation(self) -> None:
-        from ai_company.state import artifact_name_for_stage
+        from agent_team.state import artifact_name_for_stage
 
         self.assertEqual(artifact_name_for_stage("Dev"), "implementation.md")
 
     def test_stage_run_lifecycle_persists_active_candidate(self) -> None:
-        from ai_company.models import StageResultEnvelope
-        from ai_company.state import StateStore
+        from agent_team.models import StageResultEnvelope
+        from agent_team.state import StateStore
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             store = StateStore(Path(temp_dir))
@@ -257,7 +257,7 @@ class StateTests(unittest.TestCase):
             self.assertEqual(store.active_stage_run(session.session_id, stage="Product").state, "SUBMITTED")
 
     def test_create_stage_run_rejects_existing_active_run(self) -> None:
-        from ai_company.state import StageRunStateError, StateStore
+        from agent_team.state import StageRunStateError, StateStore
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             store = StateStore(Path(temp_dir))
@@ -280,9 +280,9 @@ class StateTests(unittest.TestCase):
                 )
 
     def test_load_workflow_summary_falls_back_to_artifact_dir(self) -> None:
-        from ai_company.models import SessionRecord, WorkflowSummary
-        from ai_company.state import StateStore
-        from ai_company.workflow_summary import render_workflow_summary
+        from agent_team.models import SessionRecord, WorkflowSummary
+        from agent_team.state import StateStore
+        from agent_team.workflow_summary import render_workflow_summary
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             root = Path(temp_dir) / "sessions"

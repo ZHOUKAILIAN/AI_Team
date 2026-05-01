@@ -14,7 +14,7 @@
 
 - Modify: `tests/test_board_server.py`
   - Assert the served HTML includes workflow run helpers and human-readable legacy run messaging.
-- Modify: `ai_company/board_assets.py`
+- Modify: `agent_team/board_assets.py`
   - Replace the current detail header section with a bottleneck summary and workflow run board.
   - Add helper functions that map snapshot data into workflow node cards, statuses, explanations, and next actions.
 
@@ -22,7 +22,7 @@
 
 **Files:**
 - Modify: `tests/test_board_server.py`
-- Modify: `ai_company/board_assets.py`
+- Modify: `agent_team/board_assets.py`
 
 - [ ] **Step 1: Write failing HTML assertions**
 
@@ -41,14 +41,14 @@ self.assertIn("当前 bottleneck", html)
 Run:
 
 ```bash
-/tmp/ai-team-runtime-enforced-venv/bin/python -m unittest tests.test_board_server.BoardServerTests.test_board_server_serves_html_and_board_json
+/tmp/agent-team-runtime-enforced-venv/bin/python -m unittest tests.test_board_server.BoardServerTests.test_board_server_serves_html_and_board_json
 ```
 
 Expected: fail because the page still renders the old stage-strip-focused detail view.
 
 - [ ] **Step 3: Implement the workflow run board**
 
-In `ai_company/board_assets.py`:
+In `agent_team/board_assets.py`:
 
 - Add CSS for a bottleneck banner and workflow node grid.
 - Replace the current timeline-first detail block with:
@@ -76,7 +76,7 @@ In `ai_company/board_assets.py`:
 Run:
 
 ```bash
-/tmp/ai-team-runtime-enforced-venv/bin/python -m unittest tests.test_board_server
+/tmp/agent-team-runtime-enforced-venv/bin/python -m unittest tests.test_board_server
 ```
 
 Expected: `OK`.
@@ -94,6 +94,6 @@ Expected: no output.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add ai_company/board_assets.py tests/test_board_server.py
+git add agent_team/board_assets.py tests/test_board_server.py
 git commit -m "feat: render workflow run board"
 ```

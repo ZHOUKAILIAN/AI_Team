@@ -22,7 +22,7 @@ The console keeps the current CLI product shape: users still run `agent-team pan
 
 ## Non-Goals
 
-- Do not rewrite the AI_Team state machine.
+- Do not rewrite the Agent Team state machine.
 - Do not replace the artifact storage model.
 - Do not remove `agent-team panel`, `agent-team serve-board`, `panel-snapshot`, or `board-snapshot`.
 - Do not require users to run a separate frontend server in normal installed usage.
@@ -237,7 +237,7 @@ Recommended implementation:
 Add a module such as:
 
 ```text
-ai_company/web_server.py
+agent_team/web_server.py
 ```
 
 Responsibilities:
@@ -386,7 +386,7 @@ Session detail can reuse `build_panel_snapshot` output at first, then gradually 
 Vite build output should be copied into the Python package for release builds:
 
 ```text
-ai_company/web_dist/
+agent_team/web_dist/
   index.html
   assets/
 ```
@@ -400,7 +400,7 @@ Recommended scripts:
   "scripts": {
     "dev:web": "npm --workspace apps/web run dev",
     "build:web": "npm --workspace apps/web run build",
-    "copy:web": "python -m ai_company.web_assets copy",
+    "copy:web": "python -m agent_team.web_assets copy",
     "build": "npm run build:web && npm run copy:web"
   },
   "workspaces": [
@@ -412,7 +412,7 @@ Recommended scripts:
 The Python package data should include:
 
 ```text
-ai_company/web_dist/**/*
+agent_team/web_dist/**/*
 ```
 
 ## CLI Behavior

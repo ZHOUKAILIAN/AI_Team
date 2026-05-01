@@ -23,9 +23,9 @@ def evidence(name: str, *, kind: str = "report", summary: str = "Evidence provid
 
 class GatekeeperTests(unittest.TestCase):
     def test_missing_required_evidence_fails_gate(self) -> None:
-        from ai_company.gatekeeper import Gatekeeper
-        from ai_company.models import StageContract, StageResultEnvelope
-        from ai_company.state import StateStore
+        from agent_team.gatekeeper import Gatekeeper
+        from agent_team.models import StageContract, StageResultEnvelope
+        from agent_team.state import StateStore
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             store = StateStore(Path(temp_dir))
@@ -54,9 +54,9 @@ class GatekeeperTests(unittest.TestCase):
             self.assertIn("self_verification", gate.missing_evidence)
 
     def test_qa_findings_can_pass_stage_run_and_route_later(self) -> None:
-        from ai_company.gatekeeper import Gatekeeper
-        from ai_company.models import Finding, StageContract, StageResultEnvelope
-        from ai_company.state import StateStore
+        from agent_team.gatekeeper import Gatekeeper
+        from agent_team.models import Finding, StageContract, StageResultEnvelope
+        from agent_team.state import StateStore
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             store = StateStore(Path(temp_dir))
@@ -85,9 +85,9 @@ class GatekeeperTests(unittest.TestCase):
             self.assertEqual(gate.status, "PASSED")
 
     def test_worker_blocked_status_blocks_gate_without_advancing(self) -> None:
-        from ai_company.gatekeeper import Gatekeeper
-        from ai_company.models import StageContract, StageResultEnvelope
-        from ai_company.state import StateStore
+        from agent_team.gatekeeper import Gatekeeper
+        from agent_team.models import StageContract, StageResultEnvelope
+        from agent_team.state import StateStore
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             store = StateStore(Path(temp_dir))
@@ -117,9 +117,9 @@ class GatekeeperTests(unittest.TestCase):
             self.assertIn("External tool unavailable", gate.reason)
 
     def test_structured_evidence_missing_required_summary_fails_gate(self) -> None:
-        from ai_company.gatekeeper import Gatekeeper
-        from ai_company.models import EvidenceRequirement, StageContract, StageResultEnvelope
-        from ai_company.state import StateStore
+        from agent_team.gatekeeper import Gatekeeper
+        from agent_team.models import EvidenceRequirement, StageContract, StageResultEnvelope
+        from agent_team.state import StateStore
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             store = StateStore(Path(temp_dir))
@@ -162,9 +162,9 @@ class GatekeeperTests(unittest.TestCase):
             self.assertIn("self_verification.summary", gate.missing_evidence)
 
     def test_structured_command_evidence_passes_gate(self) -> None:
-        from ai_company.gatekeeper import Gatekeeper
-        from ai_company.models import EvidenceRequirement, StageContract, StageResultEnvelope
-        from ai_company.state import StateStore
+        from agent_team.gatekeeper import Gatekeeper
+        from agent_team.models import EvidenceRequirement, StageContract, StageResultEnvelope
+        from agent_team.state import StateStore
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             store = StateStore(Path(temp_dir))
