@@ -10,7 +10,6 @@ from .board import build_board_snapshot
 from .executor import ClaudeCodeExecutor, CodexExecutor, StageExecutor
 from .execution_context import build_stage_execution_context
 from .gatekeeper import evaluate_candidate
-from .codex_skill_installer import install_codex_skill
 from .harness_paths import default_state_root
 from .intake import parse_intake_message
 from .interactive import DevController, DevControllerConfig, ExecutorAlignmentRunner, ExecutorTechPlanRunner, InteractivePrompter
@@ -65,12 +64,6 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     codex_init_parser.set_defaults(handler=_handle_codex_init)
-
-    install_skill_parser = subparsers.add_parser(
-        "install-codex-skill",
-        help="Install the packaged agent-team-workflow skill into CODEX_HOME.",
-    )
-    install_skill_parser.set_defaults(handler=_handle_install_codex_skill)
 
     project_init_parser = subparsers.add_parser(
         "init-project-structure",
@@ -559,14 +552,6 @@ def _handle_codex_init(args: argparse.Namespace) -> int:
     print("recommended_run_entry: $agent-team-run")
     print(f"manual_init_fallback: {args.repo_root / 'scripts' / 'agent-team-init.sh'}")
     print(f"manual_run_fallback: {args.repo_root / 'scripts' / 'agent-team-run.sh'} \"<your message>\"")
-    return 0
-
-
-def _handle_install_codex_skill(args: argparse.Namespace) -> int:
-    del args
-    target = install_codex_skill()
-    print(f"installed_skill: {target / 'SKILL.md'}")
-    print(f"installed_helper: {target / 'scripts' / 'agent-team-run.sh'}")
     return 0
 
 

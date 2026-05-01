@@ -31,6 +31,4 @@ agent_team = [
     "web_dist/*",
     "web_dist/assets/*",
     "assets/skills/*/SKILL.md",
-    "assets/codex_skill/agent-team-workflow/SKILL.md",
-    "assets/codex_skill/agent-team-workflow/scripts/*.sh",
 ]

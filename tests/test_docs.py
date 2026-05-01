@@ -32,6 +32,8 @@ class DocsTests(unittest.TestCase):
         self.assertIn("agent-team record-human-decision", readme)
         self.assertIn("agent-team board-snapshot", readme)
         self.assertIn("agent-team serve-board", readme)
+        self.assertNotIn("install-codex-skill", readme)
+        self.assertNotIn("codex-skill/agent-team-workflow", readme)
 
     def test_readme_documents_interactive_dev_workflow(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
@@ -118,8 +120,14 @@ class DocsTests(unittest.TestCase):
         self.assertIn("M1", codex_harness)
         self.assertIn("M2", codex_harness)
         self.assertIn("Codex 运行 Help", readme)
-        self.assertIn("Skill 接入说明", readme)
+        self.assertIn("Stage 资产说明", readme)
         self.assertIn("Codex Harness 方案", readme)
+
+    def test_root_and_installable_workflow_skills_are_not_product_entrypoints(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+
+        self.assertFalse((repo_root / "SKILL.md").exists())
+        self.assertFalse((repo_root / "codex-skill" / "agent-team-workflow").exists())
 
     def test_removed_legacy_docs_are_gone(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]

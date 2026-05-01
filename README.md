@@ -112,15 +112,15 @@ worker 看到的是 stage contract，不是自由发挥的任务描述。
 
 ### 4. Role Asset Layer
 
-角色目录和 skill 文件仍然保留，但现在更偏向“角色资产”和“prompt 素材”：
+角色目录和内置角色资产仍然保留，但它们只是 context / contract 素材，不再作为 workflow 控制器：
 
 - `Product/`
 - `Dev/`
 - `QA/`
 - `Acceptance/`
 - `Ops/`
-- `SKILL.md`
-- `codex-skill/agent-team-workflow/`
+- `agent_team/assets/roles/`
+- `agent_team/assets/skills/`
 
 ## 当前已实现的运行时能力
 
@@ -205,12 +205,6 @@ curl -fsSL https://github.com/ZHOUKAILIAN/agent-team-runtime/releases/download/v
 
 ```bash
 ~/.local/bin/agent-team
-```
-
-如果你需要安装随包分发的 Codex skill：
-
-```bash
-agent-team install-codex-skill
 ```
 
 当前版本发布资产包括 `wheel`、源码包、`install.sh`、`SHA256SUMS` 和版本级 `CHANGELOG.md`。
@@ -379,8 +373,6 @@ agent-team serve-board --all-workspaces --port 8765 --poll-interval 5
   - 角色资产
 - `scripts/`
   - 项目级 helper
-- `codex-skill/`
-  - 可安装 skill 包装层
 - `docs/workflow-specs/`
   - 运行时设计、流程和使用文档
 - `tests/`
@@ -397,7 +389,7 @@ agent-team serve-board --all-workspaces --port 8765 --poll-interval 5
 - [版本发布页](https://github.com/ZHOUKAILIAN/agent-team-runtime/releases)
 - [Codex 运行 Help](docs/workflow-specs/2026-04-11-agent-team-codex-cli-help.md)
 - [Codex Harness 方案](docs/workflow-specs/2026-04-11-agent-team-codex-harness-solution.md)
-- [Skill 接入说明](docs/workflow-specs/2026-04-11-agent-team-skill-integration.md)
+- [Stage 资产说明](docs/workflow-specs/2026-04-11-agent-team-skill-integration.md)
 
 ## 当前原则
 
