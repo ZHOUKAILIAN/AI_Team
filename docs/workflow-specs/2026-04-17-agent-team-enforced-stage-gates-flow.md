@@ -315,7 +315,7 @@ worker 认领当前 stage run，runtime 创建 run record，并把 run state 从
 worker 按 contract 执行当前 stage：
 
 - Product 写 PRD
-- Dev 改代码并自验证
+- Dev 改代码、做代码自 review，并自验证
 - QA 做独立验证
 - Acceptance 做验收 review
 
@@ -483,11 +483,13 @@ gatekeeper 应该评估三层。
 必须证明：
 
 - implementation artifact 存在
+- self-code-review evidence 存在
 - self-verification evidence 存在
-- contract 要求的 command 或 artifact evidence 已经附上
+- contract 要求的 command、report 或 artifact evidence 已经附上
 
 典型 evidence：
 
+- self code review notes
 - test output
 - typecheck output
 - lint output

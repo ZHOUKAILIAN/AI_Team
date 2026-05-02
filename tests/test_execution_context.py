@@ -49,7 +49,7 @@ class ExecutionContextTests(unittest.TestCase):
         self.assertIn("Build a runtime-controlled Dev handoff.", context.original_request_summary)
         self.assertIn("Approved Product PRD", context.approved_prd_summary)
         self.assertEqual(context.required_outputs, ["implementation.md"])
-        self.assertEqual(context.required_evidence, ["self_verification"])
+        self.assertEqual(context.required_evidence, ["self_code_review", "self_verification"])
         self.assertEqual(context.acceptance_matrix[0]["id"], "AC-001")
         self.assertEqual(
             context.acceptance_matrix[0]["criterion"],

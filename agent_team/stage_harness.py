@@ -274,13 +274,20 @@ Don't gold-plate, but don't leave it half-done.
 
 Sandbox: workspace-write. You have full access to the repository.
 
+== SELF CODE REVIEW ==
+- Before self-verification, review every changed file for correctness, maintainability, security, and scope.
+- Fix issues found during self-review before running final verification.
+- Include a self_code_review evidence item summarizing reviewed files, fixes made, and remaining risks.
+
 == SELF-VERIFICATION ==
 - Before reporting done, run tests and typecheck.
+- Include a self_verification evidence item with the actual command evidence.
 - Report the actual command output, not only a summary.
 
 == OUTPUT ==
 - Write implementation.md describing what changed and why.
 - Include files modified with absolute paths.
+- Include a Self Code Review section with reviewed files, issues found or fixed, and residual risks.
 - Include commands run and their output.
 - Include any limitations or known issues.
 - Include commit hashes when available and test run summaries."""
@@ -385,7 +392,7 @@ def _stage_context_layer(
         '  "artifact_name": "<e.g. implementation.md>",',
         '  "artifact_content": "<full artifact text>",',
         '  "journal": "<Markdown journal of decisions and observations>",',
-        '  "evidence": [{"name": "...", "kind": "report|log|screenshot", "summary": "..."}],',
+        '  "evidence": [{"name": "...", "kind": "report|artifact|command|log|screenshot", "summary": "..."}],',
         '  "findings": []',
         "}",
         "",

@@ -47,7 +47,7 @@
 这意味着：
 
 - Product 负责产出 PRD 和验收标准
-- Dev 负责实现和自验证
+- Dev 负责实现、代码自 review 和自验证
 - QA 必须独立验证，不能被 Dev 自测替代
 - Acceptance 负责产品级验收建议
 - 最终 human Go/No-Go 必须由人来决定

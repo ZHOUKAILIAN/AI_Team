@@ -23,8 +23,9 @@ If this is a QA rework round, read the latest `qa_report.md` first. If this is a
 ## Allowed Methodology
 
 - Use rigorous engineering discipline inside Dev.
-- Generic methodology skills are allowed inside Dev when they help implementation, debugging, testing, or self-verification.
+- Generic methodology skills are allowed inside Dev when they help implementation, self-review, debugging, testing, or self-verification.
 - Generic methodology skills must not replace QA, must not replace Acceptance, and must not change the Agent Team stage order or approval gates.
+- Review your own changed code after implementation and before final self-verification.
 - Treat self-verification as Dev evidence, not as a replacement for QA.
 
 ## Required Output
@@ -35,6 +36,7 @@ The handoff must include:
 - implementation target
 - change summary
 - changed files
+- self code review notes
 - self-verification evidence
 - commands executed
 - command result summary
@@ -53,5 +55,6 @@ The handoff must include:
 
 - Repository changes or an explicit no-code explanation match the current Dev scope.
 - `implementation.md` exists in the active session artifact directory.
+- `implementation.md` contains self code review notes covering reviewed files, issues fixed, and residual risks.
 - `implementation.md` contains self-verification evidence, commands executed, command result summary, and a QA regression checklist.
 - Every QA, Acceptance, or human-feedback issue for this round is mapped to a concrete fix and closure signal in the Dev handoff.

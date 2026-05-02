@@ -34,7 +34,7 @@ class StageHarnessTests(unittest.TestCase):
                 goal="Implement",
                 contract_id="abc",
                 required_outputs=["implementation.md"],
-                evidence_requirements=["self_verification"],
+                evidence_requirements=["self_code_review", "self_verification"],
             ),
             confirmed_alignment={"acceptance_criteria": [{"id": "AC1", "criterion": "It works"}]},
             tech_plan={"implementation_steps": ["Write code", "Run tests"]},
@@ -45,14 +45,17 @@ class StageHarnessTests(unittest.TestCase):
         self.assertIn("workspace-write", prompt)
         self.assertIn("Don't gold-plate", prompt)
         self.assertIn("implementation.md", prompt)
+        self.assertIn("self_code_review", prompt)
         self.assertIn("self_verification", prompt)
         self.assertIn("== UNIVERSAL PROTECTION ==", prompt)
         self.assertIn("== SCOPE ==", prompt)
         self.assertIn("== SECURITY ==", prompt)
+        self.assertIn("== SELF CODE REVIEW ==", prompt)
         self.assertIn("== SELF-VERIFICATION ==", prompt)
         self.assertIn("== STAGE CONTEXT ==", prompt)
         self.assertIn("== BOUNDARY ==", prompt)
         self.assertIn("OWASP top 10", prompt)
+        self.assertIn("Self Code Review", prompt)
         self.assertIn("Never claim \"all tests pass\"", prompt)
         self.assertIn("Do NOT attempt to advance the workflow state machine", prompt)
 

@@ -112,6 +112,7 @@ class GateEvaluatorTests(unittest.TestCase):
 
         self.assertEqual(evaluation.decision.outcome, "rework")
         self.assertEqual(evaluation.decision.target_stage, "Dev")
+        self.assertIn("self_code_review", evaluation.decision.missing_evidence)
         self.assertIn("self_verification", evaluation.decision.missing_evidence)
         self.assertEqual(judge.calls, [])
 

@@ -25,6 +25,7 @@ class StagePolicyTests(unittest.TestCase):
 
         self.assertEqual(contract.stage, "Dev")
         self.assertEqual(contract.required_outputs, ["implementation.md"])
+        self.assertIn("self_code_review", contract.evidence_requirements)
         self.assertIn("self_verification", contract.evidence_requirements)
         self.assertEqual(contract.role_context, "Dev role context")
 

@@ -196,7 +196,6 @@ class DryRunStageExecutor:
     def execute(self, request: StageExecutionRequest) -> StageResultEnvelope:
         stage = request.contract.stage
         artifact_name = artifact_name_for_stage(stage)
-        evidence_name, evidence_kind, evidence_summary = _default_evidence(stage)
         return StageResultEnvelope(
             session_id=request.session_id,
             stage=stage,
@@ -205,16 +204,7 @@ class DryRunStageExecutor:
             artifact_content=_dry_run_artifact_content(stage, request.context),
             contract_id=request.contract.contract_id,
             journal=f"Dry-run executor produced {artifact_name} for {stage}.",
-            evidence=[
-                EvidenceItem(
-                    name=evidence_name,
-                    kind=evidence_kind,
-                    summary=evidence_summary,
-                    command="agent-team runtime dry-run" if evidence_kind == "command" else "",
-                    exit_code=0 if evidence_kind == "command" else None,
-                    producer="runtime-driver",
-                )
-            ],
+            evidence=_default_evidence(stage),
             summary=f"{stage} dry-run result satisfied the stage contract.",
             acceptance_status="recommended_go" if stage == "Acceptance" else "",
         )
@@ -725,12 +715,50 @@ def _result_from_summary(
     )
 
 
-def _default_evidence(stage: str) -> tuple[str, str, str]:
+def _default_evidence(stage: str) -> list[EvidenceItem]:
     return {
-        "Product": ("explicit_acceptance_criteria", "report", "PRD includes explicit acceptance criteria."),
-        "Dev": ("self_verification", "command", "Implementation self-verification completed."),
-        "QA": ("independent_verification", "command", "QA independently reran critical verification."),
-        "Acceptance": ("product_level_validation", "report", "Acceptance validated product-level behavior."),
+        "Product": [
+            EvidenceItem(
+                name="explicit_acceptance_criteria",
+                kind="report",
+                summary="PRD includes explicit acceptance criteria.",
+                producer="runtime-driver",
+            )
+        ],
+        "Dev": [
+            EvidenceItem(
+                name="self_code_review",
+                kind="report",
+                summary="Dry-run Dev reviewed the generated implementation handoff and found no code changes.",
+                producer="runtime-driver",
+            ),
+            EvidenceItem(
+                name="self_verification",
+                kind="command",
+                summary="Implementation self-verification completed.",
+                command="agent-team runtime dry-run",
+                exit_code=0,
+                producer="runtime-driver",
+            ),
+        ],
+        "QA": [
+            EvidenceItem(
+                name="independent_verification",
+                kind="command",
+                summary="QA independently reran critical verification.",
+                command="agent-team runtime dry-run",
+                exit_code=0,
+                producer="runtime-driver",
+            )
+        ],
+        "Acceptance": [
+            EvidenceItem(
+                name="product_level_validation",
+                kind="report",
+                summary="Acceptance validated product-level behavior.",
+                producer="runtime-driver",
+            )
+        ],
     }[stage]
 
 
@@ -748,6 +776,8 @@ def _dry_run_artifact_content(stage: str, context: StageExecutionContext) -> str
             "# Implementation\n\n"
             "## Change Summary\n"
             "- Runtime driver dry-run produced a valid Dev handoff.\n\n"
+            "## Self Code Review\n"
+            "- Reviewed the dry-run handoff content and found no repository code changes.\n\n"
             "## Self Verification\n"
             "- command: agent-team runtime dry-run\n"
             "- result: passed\n\n"

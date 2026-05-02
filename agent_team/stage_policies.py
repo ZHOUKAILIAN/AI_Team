@@ -85,9 +85,14 @@ def default_policy_registry() -> PolicyRegistry:
             ),
             StagePolicy(
                 stage="Dev",
-                goal="Implement the approved PRD and provide self-verification evidence.",
+                goal="Implement the approved PRD, review the changed code, and provide self-verification evidence.",
                 required_outputs=["implementation.md"],
                 evidence_specs=[
+                    EvidenceRequirement(
+                        name="self_code_review",
+                        allowed_kinds=["artifact", "report"],
+                        required_fields=["summary"],
+                    ),
                     EvidenceRequirement(
                         name="self_verification",
                         allowed_kinds=["command", "artifact", "report"],

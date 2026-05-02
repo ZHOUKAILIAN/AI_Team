@@ -829,9 +829,10 @@ Docker is not available for OpenAI sandbox judging. Start Docker Desktop or use 
 
 ```text
 完成标准
-  产出 implementation artifact，且自验证完成
+  产出 implementation artifact，完成代码自 review，且自验证完成
 
 必需证据
+  self_code_review
   self_verification
 
 回流标准
