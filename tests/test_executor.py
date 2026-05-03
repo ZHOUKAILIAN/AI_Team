@@ -27,6 +27,7 @@ class ExecutorTests(unittest.TestCase):
         self.assertIn("--disable", command)
         self.assertIn("plugins", command)
         self.assertIn("--ephemeral", command)
+        self.assertIn("--skip-git-repo-check", command)
         self.assertIn("--model", command)
         self.assertIn("gpt-5.5", command)
         self.assertIn("--sandbox", command)
@@ -45,6 +46,7 @@ class ExecutorTests(unittest.TestCase):
         self.assertIn("--ignore-rules", command)
         self.assertIn("--disable", command)
         self.assertIn("plugins", command)
+        self.assertIn("--skip-git-repo-check", command)
         self.assertNotIn("--ignore-user-config", command)
 
     def test_codex_executor_reads_last_message(self) -> None:

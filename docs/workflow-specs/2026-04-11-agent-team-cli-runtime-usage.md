@@ -67,6 +67,7 @@ agent-team status --session-id <session_id>
 ```
 
 这里会同时放 `session.json`、`workflow_summary.md`、阶段产物、`review.md` 和 `events.jsonl`。
+如果想一次性准备好状态目录和项目级文档结构，先运行 `agent-team init`。
 
 ### 4. 生成阶段 contract
 
@@ -102,16 +103,10 @@ agent-team record-human-decision --session-id <session_id> --decision go
 
 ## 常用命令
 
-初始化状态目录：
+初始化状态目录和项目级文档结构：
 
 ```bash
-agent-team init-state
-```
-
-初始化项目级文档结构：
-
-```bash
-agent-team init-project-structure
+agent-team init
 ```
 
 查看当前阶段：

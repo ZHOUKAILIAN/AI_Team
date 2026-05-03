@@ -171,7 +171,7 @@ runtime 不再默认拆出 repo 外的 `workspaces/`、`artifacts/`、`sessions/
 
 所以当前最准确的理解是：
 
-它已经用 runtime 强制“控流程”和“跑流程”；PRD 审批与最终 Go/No-Go 仍由人卡控。
+它已经用 runtime 强制“控流程”和“跑流程”；PRD 审批与最终 Go/No-Go 仍由人卡控，`--auto` 只自动穿过中间阶段。
 
 ## 安装与使用
 
@@ -192,7 +192,7 @@ curl -fsSL https://github.com/ZHOUKAILIAN/agent-team-runtime/releases/latest/dow
 安装当前 beta 版本：
 
 ```bash
-curl -fsSL https://github.com/ZHOUKAILIAN/agent-team-runtime/releases/download/v0.2.0b3/install.sh | sh
+curl -fsSL https://github.com/ZHOUKAILIAN/agent-team-runtime/releases/download/v0.2.0b4/install.sh | sh
 ```
 
 安装固定版本：
@@ -213,6 +213,34 @@ curl -fsSL https://github.com/ZHOUKAILIAN/agent-team-runtime/releases/download/v
 
 ```bash
 pip install -e .
+```
+
+### 在自己的项目里试一次
+
+安装完成后，先确保 `agent-team` 在 PATH 里：
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+agent-team --help
+```
+
+进入一个真实项目仓库后初始化运行时目录和项目文档结构：
+
+```bash
+cd /path/to/your/project
+agent-team init
+```
+
+如果本机已经安装并登录 Codex CLI，可以用默认 `codex-exec` 真实跑一条需求：
+
+```bash
+agent-team run-requirement --message "写个js文件，并打印agent-team-runtime" --auto
+```
+
+如果只想先验证安装和 workflow 文件生成，不调用 Codex：
+
+```bash
+agent-team run-requirement --message "写个js文件，并打印agent-team-runtime" --executor deterministic --auto
 ```
 
 ### Interactive terminal workflow
@@ -252,10 +280,10 @@ agent-team dev --skills-empty
 agent-team run-requirement --message "执行这个需求：<你的需求>"
 ```
 
-默认 executor 是 `codex-exec`，runtime 会逐阶段调用 `codex exec`，并在每个阶段之后提交和验证 `StageResultEnvelope`。每个 stage-run 会生成 `<run_id>_trace.json`，记录不可跳过的 `contract_built`、`execution_context_built`、`stage_run_acquired`、`executor_started`、`executor_completed`、`result_submitted`、`gate_evaluated`、`state_advanced` 链路。Product 完成后默认停在 `WaitForCEOApproval`；如果你明确想让 runtime 自动进入 Dev，可以加：
+默认 executor 是 `codex-exec`，runtime 会逐阶段调用 `codex exec`，并在每个阶段之后提交和验证 `StageResultEnvelope`。每个 stage-run 会生成 `<run_id>_trace.json`，记录不可跳过的 `contract_built`、`execution_context_built`、`stage_run_acquired`、`executor_started`、`executor_completed`、`result_submitted`、`gate_evaluated`、`state_advanced` 链路。Product 完成后默认停在 `WaitForCEOApproval`；如果你想在确认 PRD 后自动流转到 Acceptance 并完成交付，可以加：
 
 ```bash
-agent-team run-requirement --message "执行这个需求：<你的需求>" --auto-approve-product
+agent-team run-requirement --message "执行这个需求：<你的需求>" --auto
 ```
 
 测试或离线演示可以用 deterministic executor：
@@ -267,7 +295,7 @@ agent-team run-requirement --message "执行这个需求：<你的需求>" --exe
 继续一个已经通过 PRD 审批的 session：
 
 ```bash
-agent-team run-requirement --session-id <session_id> --auto-approve-product
+agent-team run-requirement --session-id <session_id> --auto
 ```
 
 查看当前阶段：

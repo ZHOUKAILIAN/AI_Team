@@ -53,6 +53,7 @@ class CodexExecutor:
     ignore_rules: bool = True
     disable_plugins: bool = True
     ephemeral: bool = True
+    skip_git_repo_check: bool = True
     run: RunCallable = subprocess.run
 
     def build_command(self, *, prompt: str, output_path: Path) -> list[str]:
@@ -71,6 +72,8 @@ class CodexExecutor:
             command.extend(["--disable", "plugins"])
         if self.ephemeral:
             command.append("--ephemeral")
+        if self.skip_git_repo_check:
+            command.append("--skip-git-repo-check")
         if self.model:
             command.extend(["--model", self.model])
         if self.sandbox:

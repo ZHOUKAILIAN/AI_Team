@@ -64,6 +64,70 @@ class StageMachineTests(unittest.TestCase):
         self.assertEqual(updated.current_stage, "Dev")
         self.assertEqual(updated.human_decision, "go")
 
+    def test_interactive_runtime_walks_through_tech_plan_dev_qa_and_acceptance(self) -> None:
+        from agent_team.models import StageResultEnvelope, WorkflowSummary
+        from agent_team.stage_machine import StageMachine
+
+        machine = StageMachine()
+        summary = WorkflowSummary(
+            session_id="session-1",
+            runtime_mode="runtime_driver_interactive",
+            current_state="WaitForCEOApproval",
+            current_stage="ProductDraft",
+        )
+
+        summary = machine.apply_human_decision(summary=summary, decision="go")
+        self.assertEqual(summary.current_state, "TechPlan")
+        self.assertEqual(summary.current_stage, "TechPlan")
+
+        summary = machine.advance(
+            summary=summary,
+            stage_result=StageResultEnvelope(
+                session_id="session-1",
+                stage="TechPlan",
+                status="completed",
+                artifact_name="technical_plan.md",
+                artifact_content="# Technical Plan\n",
+            ),
+        )
+        self.assertEqual(summary.current_state, "WaitForTechPlanApproval")
+
+        summary = machine.apply_human_decision(summary=summary, decision="go")
+        self.assertEqual(summary.current_state, "Dev")
+        self.assertEqual(summary.current_stage, "Dev")
+
+        summary = machine.advance(
+            summary=summary,
+            stage_result=StageResultEnvelope(
+                session_id="session-1",
+                stage="Dev",
+                status="completed",
+                artifact_name="implementation.md",
+                artifact_content="# Implementation\n",
+            ),
+        )
+        self.assertEqual(summary.current_state, "WaitForDevApproval")
+
+        summary = machine.apply_human_decision(summary=summary, decision="go")
+        self.assertEqual(summary.current_state, "QA")
+        self.assertEqual(summary.current_stage, "QA")
+
+        summary = machine.advance(
+            summary=summary,
+            stage_result=StageResultEnvelope(
+                session_id="session-1",
+                stage="QA",
+                status="completed",
+                artifact_name="qa_report.md",
+                artifact_content="# QA Report\n",
+            ),
+        )
+        self.assertEqual(summary.current_state, "WaitForQAApproval")
+
+        summary = machine.apply_human_decision(summary=summary, decision="go")
+        self.assertEqual(summary.current_state, "Acceptance")
+        self.assertEqual(summary.current_stage, "Acceptance")
+
     def test_human_rework_decision_routes_to_target_stage(self) -> None:
         from agent_team.models import WorkflowSummary
         from agent_team.stage_machine import StageMachine

@@ -2,7 +2,12 @@
 
 ## [Unreleased]
 
-- Removed the legacy project-local Codex bridge initialization path; use `init-state`, `init-project-structure`, `dev`, or `run-requirement` directly.
+## [0.2.0b4] - 2026-05-03
+
+- Removed the legacy project-local Codex bridge initialization path; use `init`, `dev`, or `run-requirement` directly.
+- Replaced the separate `init-state` and `init-project-structure` commands with one user-facing `init` command.
+- Added the interactive `run-requirement --auto` flow for driving TechPlan, Dev, QA, and Acceptance after Product approval.
+- Documented the release installer path for trying Agent Team in a real project.
 
 ## [0.2.0b3] - 2026-04-26
 

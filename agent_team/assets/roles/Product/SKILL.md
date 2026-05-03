@@ -18,6 +18,7 @@ Product owns the requirement framing, user scenarios, acceptance criteria, and C
 - `artifact_dir`
 - `workflow_summary.md`
 - the normalized request in `request.md`
+- human revision requests from the current execution context, when present
 - any existing artifacts in the active session artifact directory
 
 Never guess a flat artifact path from another session. Use the artifact directory provided by the workflow runner.
@@ -30,13 +31,17 @@ The PRD must cover:
 - raw request
 - problem statement
 - goals
-- non-goals
 - user scenarios
 - acceptance criteria
 - QA verification focus
 - Acceptance verification focus
 - risks and assumptions
 - CEO confirmation questions
+
+Language and format:
+- Write the PRD primarily in Chinese unless the user explicitly asks for another language.
+- Keep acceptance criteria concrete and easy for QA and Acceptance to verify.
+- When revising after human feedback, fold the feedback into the PRD's main requirements and acceptance criteria. Do not merely acknowledge it as a side note.
 
 ## Boundaries
 

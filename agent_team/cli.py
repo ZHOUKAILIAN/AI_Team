@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
+import sys
 from dataclasses import replace
 from pathlib import Path
 
-from .backend import DeterministicBackend
 from .board import build_board_snapshot
 from .executor import ClaudeCodeExecutor, CodexExecutor, StageExecutor
 from .execution_context import build_stage_execution_context
@@ -14,7 +15,6 @@ from .harness_paths import default_state_root
 from .intake import parse_intake_message
 from .interactive import DevController, DevControllerConfig, ExecutorAlignmentRunner, ExecutorTechPlanRunner, InteractivePrompter
 from .models import Finding, GateResult, StageResultEnvelope, WorkflowSummary
-from .orchestrator import WorkflowOrchestrator
 from .panel import build_panel_snapshot
 from .project_structure import ensure_project_structure
 from .skill_registry import STAGES, SOURCE_LABELS, SkillRegistry
@@ -23,6 +23,30 @@ from .stage_contracts import build_stage_contract
 from .stage_machine import StageMachine
 from .state import StageRunStateError, StateStore
 from .workspace_metadata import refresh_workspace_metadata
+
+
+RUN_REQUIREMENT_STAGE_ORDER = ("Product", "TechPlan", "Dev", "QA", "Acceptance")
+RUN_REQUIREMENT_STAGE_TITLES = {
+    "Product": "生成需求方案中",
+    "TechPlan": "生成技术方案中",
+    "Dev": "执行开发实现中",
+    "QA": "执行 QA 验证中",
+    "Acceptance": "执行验收判断中",
+}
+RUN_REQUIREMENT_WAIT_TO_STAGE = {
+    "WaitForCEOApproval": "Product",
+    "WaitForTechPlanApproval": "TechPlan",
+    "WaitForDevApproval": "Dev",
+    "WaitForQAApproval": "QA",
+    "WaitForHumanDecision": "Acceptance",
+}
+RUN_REQUIREMENT_STAGE_DOCS = {
+    "Product": ("PRD", "product", "prd.md"),
+    "TechPlan": ("Technical Plan", "techplan", "technical_plan.md"),
+    "Dev": ("Implementation", "dev", "implementation.md"),
+    "QA": ("QA Report", "qa", "qa_report.md"),
+    "Acceptance": ("Acceptance Report", "acceptance", "acceptance_report.md"),
+}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -42,46 +66,21 @@ def main(argv: list[str] | None = None) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-team",
-        description=(
-            "Agent Team single-session workflow CLI. Prefer run-requirement for runtime-driven execution; "
-            "run/agent-run are deterministic demo commands."
-        ),
+        description="Agent Team single-session workflow CLI.",
     )
     parser.add_argument("--repo-root", type=Path, default=Path("."))
     parser.add_argument("--state-root", type=Path)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    init_parser = subparsers.add_parser("init-state", help="Create the workflow state directories.")
-    init_parser.set_defaults(handler=_handle_init_state)
-
-    project_init_parser = subparsers.add_parser(
-        "init-project-structure",
-        help="Create or refresh the project-level Agent Team doc structure and doc map.",
+    init_parser = subparsers.add_parser(
+        "init",
+        help="Create workflow state directories and the project-level doc structure.",
         description=(
-            "Create or refresh the project-level Agent Team doc structure and doc map. "
-            "Use this when a repository does not yet have a clear docs structure."
+            "Create workflow state directories and the project-level doc structure. "
+            "Use this once per clone before running the workflow."
         ),
     )
-    project_init_parser.set_defaults(handler=_handle_init_project_structure)
-
-    run_parser = subparsers.add_parser(
-        "run",
-        help=(
-            "Demo command: execute the deterministic workflow session from an explicit request "
-            "(real workflow entrypoint: run-requirement)."
-        ),
-        description=(
-            "Demo command: execute the deterministic workflow session from an explicit request. "
-            "For the real runtime-driven workflow, use run-requirement."
-        ),
-    )
-    run_parser.add_argument("--request", required=True, help="Raw feature or process request.")
-    run_parser.add_argument(
-        "--print-review",
-        action="store_true",
-        help="Print the generated session review after the run completes.",
-    )
-    run_parser.set_defaults(handler=_handle_run)
+    init_parser.set_defaults(handler=_handle_init)
 
     start_session_parser = subparsers.add_parser(
         "start-session",
@@ -112,7 +111,7 @@ def build_parser() -> argparse.ArgumentParser:
             "auto-decision flags are provided."
         ),
     )
-    run_requirement_target = run_requirement_parser.add_mutually_exclusive_group(required=True)
+    run_requirement_target = run_requirement_parser.add_mutually_exclusive_group(required=False)
     run_requirement_target.add_argument("--message", help="Raw user message for a new requirement session.")
     run_requirement_target.add_argument("--session-id", help="Existing session ID to continue driving.")
     run_requirement_parser.add_argument(
@@ -135,9 +134,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Timeout for codex-exec or command executor stage runs.",
     )
     run_requirement_parser.add_argument(
+        "--auto",
+        action="store_true",
+        help=(
+            "After the CEO approves Product, automatically pass TechPlan, Dev, QA, and the "
+            "final Acceptance decision in interactive runs."
+        ),
+    )
+    run_requirement_parser.add_argument(
         "--auto-approve-product",
         action="store_true",
-        help="Automatically record Product approval and continue into Dev.",
+        help="Automatically record Product approval. Intended for scripts; interactive --auto still keeps Product human-gated.",
     )
     run_requirement_parser.add_argument(
         "--auto-final-decision",
@@ -182,6 +189,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help="Extra argument passed through to codex exec. Repeat for multiple arguments.",
+    )
+    run_requirement_parser.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Force the legacy single-shot behavior even when stdin/stdout are attached to a TTY.",
+    )
+    run_requirement_parser.add_argument(
+        "--model-output",
+        choices=["summary", "raw", "off"],
+        default="summary",
+        help="Interactive terminal output mode. summary shows stage progress; raw adds runtime details; off prints only gates and document paths.",
     )
     run_requirement_parser.set_defaults(handler=_handle_run_requirement)
 
@@ -413,25 +431,6 @@ def build_parser() -> argparse.ArgumentParser:
     human_decision_parser.add_argument("--target-stage", help="Required for rework decisions from acceptance.")
     human_decision_parser.set_defaults(handler=_handle_record_human_decision)
 
-    agent_run_parser = subparsers.add_parser(
-        "agent-run",
-        help=(
-            "Demo command: execute the deterministic workflow session from a raw user message "
-            "(real workflow entrypoint: run-requirement)."
-        ),
-        description=(
-            "Demo command: execute the deterministic workflow session from a raw user message. "
-            "For the real runtime-driven workflow, use run-requirement."
-        ),
-    )
-    agent_run_parser.add_argument("--message", required=True, help="Raw user message for the agent to process.")
-    agent_run_parser.add_argument(
-        "--print-review",
-        action="store_true",
-        help="Print the generated session review after the run completes.",
-    )
-    agent_run_parser.set_defaults(handler=_handle_agent_run)
-
     feedback_parser = subparsers.add_parser(
         "record-feedback",
         help="Record human feedback as a structured learning finding.",
@@ -520,46 +519,17 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _handle_init_state(args: argparse.Namespace) -> int:
+def _handle_init(args: argparse.Namespace) -> int:
     store = StateStore(args.state_root)
     store.ensure_layout()
-    print(f"Initialized workflow state at {args.state_root}")
-    return 0
-
-
-def _handle_init_project_structure(args: argparse.Namespace) -> int:
     structure = ensure_project_structure(args.repo_root)
+    print(f"state_root: {args.state_root}")
     print(f"repo_root: {structure.repo_root}")
     print(f"project_root: {structure.project_root}")
     print(f"doc_map_path: {structure.doc_map_path}")
     print(f"used_default_docs: {structure.used_default_docs}")
     print(f"doc_map: {json.dumps(structure.doc_map, ensure_ascii=False, sort_keys=True)}")
     return 0
-
-
-def _handle_run(args: argparse.Namespace) -> int:
-    intake = parse_intake_message(args.request)
-    return _execute_workflow(
-        repo_root=args.repo_root,
-        state_root=args.state_root,
-        request=intake.request,
-        contract=intake.contract,
-        print_review=args.print_review,
-    )
-
-
-def _handle_agent_run(args: argparse.Namespace) -> int:
-    intake = parse_intake_message(args.message)
-    if not intake.request:
-        raise SystemExit("Unable to extract a workflow request from --message.")
-
-    return _execute_workflow(
-        repo_root=args.repo_root,
-        state_root=args.state_root,
-        request=intake.request,
-        contract=intake.contract,
-        print_review=args.print_review,
-    )
 
 
 def _handle_start_session(args: argparse.Namespace) -> int:
@@ -584,38 +554,56 @@ def _handle_start_session(args: argparse.Namespace) -> int:
 
 
 def _handle_run_requirement(args: argparse.Namespace) -> int:
-    from .runtime_driver import RuntimeDriverError, RuntimeDriverOptions, run_requirement
+    from .runtime_driver import RuntimeDriverError, run_requirement
+
+    interactive = _run_requirement_should_be_interactive(args)
+    message, session_id = _resolve_run_requirement_target(args, interactive=interactive)
+    if interactive:
+        return _handle_run_requirement_interactive(args, message=message, session_id=session_id)
 
     try:
         result = run_requirement(
             repo_root=args.repo_root,
             state_root=args.state_root,
-            message=args.message or "",
-            session_id=args.session_id or "",
-            options=RuntimeDriverOptions(
-                executor=args.executor,
-                executor_command=args.executor_command or "",
-                command_timeout_seconds=args.command_timeout_seconds,
-                auto_approve_product=args.auto_approve_product,
-                auto_final_decision=args.auto_final_decision,
-                max_stage_runs=args.max_stage_runs,
-                judge=args.judge,
-                model=args.model,
-                docker_image=args.docker_image,
-                openai_api_key=args.openai_api_key,
-                openai_base_url=args.openai_base_url,
-                openai_proxy_url=args.openai_proxy_url,
-                openai_user_agent=args.openai_user_agent,
-                openai_oa=args.openai_oa,
-                codex_model=args.codex_model,
-                codex_sandbox=args.codex_sandbox,
-                codex_approval_policy=args.codex_approval_policy,
-                codex_extra_args=list(args.codex_extra_arg),
-            ),
+            message=message,
+            session_id=session_id,
+            options=_runtime_driver_options_from_args(args, interactive=False),
         )
     except RuntimeDriverError as exc:
         raise SystemExit(str(exc))
 
+    _print_runtime_driver_result(result)
+    return 1 if result.status in {"blocked", "failed"} else 0
+
+
+def _runtime_driver_options_from_args(args: argparse.Namespace, *, interactive: bool):
+    from .runtime_driver import RuntimeDriverOptions
+
+    return RuntimeDriverOptions(
+        executor=args.executor,
+        executor_command=args.executor_command or "",
+        command_timeout_seconds=args.command_timeout_seconds,
+        auto_approve_product=args.auto_approve_product,
+        auto_advance_intermediate=args.auto and not interactive,
+        auto_final_decision=args.auto_final_decision,
+        max_stage_runs=args.max_stage_runs,
+        judge=args.judge,
+        model=args.model,
+        docker_image=args.docker_image,
+        openai_api_key=args.openai_api_key,
+        openai_base_url=args.openai_base_url,
+        openai_proxy_url=args.openai_proxy_url,
+        openai_user_agent=args.openai_user_agent,
+        openai_oa=args.openai_oa,
+        codex_model=args.codex_model,
+        codex_sandbox=args.codex_sandbox,
+        codex_approval_policy=args.codex_approval_policy,
+        codex_extra_args=list(args.codex_extra_arg),
+        interactive=interactive,
+    )
+
+
+def _print_runtime_driver_result(result) -> None:
     print(f"session_id: {result.session_id}")
     print(f"artifact_dir: {result.artifact_dir}")
     print(f"summary_path: {result.summary_path}")
@@ -631,7 +619,548 @@ def _handle_run_requirement(args: argparse.Namespace) -> int:
         print(f"gate_reason: {result.gate_reason}")
     if result.next_action:
         print(f"next_action: {result.next_action}")
-    return 1 if result.status in {"blocked", "failed"} else 0
+
+
+def _run_requirement_should_be_interactive(args: argparse.Namespace) -> bool:
+    return not args.non_interactive and sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _resolve_run_requirement_target(args: argparse.Namespace, *, interactive: bool) -> tuple[str, str]:
+    if args.message and args.session_id:
+        raise SystemExit("Provide either --message or --session-id, not both.")
+    if args.message:
+        return args.message, args.session_id or ""
+    if args.session_id:
+        return "", args.session_id
+    if interactive:
+        message = input("请输入需求：").strip()
+        if not message:
+            raise SystemExit("需求不能为空。")
+        return message, ""
+    raise SystemExit("run-requirement requires --message or --session-id when stdin/stdout are not interactive.")
+
+
+def _handle_run_requirement_interactive(args: argparse.Namespace, *, message: str, session_id: str) -> int:
+    from .runtime_driver import RuntimeDriverError, run_requirement
+
+    store = StateStore(args.state_root)
+    current_message = message
+    current_session_id = session_id
+    header_printed = False
+
+    while True:
+        if current_session_id:
+            summary_before = store.load_workflow_summary(current_session_id)
+            if summary_before.current_state not in RUN_REQUIREMENT_WAIT_TO_STAGE and summary_before.current_state not in {
+                "Blocked",
+                "Done",
+            }:
+                _print_run_requirement_stage_banner(
+                    stage=_run_requirement_stage_for_summary(summary_before),
+                    completed=_run_requirement_completed_stage_count(summary_before),
+                )
+        else:
+            _print_run_requirement_stage_banner(
+                stage="Product",
+                completed=0,
+            )
+
+        try:
+            result = run_requirement(
+                repo_root=args.repo_root,
+                state_root=args.state_root,
+                message=current_message,
+                session_id=current_session_id,
+                options=_runtime_driver_options_from_args(args, interactive=True),
+            )
+        except RuntimeDriverError as exc:
+            raise SystemExit(str(exc))
+
+        if not header_printed:
+            print(f"session_id: {result.session_id}")
+            print(f"artifact_dir: {result.artifact_dir}")
+            print(f"summary_path: {result.summary_path}")
+            print("")
+            header_printed = True
+
+        summary = store.load_workflow_summary(result.session_id)
+        stage = _run_requirement_stage_for_summary(summary)
+        completed = _run_requirement_completed_stage_count(summary)
+        _print_run_requirement_stage_report(
+            store=store,
+            session_id=result.session_id,
+            stage=stage,
+            completed=completed,
+            summary=summary,
+            model_output=args.model_output,
+            result=result,
+            auto_approving=_run_requirement_should_auto_approve_stage(args, stage),
+        )
+
+        if result.status in {"blocked", "failed"}:
+            blocked_decision = _prompt_run_requirement_blocked_decision(
+                store=store,
+                summary=summary,
+                stage=stage,
+                result=result,
+                args=args,
+            )
+            if blocked_decision == "quit":
+                print("Session saved.")
+                print(_run_requirement_resume_command(args, result.session_id))
+                return 0
+            _clear_run_requirement_blocker(store=store, summary=summary, stage=stage)
+            current_session_id = result.session_id
+            current_message = ""
+            continue
+        if result.status == "done" or summary.current_state == "Done":
+            print("Session completed.")
+            return 0
+        if result.status != "waiting_human":
+            return 0
+
+        if _run_requirement_should_auto_approve_stage(args, stage):
+            updated_summary = _apply_run_requirement_decision(
+                store=store,
+                summary=summary,
+                decision="go",
+                target_stage=None,
+                issue="",
+            )
+            next_stage = (
+                "完成交付"
+                if updated_summary.current_state == "Done"
+                else _run_requirement_stage_for_summary(updated_summary)
+            )
+            print(f"--auto: 已自动通过 {stage}，进入 {next_stage}。")
+            current_session_id = result.session_id
+            current_message = ""
+            if updated_summary.current_state == "Done":
+                print("Session completed.")
+                return 0
+            continue
+
+        decision = _prompt_run_requirement_decision(
+            store=store,
+            summary=summary,
+            stage=stage,
+            model_output=args.model_output,
+        )
+        if decision["action"] == "quit":
+            print("Session saved.")
+            print(_run_requirement_resume_command(args, result.session_id))
+            return 0
+
+        updated_summary = _apply_run_requirement_decision(
+            store=store,
+            summary=summary,
+            decision=decision["decision"],
+            target_stage=decision.get("target_stage"),
+            issue=decision.get("issue", ""),
+        )
+        current_session_id = result.session_id
+        current_message = ""
+
+        if updated_summary.current_state == "Done":
+            print("Session completed.")
+            return 0
+
+
+def _run_requirement_should_auto_approve_stage(args: argparse.Namespace, stage: str) -> bool:
+    return bool(args.auto) and stage in {"TechPlan", "Dev", "QA", "Acceptance"}
+
+
+def _print_run_requirement_stage_banner(*, stage: str, completed: int) -> None:
+    total = len(RUN_REQUIREMENT_STAGE_ORDER)
+    print(f"[{completed + 1}/{total} {stage}] {RUN_REQUIREMENT_STAGE_TITLES.get(stage, stage)}...")
+    print(f"进度: {_render_progress_bar(completed, total)}")
+
+
+def _print_run_requirement_stage_report(
+    *,
+    store: StateStore,
+    session_id: str,
+    stage: str,
+    completed: int,
+    summary: WorkflowSummary,
+    model_output: str,
+    result,
+    auto_approving: bool = False,
+) -> None:
+    session = store.load_session(session_id)
+    label, artifact_key, filename = RUN_REQUIREMENT_STAGE_DOCS.get(stage, (stage, stage.lower(), f"{stage.lower()}.md"))
+    doc_path = summary.artifact_paths.get(artifact_key) or str(session.artifact_dir / filename)
+    print(f"[{completed}/{len(RUN_REQUIREMENT_STAGE_ORDER)} {stage}] {RUN_REQUIREMENT_STAGE_TITLES.get(stage, stage)}")
+    print(f"进度: {_render_progress_bar(completed, len(RUN_REQUIREMENT_STAGE_ORDER))}")
+    if model_output != "off":
+        for line in _run_requirement_stage_summary_lines(stage, summary, auto_approving=auto_approving):
+            print(f"- {line}")
+    print("文档:")
+    print(f"- {label}: {doc_path}")
+    if model_output == "raw":
+        print("调试信息:")
+        _print_runtime_driver_result(result)
+        _print_run_requirement_raw_streams(store=store, session_id=session_id, stage=stage)
+    if result.gate_reason and model_output != "raw":
+        print(f"gate_reason: {result.gate_reason}")
+    print("下一步:")
+    if result.status == "done":
+        print("流程已完成。")
+    elif result.status in {"blocked", "failed"}:
+        print("请检查 gate_reason、stage_run trace 和阶段产物后修复。")
+    elif auto_approving:
+        print(_run_requirement_auto_next_step_text(stage))
+    else:
+        print(_run_requirement_next_step_text(stage))
+    print("")
+
+
+def _run_requirement_stage_summary_lines(
+    stage: str,
+    summary: WorkflowSummary,
+    *,
+    auto_approving: bool = False,
+) -> list[str]:
+    del summary
+    if stage == "Product":
+        return [
+            "已解析原始需求",
+            "已整理目标、边界和验收标准",
+            "已写入 PRD",
+        ]
+    if stage == "TechPlan":
+        return [
+            "已确认 PRD 作为技术方案输入",
+            "已拆分实现步骤和验证方式",
+            "已写入 technical_plan.md",
+        ]
+    if stage == "Dev":
+        return [
+            "已根据技术方案完成实现",
+            "已记录自检和改动文件",
+            "已写入 implementation.md",
+        ]
+    if stage == "QA":
+        return [
+            "已独立验证实现结果",
+            "已记录 QA 结论和发现",
+            "已写入 qa_report.md",
+        ]
+    if stage == "Acceptance":
+        return [
+            "已按验收标准汇总结论",
+            "已写入 acceptance_report.md",
+            "--auto 将自动记录最终通过" if auto_approving else "等待最终人工决策",
+        ]
+    return [
+        "已推进到当前阶段",
+    ]
+
+
+def _run_requirement_next_step_text(stage: str) -> str:
+    if stage == "Product":
+        return "请打开 PRD 文档确认需求方案和验收标准是否通过。"
+    if stage == "TechPlan":
+        return "请打开技术方案文档确认实现路径和验证方式是否通过。"
+    if stage == "Dev":
+        return "请打开实现文档确认代码改动和自检结果是否通过。"
+    if stage == "QA":
+        return "请打开 QA 报告确认验证结果是否通过。"
+    if stage == "Acceptance":
+        return "请打开验收报告并确认最终决策。"
+    return "请确认当前阶段是否通过。"
+
+
+def _run_requirement_auto_next_step_text(stage: str) -> str:
+    if stage == "Acceptance":
+        return "--auto 已启用，将自动通过 Acceptance 并完成交付。"
+    next_stage = {
+        "TechPlan": "Dev",
+        "Dev": "QA",
+        "QA": "Acceptance",
+    }.get(stage, "下一阶段")
+    return f"--auto 已启用，将自动通过 {stage} 并进入 {next_stage}。"
+
+
+def _prompt_run_requirement_blocked_decision(
+    *,
+    store: StateStore,
+    summary: WorkflowSummary,
+    stage: str,
+    result,
+    args: argparse.Namespace,
+) -> str:
+    while True:
+        print("当前阶段执行被阻塞。")
+        print("[r] 重新执行当前阶段")
+        print("[p] 打印诊断文件路径")
+        print("[q] 保存并退出")
+        raw = input("> ").strip().lower()
+        if raw == "r":
+            return "retry"
+        if raw == "p":
+            _print_run_requirement_diagnostics(store=store, session_id=result.session_id, stage=stage, args=args)
+            continue
+        if raw == "q":
+            return "quit"
+        print("请输入 r / p / q。")
+
+
+def _clear_run_requirement_blocker(*, store: StateStore, summary: WorkflowSummary, stage: str) -> None:
+    session = store.load_session(summary.session_id)
+    current_state = summary.current_state
+    current_stage = summary.current_stage
+    if current_state == "Blocked":
+        current_state = stage if stage in RUN_REQUIREMENT_STAGE_ORDER else "Product"
+        current_stage = current_state
+    store.save_workflow_summary(
+        session,
+        replace(
+            summary,
+            current_state=current_state,
+            current_stage=current_stage,
+            blocked_reason="",
+        ),
+    )
+    store.record_event(
+        summary.session_id,
+        kind="workflow_blocker_cleared",
+        stage=current_stage,
+        state=current_state,
+        actor="human",
+        status="retry",
+        message="Interactive operator chose to retry the blocked stage.",
+    )
+
+
+def _print_run_requirement_diagnostics(
+    *,
+    store: StateStore,
+    session_id: str,
+    stage: str,
+    args: argparse.Namespace,
+) -> None:
+    session = store.load_session(session_id)
+    run = store.latest_stage_run(session_id, stage=stage)
+    print("诊断信息:")
+    print(f"- executor: {args.executor}")
+    print(f"- artifact_dir: {session.artifact_dir}")
+    print(f"- workflow_summary: {store.workflow_summary_path(session_id)}")
+    if run is None:
+        return
+    stage_runs_dir = session.session_dir / "stage_runs"
+    print(f"- run_id: {run.run_id}")
+    print(f"- run_state: {run.state}")
+    if run.blocked_reason:
+        print(f"- blocked_reason: {run.blocked_reason}")
+    context_path = store.latest_execution_context_path(session_id, stage)
+    if context_path is not None:
+        print(f"- context: {context_path}")
+    for label, path in (
+        ("contract", stage_runs_dir / f"{run.run_id}_contract.json"),
+        ("result", stage_runs_dir / f"{run.run_id}_result.json"),
+        ("candidate", stage_runs_dir / f"{run.run_id}_candidate.json"),
+        ("stdout", stage_runs_dir / f"{run.run_id}_stdout.txt"),
+        ("stderr", stage_runs_dir / f"{run.run_id}_stderr.txt"),
+        ("trace", stage_runs_dir / f"{run.run_id}_trace.json"),
+    ):
+        if path.exists():
+            print(f"- {label}: {path}")
+
+
+def _print_run_requirement_raw_streams(*, store: StateStore, session_id: str, stage: str) -> None:
+    run = store.latest_stage_run(session_id, stage=stage)
+    if run is None:
+        return
+    session = store.load_session(session_id)
+    stage_runs_dir = session.session_dir / "stage_runs"
+    trace_path = run.artifact_paths.get("runtime_trace")
+    if trace_path:
+        print(f"runtime_trace: {trace_path}")
+    for stream_name in ("stdout", "stderr"):
+        stream_path = stage_runs_dir / f"{run.run_id}_{stream_name}.txt"
+        if not stream_path.exists():
+            continue
+        print(f"{stream_name}_path: {stream_path}")
+        content = stream_path.read_text()
+        if content.strip():
+            print(f"{stream_name}:")
+            print(_truncate_terminal_text(content, limit=4000))
+
+
+def _truncate_terminal_text(value: str, *, limit: int) -> str:
+    if len(value) <= limit:
+        return value.rstrip()
+    return value[:limit].rstrip() + "\n...<truncated>"
+
+
+def _prompt_run_requirement_decision(
+    *,
+    store: StateStore,
+    summary: WorkflowSummary,
+    stage: str,
+    model_output: str,
+) -> dict[str, str]:
+    del model_output
+    print(_run_requirement_prompt_text(stage))
+    while True:
+        raw = input("> ").strip().lower()
+        if raw == "p":
+            _print_run_requirement_document_link(store=store, summary=summary, stage=stage)
+            continue
+        if raw == "q":
+            return {"action": "quit"}
+        if raw == "y":
+            return {"action": "apply", "decision": "go"}
+        if raw == "e":
+            issue = input("修改意见：").strip()
+            if stage == "Acceptance":
+                target_stage = _prompt_acceptance_rework_target()
+                return {
+                    "action": "apply",
+                    "decision": "rework",
+                    "target_stage": target_stage,
+                    "issue": issue or "用户要求返工。",
+                }
+            target_stage = _run_requirement_rework_target(stage)
+            return {
+                "action": "apply",
+                "decision": "rework",
+                "target_stage": target_stage,
+                "issue": issue or "用户要求返工。",
+            }
+        if stage == "Acceptance" and raw in {"n", "no"}:
+            return {"action": "apply", "decision": "no-go"}
+        print("请输入 y / e / p / q。" if stage != "Acceptance" else "请输入 y / n / e / p / q。")
+
+
+def _prompt_acceptance_rework_target() -> str:
+    while True:
+        raw = input("返工目标（Product/Dev）：").strip()
+        if raw.lower() in {"product", "p"}:
+            return "Product"
+        if raw.lower() in {"dev", "d"}:
+            return "Dev"
+        print("请输入 Product 或 Dev。")
+
+
+def _run_requirement_prompt_text(stage: str) -> str:
+    if stage == "Acceptance":
+        return "[y] 通过，完成交付\n[n] 不通过\n[e] 提修改意见，重新返工\n[p] 重新打印文档链接\n[q] 保存并退出"
+    if stage == "Product":
+        return "[y] 通过，进入技术方案\n[e] 提修改意见，重新生成 PRD\n[p] 重新打印 PRD 文档链接\n[q] 保存并退出"
+    if stage == "TechPlan":
+        return "[y] 通过，进入开发实现\n[e] 提修改意见，重新生成技术方案\n[p] 重新打印技术方案文档链接\n[q] 保存并退出"
+    if stage == "Dev":
+        return "[y] 通过，进入 QA\n[e] 提修改意见，打回 Dev\n[p] 重新打印实现文档链接\n[q] 保存并退出"
+    if stage == "QA":
+        return "[y] 通过，进入验收\n[e] 提修改意见，打回 Dev\n[p] 重新打印 QA 报告链接\n[q] 保存并退出"
+    return (
+        "[y] 通过，进入下一阶段\n"
+        "[e] 提修改意见，重新生成当前阶段\n"
+        "[p] 重新打印文档链接\n"
+        "[q] 保存并退出"
+    )
+
+
+def _run_requirement_rework_target(stage: str) -> str:
+    if stage == "QA":
+        return "Dev"
+    return stage
+
+
+def _print_run_requirement_document_link(*, store: StateStore, summary: WorkflowSummary, stage: str) -> None:
+    session = store.load_session(summary.session_id)
+    label, artifact_key, filename = RUN_REQUIREMENT_STAGE_DOCS.get(stage, (stage, stage.lower(), f"{stage.lower()}.md"))
+    doc_path = summary.artifact_paths.get(artifact_key) or str(session.artifact_dir / filename)
+    print("文档:")
+    print(f"- {label}: {doc_path}")
+
+
+def _apply_run_requirement_decision(
+    *,
+    store: StateStore,
+    summary: WorkflowSummary,
+    decision: str,
+    target_stage: str | None,
+    issue: str,
+) -> WorkflowSummary:
+    session = store.load_session(summary.session_id)
+    if issue:
+        source_stage = _run_requirement_stage_for_summary(summary)
+        finding = Finding(
+            source_stage=source_stage,
+            target_stage=target_stage or source_stage,
+            issue=issue,
+            severity="medium",
+        )
+        store.record_feedback(summary.session_id, finding)
+    updated_summary = StageMachine().apply_human_decision(
+        summary=summary,
+        decision=decision,
+        target_stage=target_stage,
+    )
+    store.save_workflow_summary(session, updated_summary)
+    store.set_human_decision(summary.session_id, updated_summary.human_decision)
+    store.record_event(
+        summary.session_id,
+        kind="workflow_state_changed",
+        stage=updated_summary.current_stage,
+        state=updated_summary.current_state,
+        actor="human",
+        status=updated_summary.human_decision,
+        message=(
+            f"Workflow moved to {updated_summary.current_stage} / "
+            f"{updated_summary.current_state} after interactive decision."
+        ),
+    )
+    return updated_summary
+
+
+def _run_requirement_resume_command(args: argparse.Namespace, session_id: str) -> str:
+    return (
+        "Resume:\n"
+        f"agent-team --repo-root {shlex.quote(str(args.repo_root))} "
+        f"--state-root {shlex.quote(str(args.state_root))} "
+        f"run-requirement --session-id {shlex.quote(session_id)}"
+    )
+
+
+def _run_requirement_stage_for_summary(summary: WorkflowSummary) -> str:
+    if summary.current_state in RUN_REQUIREMENT_WAIT_TO_STAGE:
+        return RUN_REQUIREMENT_WAIT_TO_STAGE[summary.current_state]
+    if summary.current_state in RUN_REQUIREMENT_STAGE_ORDER:
+        return summary.current_state
+    if summary.current_state in {"Intake", "ProductDraft"}:
+        return "Product"
+    if summary.current_stage in RUN_REQUIREMENT_STAGE_ORDER:
+        return summary.current_stage
+    return "Product"
+
+
+def _run_requirement_completed_stage_count(summary: WorkflowSummary) -> int:
+    if summary.current_state in {"Intake", "ProductDraft"}:
+        return 0
+    if summary.current_state in {"WaitForCEOApproval", "TechPlan"}:
+        return 1
+    if summary.current_state in {"WaitForTechPlanApproval", "Dev"}:
+        return 2
+    if summary.current_state in {"WaitForDevApproval", "QA"}:
+        return 3
+    if summary.current_state in {"WaitForQAApproval", "Acceptance"}:
+        return 4
+    if summary.current_state in {"WaitForHumanDecision", "Done"}:
+        return 5
+    if summary.current_state == "Blocked" and summary.current_stage in RUN_REQUIREMENT_STAGE_ORDER:
+        return RUN_REQUIREMENT_STAGE_ORDER.index(summary.current_stage)
+    return 0
+
+
+def _render_progress_bar(completed: int, total: int, width: int = 10) -> str:
+    total = max(total, 1)
+    completed = max(0, min(completed, total))
+    filled = int(width * completed / total)
+    return f"[{'#' * filled}{'-' * (width - filled)}] {completed}/{total}"
 
 
 def _handle_dev(args: argparse.Namespace) -> int:
@@ -795,7 +1324,13 @@ def _handle_step(args: argparse.Namespace) -> int:
     summary = store.load_workflow_summary(session_id)
     _print_summary(summary)
 
-    if summary.current_state in {"WaitForCEOApproval", "WaitForHumanDecision"}:
+    if summary.current_state in {
+        "WaitForCEOApproval",
+        "WaitForTechPlanApproval",
+        "WaitForDevApproval",
+        "WaitForQAApproval",
+        "WaitForHumanDecision",
+    }:
         print("next_action: record-human-decision")
         return 0
 
@@ -1322,31 +1857,6 @@ def _handle_serve_board(args: argparse.Namespace) -> int:
     return 0
 
 
-def _execute_workflow(
-    *,
-    repo_root: Path,
-    state_root: Path,
-    request: str,
-    contract,
-    print_review: bool,
-) -> int:
-    store = StateStore(state_root)
-    orchestrator = WorkflowOrchestrator(
-        repo_root=repo_root,
-        state_store=store,
-        backend=DeterministicBackend(),
-    )
-    result = orchestrator.run(request=request, contract=contract)
-    print(f"session_id: {result.session_id}")
-    print(f"acceptance_status: {result.acceptance_status}")
-    print(f"review_path: {result.review_path}")
-
-    if print_review:
-        print("")
-        print(result.review_path.read_text())
-    return 0
-
-
 def _handle_review(args: argparse.Namespace) -> int:
     store = StateStore(args.state_root)
     print(store.read_review(session_id=args.session_id))
@@ -1455,6 +1965,8 @@ def _judge_result_to_dict(judge_result) -> dict[str, object] | None:
 def _expected_submission_stage(summary: WorkflowSummary) -> str | None:
     if summary.current_state in {"Intake", "ProductDraft"}:
         return "Product"
+    if summary.current_state == "TechPlan":
+        return "TechPlan"
     if summary.current_state == "Dev":
         return "Dev"
     if summary.current_state == "QA":

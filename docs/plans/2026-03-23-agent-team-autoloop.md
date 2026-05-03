@@ -47,7 +47,7 @@ Expected: FAIL because the package and entrypoint do not exist yet
 Create a package with a CLI exposing:
 - `run`: execute the workflow
 - `review`: review the latest session
-- `init-state`: create required state directories
+- runtime-driven state directory creation during normal workflow entrypoints
 
 **Step 4: Run test to verify it passes**
 

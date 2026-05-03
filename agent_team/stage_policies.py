@@ -84,6 +84,20 @@ def default_policy_registry() -> PolicyRegistry:
                 allow_findings=False,
             ),
             StagePolicy(
+                stage="TechPlan",
+                goal="Draft a concrete technical implementation plan from the approved PRD without editing code.",
+                required_outputs=["technical_plan.md"],
+                evidence_specs=[
+                    EvidenceRequirement(
+                        name="implementation_plan",
+                        allowed_kinds=["artifact", "report"],
+                        required_fields=["summary"],
+                    )
+                ],
+                approval_rule="requires_technical_plan_approval",
+                allow_findings=False,
+            ),
+            StagePolicy(
                 stage="Dev",
                 goal="Implement the approved PRD, review the changed code, and provide self-verification evidence.",
                 required_outputs=["implementation.md"],
