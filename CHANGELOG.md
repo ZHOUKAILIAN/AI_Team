@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.2.0b6] - 2026-05-03
+
+- Corrected README offline smoke-test examples to use the published `--executor dry-run` option.
+
 ## [0.2.0b5] - 2026-05-03
 
 - Fixed the release installer so fresh installs can resolve runtime dependencies from PyPI.

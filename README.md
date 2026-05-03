@@ -193,7 +193,7 @@ curl -fsSL https://github.com/ZHOUKAILIAN/agent-team-runtime/releases/latest/dow
 安装当前 beta 版本：
 
 ```bash
-curl -fsSL https://github.com/ZHOUKAILIAN/agent-team-runtime/releases/download/v0.2.0b5/install.sh | sh
+curl -fsSL https://github.com/ZHOUKAILIAN/agent-team-runtime/releases/download/v0.2.0b6/install.sh | sh
 ```
 
 安装固定版本：
@@ -241,7 +241,7 @@ agent-team run-requirement --message "写个js文件，并打印agent-team-runti
 如果只想先验证安装和 workflow 文件生成，不调用 Codex：
 
 ```bash
-agent-team run-requirement --message "写个js文件，并打印agent-team-runtime" --executor deterministic --auto
+agent-team run-requirement --message "写个js文件，并打印agent-team-runtime" --executor dry-run --auto
 ```
 
 ### Interactive terminal workflow
@@ -287,7 +287,7 @@ agent-team run-requirement --message "执行这个需求：<你的需求>"
 agent-team run-requirement --message "执行这个需求：<你的需求>" --auto
 ```
 
-测试或离线演示可以用 deterministic executor：
+测试或离线演示可以用 `dry-run` executor：
 
 ```bash
 agent-team run-requirement --message "执行这个需求：<你的需求>" --executor dry-run

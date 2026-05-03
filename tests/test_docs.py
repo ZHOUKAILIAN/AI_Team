@@ -22,6 +22,8 @@ class DocsTests(unittest.TestCase):
         self.assertIn("Python 3.13+", readme)
         self.assertIn("CHANGELOG.md", readme)
         self.assertIn("agent-team run-requirement", readme)
+        self.assertIn("--executor dry-run", readme)
+        self.assertNotIn("--executor deterministic", readme)
         self.assertIn("agent-team start-session", readme)
         self.assertIn("agent-team dev", readme)
         self.assertIn("agent-team skill list", readme)
