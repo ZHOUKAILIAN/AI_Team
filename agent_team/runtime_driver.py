@@ -13,15 +13,15 @@ from .execution_context import StageExecutionContext, build_stage_execution_cont
 from .gate_evaluator import GateEvaluator, NoopJudge
 from .gatekeeper import evaluate_candidate
 from .intake import parse_intake_message
-from .models import EvidenceItem, GateResult, StageContract, StageResultEnvelope, WorkflowSummary
+from .models import EvidenceItem, Finding, GateResult, StageContract, StageResultEnvelope, WorkflowSummary
 from .openai_sandbox_judge import OpenAISandboxJudge, OpenAISandboxJudgeUnavailable
 from .stage_contracts import build_stage_contract
 from .stage_machine import StageMachine
 from .stage_policies import default_policy_registry
-from .state import StateStore, artifact_name_for_stage
+from .state import StageRunStateError, StateStore, artifact_name_for_stage
 
 
-EXECUTABLE_STAGES = {"Product", "Dev", "QA", "Acceptance"}
+EXECUTABLE_STAGES = {"Product", "TechPlan", "Dev", "QA", "Acceptance"}
 REQUIRED_PASS_TRACE_STEPS = [
     "contract_built",
     "execution_context_built",
@@ -40,6 +40,7 @@ class RuntimeDriverOptions:
     executor_command: str = ""
     command_timeout_seconds: int = 3600
     auto_approve_product: bool = False
+    auto_advance_intermediate: bool = False
     auto_final_decision: str = ""
     max_stage_runs: int = 12
     judge: str = "off"
@@ -58,6 +59,8 @@ class RuntimeDriverOptions:
     codex_ignore_rules: bool = True
     codex_disable_plugins: bool = True
     codex_ephemeral: bool = True
+    codex_skip_git_repo_check: bool = True
+    interactive: bool = False
 
 
 @dataclass(slots=True)
@@ -101,6 +104,22 @@ class StageExecutor(Protocol):
         raise NotImplementedError
 
 
+def _write_stage_run_streams(request: StageExecutionRequest, *, stdout: object, stderr: object) -> None:
+    request.result_path.parent.mkdir(parents=True, exist_ok=True)
+    stdout_path = request.result_path.parent / f"{request.run_id}_stdout.txt"
+    stderr_path = request.result_path.parent / f"{request.run_id}_stderr.txt"
+    stdout_path.write_text(_coerce_stream_text(stdout))
+    stderr_path.write_text(_coerce_stream_text(stderr))
+
+
+def _coerce_stream_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
 def run_requirement(
     *,
     repo_root: Path,
@@ -112,7 +131,13 @@ def run_requirement(
     opts = options or RuntimeDriverOptions()
     store = StateStore(state_root)
     store.ensure_layout()
-    session = store.load_session(session_id) if session_id else _create_driver_session(store, message)
+    session = store.load_session(session_id) if session_id else _create_driver_session(
+        store,
+        message,
+        interactive=opts.interactive,
+    )
+    if opts.interactive:
+        _ensure_interactive_runtime_mode(store=store, session_id=session.session_id)
     executor = build_stage_executor(opts)
 
     stage_run_count = 0
@@ -123,6 +148,7 @@ def run_requirement(
             store=store,
             summary=summary,
             auto_approve_product=opts.auto_approve_product,
+            auto_advance_intermediate=opts.auto_advance_intermediate,
             auto_final_decision=opts.auto_final_decision,
         )
         if waiting is not None:
@@ -232,13 +258,21 @@ class CommandStageExecutor:
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
+            stdout = _coerce_stream_text(exc.stdout)
+            stderr = _coerce_stream_text(exc.stderr) or f"Executor timed out after {self.timeout_seconds} seconds."
+            _write_stage_run_streams(
+                request,
+                stdout=stdout,
+                stderr=stderr,
+            )
             return _blocked_result_from_process(
                 request=request,
                 command=self.command,
-                stdout=exc.stdout or "",
-                stderr=exc.stderr or f"Executor timed out after {self.timeout_seconds} seconds.",
+                stdout=stdout,
+                stderr=stderr,
                 exit_code=124,
-        )
+            )
+        _write_stage_run_streams(request, stdout=completed.stdout, stderr=completed.stderr)
         if request.result_path.exists():
             return _stage_result_from_json_text(
                 request=request,
@@ -284,6 +318,8 @@ class CodexExecStageExecutor:
             command.extend(["--disable", "plugins"])
         if self.options.codex_ephemeral:
             command.append("--ephemeral")
+        if self.options.codex_skip_git_repo_check:
+            command.append("--skip-git-repo-check")
         if self.options.codex_model:
             command.extend(["--model", self.options.codex_model])
         command.extend(self.options.codex_extra_args)
@@ -312,6 +348,7 @@ class CodexExecStageExecutor:
                     stdin=subprocess.DEVNULL,
                 )
         except FileNotFoundError as exc:
+            _write_stage_run_streams(request, stdout="", stderr=str(exc))
             return _blocked_result_from_process(
                 request=request,
                 command="codex exec",
@@ -320,13 +357,21 @@ class CodexExecStageExecutor:
                 exit_code=127,
             )
         except subprocess.TimeoutExpired as exc:
+            stdout = _coerce_stream_text(exc.stdout)
+            stderr = _coerce_stream_text(exc.stderr) or f"codex exec timed out after {self.options.command_timeout_seconds} seconds."
+            _write_stage_run_streams(
+                request,
+                stdout=stdout,
+                stderr=stderr,
+            )
             return _blocked_result_from_process(
                 request=request,
                 command="codex exec",
-                stdout=exc.stdout or "",
-                stderr=exc.stderr or f"codex exec timed out after {self.options.command_timeout_seconds} seconds.",
+                stdout=stdout,
+                stderr=stderr,
                 exit_code=124,
             )
+        _write_stage_run_streams(request, stdout=completed.stdout, stderr=completed.stderr)
         if completed.returncode != 0 and not request.result_path.exists():
             return _blocked_result_from_process(
                 request=request,
@@ -344,7 +389,7 @@ class CodexExecStageExecutor:
         )
 
 
-def _create_driver_session(store: StateStore, message: str):
+def _create_driver_session(store: StateStore, message: str, *, interactive: bool = False):
     intake = parse_intake_message(message)
     if not intake.request:
         raise RuntimeDriverError("Unable to extract a workflow request from --message.")
@@ -352,8 +397,17 @@ def _create_driver_session(store: StateStore, message: str):
         intake.request,
         raw_message=message,
         contract=intake.contract,
-        runtime_mode="runtime_driver",
+        runtime_mode="runtime_driver_interactive" if interactive else "runtime_driver",
+        initiator="human" if interactive else "agent",
     )
+
+
+def _ensure_interactive_runtime_mode(*, store: StateStore, session_id: str) -> None:
+    session = store.load_session(session_id)
+    summary = store.load_workflow_summary(session_id)
+    if summary.runtime_mode == "runtime_driver_interactive":
+        return
+    store.save_workflow_summary(session, replace(summary, runtime_mode="runtime_driver_interactive"))
 
 
 def _handle_wait_state(
@@ -362,6 +416,7 @@ def _handle_wait_state(
     store: StateStore,
     summary: WorkflowSummary,
     auto_approve_product: bool,
+    auto_advance_intermediate: bool,
     auto_final_decision: str,
 ) -> tuple[str, str] | None:
     del repo_root
@@ -369,12 +424,29 @@ def _handle_wait_state(
         if auto_approve_product:
             _apply_human_decision(store=store, summary=summary, decision="go")
             return None
+        if summary.runtime_mode == "runtime_driver_interactive":
+            return ("waiting_human", "record-human-decision --decision go|rework|no-go")
         return ("waiting_human", "record-human-decision --decision go")
+    if summary.current_state == "WaitForTechPlanApproval":
+        if auto_advance_intermediate:
+            _apply_human_decision(store=store, summary=summary, decision="go")
+            return None
+        return ("waiting_human", "record-human-decision --decision go|rework|no-go")
+    if summary.current_state == "WaitForDevApproval":
+        if auto_advance_intermediate:
+            _apply_human_decision(store=store, summary=summary, decision="go")
+            return None
+        return ("waiting_human", "record-human-decision --decision go|rework|no-go")
+    if summary.current_state == "WaitForQAApproval":
+        if auto_advance_intermediate:
+            _apply_human_decision(store=store, summary=summary, decision="go")
+            return None
+        return ("waiting_human", "record-human-decision --decision go|rework|no-go")
     if summary.current_state == "WaitForHumanDecision":
         if auto_final_decision:
             _apply_human_decision(store=store, summary=summary, decision=auto_final_decision)
             return None
-        return ("waiting_human", "record-human-decision --decision go|no-go")
+        return ("waiting_human", "record-human-decision --decision go|no-go|rework")
     if summary.current_state == "Blocked":
         return ("blocked", "inspect gate_reason and route rework")
     return None
@@ -510,7 +582,44 @@ def _execute_stage(
         stage=stage,
         trace_steps=trace_steps,
     )
-    submitted = store.submit_stage_run_result(run.run_id, result)
+    try:
+        submitted = store.submit_stage_run_result(run.run_id, result)
+    except StageRunStateError as exc:
+        failed_gate = GateResult(
+            status="BLOCKED",
+            reason=f"Executor produced an invalid stage result: {exc}",
+            findings=list(result.findings),
+            checked_at=datetime.now(timezone.utc).isoformat(),
+        )
+        _add_runtime_trace_step(
+            trace_steps,
+            step="result_submitted",
+            status="failed",
+            details={"error": str(exc)},
+        )
+        _add_runtime_trace_step(
+            trace_steps,
+            step="gate_evaluated",
+            status="blocked",
+            details={"gate_status": failed_gate.status, "gate_reason": failed_gate.reason},
+        )
+        _write_runtime_trace(
+            trace_path=trace_path,
+            session_id=session_id,
+            run_id=run.run_id,
+            stage=stage,
+            trace_steps=trace_steps,
+        )
+        latest_summary = store.load_workflow_summary(session_id)
+        store.save_workflow_summary(session, replace(latest_summary, blocked_reason=failed_gate.reason))
+        store.update_stage_run(
+            run,
+            state="BLOCKED",
+            gate_result=failed_gate,
+            blocked_reason=failed_gate.reason,
+            artifact_paths={"runtime_trace": str(trace_path)},
+        )
+        return failed_gate
     _add_runtime_trace_step(
         trace_steps,
         step="result_submitted",
@@ -725,6 +834,14 @@ def _default_evidence(stage: str) -> list[EvidenceItem]:
                 producer="runtime-driver",
             )
         ],
+        "TechPlan": [
+            EvidenceItem(
+                name="implementation_plan",
+                kind="report",
+                summary="Technical plan identifies implementation steps and verification commands.",
+                producer="runtime-driver",
+            )
+        ],
         "Dev": [
             EvidenceItem(
                 name="self_code_review",
@@ -764,12 +881,42 @@ def _default_evidence(stage: str) -> list[EvidenceItem]:
 
 def _dry_run_artifact_content(stage: str, context: StageExecutionContext) -> str:
     if stage == "Product":
+        revision_summary = _human_revision_summary(context.actionable_findings)
+        revision_section = (
+            "\n## 人工修改意见\n"
+            f"{revision_summary}\n"
+            "这些意见必须折入目标、用户场景和验收标准，而不是只作为备注保留。\n"
+            if revision_summary
+            else ""
+        )
         return (
-            "# PRD\n\n"
-            f"## Requirement\n{context.original_request_summary}\n\n"
-            "## Acceptance Criteria\n"
-            "- Runtime driver owns stage execution instead of relying on a conversational promise.\n"
-            "- Product, Dev, QA, and Acceptance outputs are verified through stage contracts.\n"
+            "# 需求方案\n\n"
+            f"## 原始需求\n{context.original_request_summary}\n\n"
+            f"{revision_section}"
+            "## 目标\n"
+            "- 由 runtime driver 控制阶段执行，而不是依赖对话承诺。\n"
+            "- Product、Dev、QA、Acceptance 的产物都通过阶段契约验证。\n\n"
+            "## 验收标准\n"
+            "- Product 阶段生成可确认的需求方案。\n"
+            "- 后续阶段必须基于已确认的需求方案继续推进。\n"
+        )
+    if stage == "TechPlan":
+        return (
+            "# 技术方案\n\n"
+            "## 执行流程\n\n"
+            "```mermaid\n"
+            "flowchart TD\n"
+            "    A[读取已确认需求方案] --> B[识别最小变更范围]\n"
+            "    B --> C[完成实现]\n"
+            "    C --> D[运行验证命令]\n"
+            "```\n\n"
+            "## 变更范围\n\n"
+            "| 项目 | 内容 |\n"
+            "| --- | --- |\n"
+            "| 实现策略 | 按已确认 PRD 做最小必要改动 |\n"
+            "| 影响模块 | Dev 阶段根据仓库结构确认 |\n"
+            "| 验证命令 | `agent-team runtime dry-run` |\n"
+            "| 预期结果 | passed |\n"
         )
     if stage == "Dev":
         return (
@@ -822,6 +969,8 @@ def _blocked_result_from_process(
     stderr: str,
     exit_code: int,
 ) -> StageResultEnvelope:
+    stdout_text = _coerce_stream_text(stdout)
+    stderr_text = _coerce_stream_text(stderr)
     return StageResultEnvelope(
         session_id=request.session_id,
         stage=request.contract.stage,
@@ -831,9 +980,9 @@ def _blocked_result_from_process(
             f"# {request.contract.stage} Blocked\n\n"
             f"Command `{command}` exited with {exit_code} before producing a valid stage result.\n\n"
             "## stderr\n\n"
-            f"```text\n{stderr.strip()[:4000]}\n```\n\n"
+            f"```text\n{stderr_text.strip()[:4000]}\n```\n\n"
             "## stdout\n\n"
-            f"```text\n{stdout.strip()[:4000]}\n```\n"
+            f"```text\n{stdout_text.strip()[:4000]}\n```\n"
         ),
         contract_id=request.contract.contract_id,
         blocked_reason=f"Executor command failed with exit code {exit_code}.",
@@ -882,10 +1031,17 @@ def _build_codex_prompt(request: StageExecutionRequest) -> str:
     contract_json = json.dumps(request.contract.to_dict(), ensure_ascii=False, indent=2)
     context_json = json.dumps(request.context.to_dict(), ensure_ascii=False, indent=2)
     artifact_name = artifact_name_for_stage(request.contract.stage)
+    format_instructions = _stage_artifact_format_instructions(request.contract.stage)
+    human_revision_summary = _human_revision_summary(request.context.actionable_findings)
     return (
         f"You are the {request.contract.stage} stage worker inside the Agent Team runtime driver.\n"
         "Execute exactly this stage. Do not call agent-team commands and do not advance workflow state.\n"
         "The runtime driver will validate your JSON result against the stage contract after you return.\n\n"
+        "If human revision requests are present, treat them as authoritative updates for this rerun. "
+        "Apply them to the main artifact content and acceptance criteria instead of only mentioning them "
+        "in a revision note.\n\n"
+        "Human revision requests:\n"
+        f"{human_revision_summary or 'None'}\n\n"
         "Return only a JSON object matching the provided output schema. The required identity fields are:\n"
         f"- session_id: {request.session_id}\n"
         f"- stage: {request.contract.stage}\n"
@@ -895,11 +1051,59 @@ def _build_codex_prompt(request: StageExecutionRequest) -> str:
         "cannot be produced. Include the required evidence item names from the contract.\n\n"
         "For optional string fields use an empty string, for optional arrays use [], and for an evidence "
         "exit_code that is not a command use null.\n\n"
+        "Artifact writing rules:\n"
+        f"{format_instructions}\n\n"
         "StageContract:\n"
         f"{contract_json}\n\n"
         "StageExecutionContext:\n"
         f"{context_json}\n"
     )
+
+
+def _stage_artifact_format_instructions(stage: str) -> str:
+    if stage == "Product":
+        return (
+            "- Write artifact_content primarily in Chinese unless the user explicitly asks for another language.\n"
+            "- Use clear Chinese headings such as `需求背景`, `目标`, `用户场景`, `验收标准`, "
+            "`QA 验证重点`, `验收重点`, `风险与假设`, and `确认问题`.\n"
+            "- Keep the PRD focused on requirements, verification, risks, assumptions, and confirmation questions.\n"
+            "- When human revision requests exist, fold them into the PRD's goals, user scenarios, "
+            "acceptance criteria, and risks instead of only quoting them in a revision section."
+        )
+    if stage == "TechPlan":
+        return (
+            "- Write artifact_content primarily in Chinese unless the user explicitly asks for another language.\n"
+            "- Prefer Mermaid flowcharts for execution flow and Markdown tables for scope, file changes, "
+            "interfaces, verification, risks, and rollback plans.\n"
+            "- Avoid bullet lists when the same information can be expressed as a flowchart or table.\n"
+            "- When human revision requests exist, update the concrete implementation scope, flowchart, "
+            "file plan, verification plan, and risks instead of only quoting them in a revision section."
+        )
+    if stage == "Dev":
+        return (
+            "- Treat StageExecutionContext.approved_tech_plan_content as the approved implementation plan.\n"
+            "- Implement the technical plan instead of replacing it with a new design.\n"
+            "- If approved_tech_plan_content is empty, fall back to the approved PRD and stage contract."
+        )
+    return "- Write artifact_content in the most useful language for the current request and keep it concise."
+
+
+def _human_revision_summary(findings: list[Finding]) -> str:
+    lines: list[str] = []
+    for index, finding in enumerate(findings, start=1):
+        issue = finding.issue.strip()
+        if not issue:
+            continue
+        lines.append(f"{index}. {finding.source_stage} -> {finding.target_stage}: {issue}")
+        if finding.proposed_context_update.strip():
+            lines.append(f"   context_update: {finding.proposed_context_update.strip()}")
+        if finding.lesson.strip():
+            lines.append(f"   lesson: {finding.lesson.strip()}")
+        if finding.required_evidence:
+            lines.append(f"   required_evidence: {', '.join(finding.required_evidence)}")
+        if finding.completion_signal.strip():
+            lines.append(f"   completion_signal: {finding.completion_signal.strip()}")
+    return "\n".join(lines)
 
 
 def _add_runtime_trace_step(
@@ -997,7 +1201,7 @@ def _stage_result_schema() -> dict[str, Any]:
         ],
         "properties": {
             "session_id": {"type": "string"},
-            "stage": {"enum": ["Product", "Dev", "QA", "Acceptance"]},
+            "stage": {"enum": ["Product", "TechPlan", "Dev", "QA", "Acceptance"]},
             "status": {"enum": ["completed", "failed", "blocked"]},
             "artifact_name": {"type": "string"},
             "artifact_content": {"type": "string"},

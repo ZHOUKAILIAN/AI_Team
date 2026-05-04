@@ -112,6 +112,13 @@ def render_install_script(repo_root: Path, wheel_name: str) -> str:
 
 
 class ReleaseInstallScriptTests(unittest.TestCase):
+    def test_install_script_allows_runtime_dependency_resolution(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        install_script = render_install_script(repo_root, "agent_team_runtime-0.1.0-py3-none-any.whl")
+
+        self.assertNotIn("--no-index", install_script)
+        self.assertIn('-m pip install "${tmp_dir}/${AGENT_TEAM_WHEEL}"', install_script)
+
     def test_install_script_installs_candidate_and_updates_stable_command(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:

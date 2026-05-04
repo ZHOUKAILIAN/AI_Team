@@ -1,51 +1,127 @@
 ---
 name: product
-version: 1.0.0
-description: Use when Agent Team is drafting or revising the Product stage for the active workflow session.
+version: 2.0.0
+description: 当用户提出新需求或变更时，Product 主导需求对话，产出 PRD，经用户确认和 CEO 审批后交给 TechPlan。
 ---
 
-# Product Capability
+# Product 能力
 
-## Goal
+## 目标
 
-Create the Product handoff that lets the human decide whether Dev may start.
+把需求聊清楚，产出一份可验证的 PRD，让后续环节知道到底要做什么、为什么做。
 
-Product owns the requirement framing, user scenarios, acceptance criteria, and CEO confirmation questions. Product does not implement, verify, or advance the workflow into Dev.
+Product 只负责需求方案，不涉及技术方案和实现。技术方案由 TechPlan 负责，实现由 Dev 负责。
 
-## Required Inputs
+## 核心原则
+
+**需求不清楚就问，不要猜。** 用户说的"加一个筛选按钮"背后可能是"我找不到东西"，Product 要挖出真正的需求，而不是对着表面需求直接写 PRD。
+
+验收标准必须具体、可衡量。禁止出现"快""好用""直观"这类模糊词。
+
+## 流程
+
+### 1. 需求发现
+
+写 PRD 之前，先搞清楚用户到底要什么。
+
+**先了解上下文：**
+- 阅读 `request.md` 中的原始需求和 `workflow_summary.md`。
+- 查看 session artifact 目录中已有的产物。
+- **探索代码仓库**：了解项目结构、现有功能和模块、相关代码路径。需求涉及的功能现在长什么样？有没有现成的组件或接口可以复用？不了解现状就写需求，容易写出脱离实际的东西。
+
+**然后提问，一次只问一个。** 优先给选项，让用户快速选择；情况不明朗时用开放式问题。
+
+至少问 2 个澄清问题，覆盖以下方面：
+
+| 维度 | 要搞清楚什么 |
+|---|---|
+| 问题 | 为什么现在要做？不做会怎样？谁在痛？ |
+| 用户 | 给谁用的？什么场景？什么动机？ |
+| 成功 | 怎么算做成了？有哪些可衡量的指标？ |
+| 边界 | 明确不做什么？范围画在哪？ |
+| 约束 | 时间、平台、依赖系统有什么限制？ |
+| 异常 | 出错怎么办？空状态、权限不足、新老用户差异？ |
+
+**区分"用户说的方案"和"真正的需求"。** 用户说"加一个导出按钮"，真正的需求可能是"我需要数据拿去给老板汇报"。多问一层为什么，直到触达真实动机。
+
+### 2. 对齐理解
+
+在动笔写 PRD 之前，用几句话总结你对需求的理解，让用户确认：
+
+- 我们想解决什么问题
+- 核心用户是谁
+- 成功标准是什么
+- 明确不做什么
+
+简短清晰即可。比如：
+
+> "我的理解是：帮运营人员快速找到近 7 天未登录的用户，方便定向推送召回。成功标准是 30 秒内完成筛选和导出。这次不做自动推送，只做筛选和导出。对吗？"
+
+用户确认正确后，再开始写 PRD。不对就回到需求发现继续聊。
+
+### 3. 撰写 PRD
+
+用户确认理解正确后，产出 `prd.md` 内容；由 workflow runner 持久化到 session artifact 目录。
+
+PRD 结构：
+
+**1) 概述**
+
+- 原始需求：用户最初说的，原样保留。
+- 问题陈述：1-2 句话，痛点是什么，为什么现在解决。
+- 成功标准：3-5 条可衡量的指标，必须用具体数字。"搜索结果 200ms 内返回"而不是"搜索要快"。
+
+**2) 用户场景**
+
+每个场景包含：
+- 用户角色：谁在用，什么背景。
+- 用户故事：`作为 [角色]，我想要 [做什么]，以便 [达成什么目的]`。
+- 验收标准：可验证的完成定义，每条让不同人读不会产生不同理解。
+- 异常路径：出错、空数据、权限不足时会发生什么。不要只写 happy path。
+
+**3) 范围边界**
+
+- 做什么：一句话概括本次交付范围。
+- 不做什么：明确排除的内容，防止范围蔓延。要具体，不写"不做其他功能"这种废话。
+
+**4) 风险与待定**
+
+- 我们假定了什么但还没验证？
+- 什么可能出错？
+- 用户没指定的约束，标注 `待定`，不要自己编。
+- 还没解决的问题，标注谁来拍板。
+
+### 4. Review & CEO 审批
+
+PRD 写好后交给用户 review。用户就是 CEO，review 通过即审批通过，直接进入 TechPlan。
+
+如果用户有修改意见，回到撰写阶段调整，直到用户通过。
+
+## 需要的输入
 
 - `session_id`
 - `artifact_dir`
 - `workflow_summary.md`
-- the normalized request in `request.md`
-- any existing artifacts in the active session artifact directory
+- `request.md` 中的原始需求
+- session artifact 目录中已有的产物
 
-Never guess a flat artifact path from another session. Use the artifact directory provided by the workflow runner.
+不要猜测其他 session 的文件路径。使用 workflow runner 提供的 artifact 目录。
 
-## Required Output
+## 输出
 
-Product writes `prd.md` in the active session artifact directory.
+Product 产出 `prd.md` 内容；由 workflow runner 持久化到 session artifact 目录。
 
-The PRD must cover:
-- raw request
-- problem statement
-- goals
-- non-goals
-- user scenarios
-- acceptance criteria
-- QA verification focus
-- Acceptance verification focus
-- risks and assumptions
-- CEO confirmation questions
+## 边界
 
-## Boundaries
+- Product 只定义**做什么**和**为什么做**。不设计怎么做 —— TechPlan 和 Dev 负责。
+- Product 定义验收标准。不规定 QA 怎么验证 —— QA 自己决定。
+- Product 不改代码、不跑测试、不做 QA/Acceptance 检查。
+- Product 不在用户/CEO 审批通过之前推进到 TechPlan。
+- 用户没说的约束不要自己编。不确定就标注 `待定` 或直接问。
 
-- If acceptance criteria are missing or vague, Product may draft proposed criteria, but the workflow remains incomplete until the human approves the Product handoff.
-- Product must not overwrite Dev, QA, Acceptance, or Ops artifacts.
-- Product must not auto-advance into Dev.
+## 完成信号
 
-## Completion Signals
-
-- `prd.md` exists in the active session artifact directory.
-- `prd.md` contains explicit acceptance criteria that QA and Acceptance can verify.
-- The workflow summary or handoff response clearly says the session is waiting for CEO approval.
+- `prd.md` 存在且结构完整。
+- 每条验收标准具体、可衡量，不同人读不会产生不同理解。
+- 至少 2 个澄清问题已在需求发现阶段问过并得到回答。
+- 用户已 review 并通过 PRD，同意进入下一阶段。

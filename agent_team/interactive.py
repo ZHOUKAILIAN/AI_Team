@@ -300,7 +300,7 @@ class DevController:
         while True:
             choice = self.prompter.ask(
                 "\nDelegate to agents?\n"
-                "[y] Start Product/Dev/QA/Acceptance agent chain\n"
+                "[y] Start Product/TechPlan/Dev/QA/Acceptance agent chain\n"
                 "[m] Manual execution; keep the session for manual stage submission\n"
                 "[q] Quit and keep the session\n> "
             ).strip().lower()
@@ -370,6 +370,8 @@ class DevController:
     def _run_agent_chain(self, session_id: str) -> None:
         self.stage_harness.run_stage(session_id, "Product")
         self._auto_approve_product_if_waiting(session_id)
+        self.stage_harness.run_stage(session_id, "TechPlan")
+        self._auto_approve_techplan_if_waiting(session_id)
         self.stage_harness.run_stage(session_id, "Dev")
         self.stage_harness.run_stage(session_id, "QA")
         self.stage_harness.run_stage(session_id, "Acceptance")
@@ -379,6 +381,15 @@ class DevController:
         session = self.config.state_store.load_session(session_id)
         summary = self.config.state_store.load_workflow_summary(session_id)
         if summary.current_state != "WaitForCEOApproval":
+            return
+        updated = StageMachine().apply_human_decision(summary=summary, decision="go")
+        self.config.state_store.save_workflow_summary(session, updated)
+        self.config.state_store.set_human_decision(session_id, updated.human_decision)
+
+    def _auto_approve_techplan_if_waiting(self, session_id: str) -> None:
+        session = self.config.state_store.load_session(session_id)
+        summary = self.config.state_store.load_workflow_summary(session_id)
+        if summary.current_state != "WaitForTechPlanApproval":
             return
         updated = StageMachine().apply_human_decision(summary=summary, decision="go")
         self.config.state_store.save_workflow_summary(session, updated)

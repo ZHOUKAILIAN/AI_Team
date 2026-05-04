@@ -37,7 +37,7 @@ Read `prd.md` to establish the business goal, `qa_report.md` to confirm what QA 
 
 ## Required Output
 
-Acceptance writes `acceptance_report.md` in the active session artifact directory.
+Acceptance produces `acceptance_report.md`; the workflow runner persists it in the active session artifact directory.
 
 The report must cover:
 - acceptance inputs
@@ -53,7 +53,7 @@ The report must cover:
 - Do not restart external tools, edit host-app configuration, or mutate the local environment unless the workflow contract or the user has given explicit user approval in the current session.
 - For page-root visual parity or Figma tolerance work, do not recommend `recommended_go` without `runtime_screenshot`, `overlay_diff`, and `page_root_recursive_audit`.
 - For review-driven sessions, do not recommend `recommended_go` while `review_completion.json` remains incomplete, unresolved, or does not cover the declared acceptance contract.
-- If the recommendation is `recommended_no_go` or an actionable `blocked`, emit structured findings with reusable lessons and explicit completion-signal language that route the work back to Product or Dev.
+- If the recommendation is `recommended_no_go` or an actionable `blocked`, emit structured findings with reusable lessons and explicit completion-signal language that route the work back to Product, TechPlan, or Dev.
 - Acceptance returns an AI recommendation only and then waits for the human Go/No-Go decision.
 
 ## Completion Signals

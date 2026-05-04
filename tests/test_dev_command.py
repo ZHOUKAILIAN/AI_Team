@@ -94,7 +94,7 @@ class DevCommandTests(unittest.TestCase):
 
         self.assertTrue(session_id)
         self.assertEqual(session.initiator, "human")
-        self.assertEqual(stage_harness.stages, ["Product", "Dev", "QA", "Acceptance"])
+        self.assertEqual(stage_harness.stages, ["Product", "TechPlan", "Dev", "QA", "Acceptance"])
         self.assertEqual(summary.human_decision, "go")
 
     def test_manual_decision_saves_session_without_running_agents(self) -> None:

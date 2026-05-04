@@ -6,7 +6,7 @@
 
 - 对外是一个 CLI 产品
 - 对内是一套可扩展的 orchestration framework
-- 默认内置 Product / Dev / QA / Acceptance 团队
+- 默认内置 Product / TechPlan / Dev / QA / Acceptance 团队
 - 能把反馈、返工、证据和人工决策沉淀为可复用的运行时资产
 
 ## 项目定位
@@ -35,18 +35,19 @@
 当前默认团队是：
 
 - `Product`
+- `TechPlan`
 - `Dev`
 - `QA`
 - `Acceptance`
-- `Ops`
 
 当前权威流程链路是：
 
-`Product -> CEO approval -> Dev <-> QA -> Acceptance -> human Go/No-Go`
+`Product -> CEO approval -> TechPlan -> Dev <-> QA -> Acceptance -> human Go/No-Go`
 
 这意味着：
 
 - Product 负责产出 PRD 和验收标准
+- TechPlan 负责产出独立技术方案和验证策略
 - Dev 负责实现、代码自 review 和自验证
 - QA 必须独立验证，不能被 Dev 自测替代
 - Acceptance 负责产品级验收建议
@@ -118,7 +119,6 @@ worker 看到的是 stage contract，不是自由发挥的任务描述。
 - `Dev/`
 - `QA/`
 - `Acceptance/`
-- `Ops/`
 - `agent_team/assets/roles/`
 - `agent_team/assets/skills/`
 
@@ -163,7 +163,7 @@ runtime 不再默认拆出 repo 外的 `workspaces/`、`artifacts/`、`sessions/
 
 ## 当前边界
 
-当前这套 runtime 已经能用 `run-requirement` 自动驱动 Product/Dev/QA/Acceptance，并在人工 gate 处停住。仍在演进的部分主要包括：
+当前这套 runtime 已经能用 `run` 自动驱动 Product/TechPlan/Dev/QA/Acceptance，并在人工 gate 处停住。仍在演进的部分主要包括：
 
 - 原生 Codex 插件体验
 - 更完整的扩展注册机制
@@ -171,7 +171,7 @@ runtime 不再默认拆出 repo 外的 `workspaces/`、`artifacts/`、`sessions/
 
 所以当前最准确的理解是：
 
-它已经用 runtime 强制“控流程”和“跑流程”；PRD 审批与最终 Go/No-Go 仍由人卡控。
+它已经用 runtime 强制“控流程”和“跑流程”；PRD 审批与最终 Go/No-Go 仍由人卡控，`--auto` 只自动穿过中间阶段。
 
 ## 安装与使用
 
@@ -182,6 +182,7 @@ runtime 不再默认拆出 repo 外的 `workspaces/`、`artifacts/`、`sessions/
 - Python 3.13+
 - `curl`
 - `shasum` 或 `sha256sum`
+- 能访问 GitHub Releases 和 PyPI；安装脚本会下载 release wheel，并让 `pip` 安装运行时依赖。
 
 安装最新版本：
 
@@ -192,7 +193,7 @@ curl -fsSL https://github.com/ZHOUKAILIAN/agent-team-runtime/releases/latest/dow
 安装当前 beta 版本：
 
 ```bash
-curl -fsSL https://github.com/ZHOUKAILIAN/agent-team-runtime/releases/download/v0.2.0b3/install.sh | sh
+curl -fsSL https://github.com/ZHOUKAILIAN/agent-team-runtime/releases/download/v0.2.0b6/install.sh | sh
 ```
 
 安装固定版本：
@@ -215,6 +216,34 @@ curl -fsSL https://github.com/ZHOUKAILIAN/agent-team-runtime/releases/download/v
 pip install -e .
 ```
 
+### 在自己的项目里试一次
+
+安装完成后，先确保 `agent-team` 在 PATH 里：
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+agent-team --help
+```
+
+进入一个真实项目仓库后初始化运行时目录和项目文档结构：
+
+```bash
+cd /path/to/your/project
+agent-team init
+```
+
+如果本机已经安装并登录 Codex CLI，可以用默认 `codex-exec` 真实跑一条需求：
+
+```bash
+agent-team run --message "写个js文件，并打印agent-team-runtime" --auto
+```
+
+如果只想先验证安装和 workflow 文件生成，不调用 Codex：
+
+```bash
+agent-team run --message "写个js文件，并打印agent-team-runtime" --executor dry-run --auto
+```
+
 ### Interactive terminal workflow
 
 ```bash
@@ -222,7 +251,7 @@ cd /path/to/project
 agent-team dev
 ```
 
-`agent-team dev` prompts for the requirement, confirms acceptance criteria, asks for a technical plan confirmation, and then can delegate Product / Dev / QA / Acceptance execution through `codex exec` while preserving runtime gates.
+`agent-team dev` prompts for the requirement, confirms acceptance criteria, asks for a technical plan confirmation, and then can delegate the remaining Product / Dev / QA / Acceptance harness chain through `codex exec` while preserving runtime gates. The `agent-team run` path models TechPlan as a first-class runtime stage.
 
 默认执行器是 Codex；也可以切到 Claude Code：
 
@@ -237,6 +266,7 @@ agent-team dev --dev-executor codex --qa-executor claude-code
 ```
 
 `agent-team dev` 支持在 Phase 2 技术方案确认后选择 stage skills。首次默认空选，后续会从 `.agent-team/skill-preferences.yaml` 读取上次偏好。
+每次 stage 执行都会在 `stage_runs/<run_id>_skill_injection.json` 记录这次实际注入的 skill 清单，包含 skill 名称、来源（builtin/personal/project）、作用域（global/project）、delivery、安装路径和对应 prompt 路径。
 
 ```bash
 agent-team skill list
@@ -249,25 +279,25 @@ agent-team dev --skills-empty
 启动一个 session：
 
 ```bash
-agent-team run-requirement --message "执行这个需求：<你的需求>"
+agent-team run --message "<你的需求>"
 ```
 
-默认 executor 是 `codex-exec`，runtime 会逐阶段调用 `codex exec`，并在每个阶段之后提交和验证 `StageResultEnvelope`。每个 stage-run 会生成 `<run_id>_trace.json`，记录不可跳过的 `contract_built`、`execution_context_built`、`stage_run_acquired`、`executor_started`、`executor_completed`、`result_submitted`、`gate_evaluated`、`state_advanced` 链路。Product 完成后默认停在 `WaitForCEOApproval`；如果你明确想让 runtime 自动进入 Dev，可以加：
+默认 executor 是 `codex-exec`，runtime 会逐阶段调用 `codex exec`，并在每个阶段之后提交和验证 `StageResultEnvelope`。每个 stage-run 会生成 `<run_id>_trace.json`，记录不可跳过的 `contract_built`、`execution_context_built`、`stage_run_acquired`、`executor_started`、`executor_completed`、`result_submitted`、`gate_evaluated`、`state_advanced` 链路。Product 完成后默认停在 `WaitForCEOApproval`；如果你想在确认 PRD 后自动流转到 Acceptance 并完成交付，可以加：
 
 ```bash
-agent-team run-requirement --message "执行这个需求：<你的需求>" --auto-approve-product
+agent-team run --message "<你的需求>" --auto
 ```
 
-测试或离线演示可以用 deterministic executor：
+测试或离线演示可以用 `dry-run` executor：
 
 ```bash
-agent-team run-requirement --message "执行这个需求：<你的需求>" --executor dry-run
+agent-team run --message "<你的需求>" --executor dry-run
 ```
 
 继续一个已经通过 PRD 审批的 session：
 
 ```bash
-agent-team run-requirement --session-id <session_id> --auto-approve-product
+agent-team run --session-id <session_id> --auto
 ```
 
 查看当前阶段：
@@ -369,7 +399,7 @@ agent-team serve-board --all-workspaces --port 8765 --poll-interval 5
 
 - `agent_team/`
   - 当前 runtime 核心实现
-- `Product/`, `Dev/`, `QA/`, `Acceptance/`, `Ops/`
+- `Product/`, `TechPlan/`, `Dev/`, `QA/`, `Acceptance/`
   - 角色资产
 - `scripts/`
   - 项目级 helper

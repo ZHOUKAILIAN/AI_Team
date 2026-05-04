@@ -10,9 +10,26 @@ def local_temp_dir() -> Path:
     return path
 
 
+def visual_review_contract(*, allow_host_environment_changes: bool = True):
+    from agent_team.models import AcceptanceContract
+
+    return AcceptanceContract(
+        review_method="figma-restoration-review",
+        boundary="page_root",
+        recursive=True,
+        tolerance_px=0.5,
+        required_dimensions=["Structure", "Geometry", "Style", "Content", "State"],
+        required_artifacts=["deviation_checklist.md", "review_completion.json"],
+        required_evidence=["runtime_screenshot", "overlay_diff", "page_root_recursive_audit"],
+        native_node_policy="miniprogram",
+        allow_host_environment_changes=allow_host_environment_changes,
+        read_only_review=True,
+        acceptance_criteria=["递归检查所有可见子节点", "偏差 <= 0.5px"],
+    )
+
+
 class OrchestratorTests(unittest.TestCase):
     def test_review_completion_gate_blocks_visual_review_without_required_artifacts(self) -> None:
-        from agent_team.intake import parse_intake_message
         from agent_team.models import StageOutput
         from agent_team.orchestrator import WorkflowOrchestrator
         from agent_team.state import StateStore
@@ -53,12 +70,7 @@ class OrchestratorTests(unittest.TestCase):
                 raise AssertionError(f"unexpected stage: {stage}")
 
         repo_root = Path(__file__).resolve().parents[1]
-        intake = parse_intake_message(
-            (
-                "执行这个需求：使用 figma-restoration-review 做 page-root 视觉验收。"
-                "验收标准：1. 递归检查所有可见子节点；2. 偏差 <= 0.5px。"
-            )
-        )
+        request = "使用 figma-restoration-review 做 page-root 视觉验收。"
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             state_root = Path(temp_dir)
@@ -66,7 +78,7 @@ class OrchestratorTests(unittest.TestCase):
                 repo_root=repo_root,
                 state_store=StateStore(state_root),
                 backend=ReviewBackend(),
-            ).run(request=intake.request, contract=intake.contract)
+            ).run(request=request, contract=visual_review_contract())
 
             review = (state_root / result.session_id / "review.md").read_text()
             summary = (state_root / result.session_id / "workflow_summary.md").read_text()
@@ -77,7 +89,6 @@ class OrchestratorTests(unittest.TestCase):
             self.assertIn("blocked_reason: Review completion gate is incomplete", summary)
 
     def test_review_completion_gate_passes_when_acceptance_outputs_required_artifacts(self) -> None:
-        from agent_team.intake import parse_intake_message
         from agent_team.models import StageOutput
         from agent_team.orchestrator import WorkflowOrchestrator
         from agent_team.state import StateStore
@@ -135,12 +146,7 @@ class OrchestratorTests(unittest.TestCase):
                 raise AssertionError(f"unexpected stage: {stage}")
 
         repo_root = Path(__file__).resolve().parents[1]
-        intake = parse_intake_message(
-            (
-                "执行这个需求：使用 figma-restoration-review 做 page-root 视觉验收。"
-                "验收标准：1. 递归检查所有可见子节点；2. 偏差 <= 0.5px。"
-            )
-        )
+        request = "使用 figma-restoration-review 做 page-root 视觉验收。"
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             state_root = Path(temp_dir)
@@ -148,7 +154,7 @@ class OrchestratorTests(unittest.TestCase):
                 repo_root=repo_root,
                 state_store=StateStore(state_root),
                 backend=ReviewBackend(),
-            ).run(request=intake.request, contract=intake.contract)
+            ).run(request=request, contract=visual_review_contract())
 
             self.assertEqual(result.acceptance_status, "recommended_go")
 
@@ -195,8 +201,7 @@ class OrchestratorTests(unittest.TestCase):
             self.assertIn("stage_completed", event_kinds)
             self.assertEqual(events[-1]["kind"], "workflow_waiting_human_decision")
 
-    def test_generic_figma_1to1_request_triggers_review_completion_gate(self) -> None:
-        from agent_team.intake import parse_intake_message
+    def test_explicit_visual_review_contract_triggers_review_completion_gate(self) -> None:
         from agent_team.models import StageOutput
         from agent_team.orchestrator import WorkflowOrchestrator
         from agent_team.state import StateStore
@@ -237,12 +242,10 @@ class OrchestratorTests(unittest.TestCase):
                 raise AssertionError(f"unexpected stage: {stage}")
 
         repo_root = Path(__file__).resolve().parents[1]
-        intake = parse_intake_message(
-            (
-                "执行这个需求：在当前 worktree 完成 Figma 1:1 还原。"
-                "验收时必须重新完整读取 Figma 节点 2411:6162、2455:12852，"
-                "不允许只依赖开发阶段读取结果。"
-            )
+        request = (
+            "在当前 worktree 完成 Figma 1:1 还原。"
+            "验收时必须重新完整读取 Figma 节点 2411:6162、2455:12852，"
+            "不允许只依赖开发阶段读取结果。"
         )
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
@@ -251,7 +254,7 @@ class OrchestratorTests(unittest.TestCase):
                 repo_root=repo_root,
                 state_store=StateStore(state_root),
                 backend=ReviewBackend(),
-            ).run(request=intake.request, contract=intake.contract)
+            ).run(request=request, contract=visual_review_contract())
 
             review = (state_root / result.session_id / "review.md").read_text()
 
@@ -259,8 +262,7 @@ class OrchestratorTests(unittest.TestCase):
             self.assertIn("review_completion_gate", review)
 
     def test_environment_gate_blocks_host_config_changes_without_explicit_approval(self) -> None:
-        from agent_team.intake import parse_intake_message
-        from agent_team.models import StageOutput
+        from agent_team.models import AcceptanceContract, StageOutput
         from agent_team.orchestrator import WorkflowOrchestrator
         from agent_team.state import StateStore
 
@@ -289,7 +291,7 @@ class OrchestratorTests(unittest.TestCase):
                 raise AssertionError(f"unexpected stage: {stage}")
 
         repo_root = Path(__file__).resolve().parents[1]
-        intake = parse_intake_message("执行这个需求：做一个视觉验收，不允许改本机环境。")
+        request = "做一个视觉验收，不允许改本机环境。"
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             state_root = Path(temp_dir)
@@ -297,7 +299,10 @@ class OrchestratorTests(unittest.TestCase):
                 repo_root=repo_root,
                 state_store=StateStore(state_root),
                 backend=ReviewBackend(),
-            ).run(request=intake.request, contract=intake.contract)
+            ).run(
+                request=request,
+                contract=AcceptanceContract(allow_host_environment_changes=False),
+            )
 
             review = (state_root / result.session_id / "review.md").read_text()
             summary = (state_root / result.session_id / "workflow_summary.md").read_text()

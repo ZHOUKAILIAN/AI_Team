@@ -73,7 +73,13 @@ def _project_name(*, state_root: Path, repo_root: Path | None) -> str:
 def _status(summary: WorkflowSummary) -> str:
     if summary.blocked_reason or summary.acceptance_status == "blocked" or summary.qa_status == "blocked":
         return "blocked"
-    if summary.current_state in {"WaitForCEOApproval", "WaitForHumanDecision"}:
+    if summary.current_state in {
+        "WaitForCEOApproval",
+        "WaitForTechPlanApproval",
+        "WaitForDevApproval",
+        "WaitForQAApproval",
+        "WaitForHumanDecision",
+    }:
         return "waiting"
     if summary.current_state == "Done":
         return "done"
@@ -87,6 +93,12 @@ def _status_detail(summary: WorkflowSummary) -> str:
         return summary.blocked_reason
     if summary.current_state == "WaitForCEOApproval":
         return "Waiting for CEO approval."
+    if summary.current_state == "WaitForTechPlanApproval":
+        return "Waiting for technical plan approval."
+    if summary.current_state == "WaitForDevApproval":
+        return "Waiting for Dev approval."
+    if summary.current_state == "WaitForQAApproval":
+        return "Waiting for QA approval."
     if summary.current_state == "WaitForHumanDecision":
         return "Waiting for human Go/No-Go decision."
     if summary.acceptance_status in {"recommended_go", "recommended_no_go"}:

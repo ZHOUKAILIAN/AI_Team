@@ -8,7 +8,7 @@ description: Use when Agent Team is executing or reworking the Dev stage for the
 
 ## Goal
 
-Implement the approved Product handoff or close returned findings, then produce a Dev handoff that QA can independently verify.
+Implement the approved Product and TechPlan handoffs or close returned findings, then produce a Dev handoff that QA can independently verify.
 
 ## Required Inputs
 
@@ -16,6 +16,7 @@ Implement the approved Product handoff or close returned findings, then produce 
 - `artifact_dir`
 - `workflow_summary.md`
 - the approved `prd.md`
+- the approved `technical_plan.md`
 - the latest QA, Acceptance, or human-feedback findings when this is a rework round
 
 If this is a QA rework round, read the latest `qa_report.md` first. If this is an Acceptance or human-feedback rework round, read the returned finding payload first and map each issue to a concrete Product-facing fix.
@@ -30,7 +31,7 @@ If this is a QA rework round, read the latest `qa_report.md` first. If this is a
 
 ## Required Output
 
-Dev writes `implementation.md` in the active session artifact directory.
+Dev produces `implementation.md`; the workflow runner persists it in the active session artifact directory.
 
 The handoff must include:
 - implementation target

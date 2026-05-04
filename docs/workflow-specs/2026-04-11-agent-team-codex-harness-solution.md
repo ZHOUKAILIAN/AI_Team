@@ -90,10 +90,10 @@
 这一层提供：
 
 - `Product/`
+- `TechPlan/`
 - `Dev/`
 - `QA/`
 - `Acceptance/`
-- `Ops/`
 
 每个角色继续维护：
 

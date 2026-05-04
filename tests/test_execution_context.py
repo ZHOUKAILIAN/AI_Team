@@ -29,6 +29,7 @@ class ExecutionContextTests(unittest.TestCase):
                 runtime_mode="harness",
             )
             self._record_product_artifact(store, session.session_id)
+            self._record_tech_plan_artifact(store, session.session_id)
             contract = build_stage_contract(
                 repo_root=repo_root,
                 state_store=store,
@@ -48,6 +49,7 @@ class ExecutionContextTests(unittest.TestCase):
         self.assertEqual(context.contract_id, contract.contract_id)
         self.assertIn("Build a runtime-controlled Dev handoff.", context.original_request_summary)
         self.assertIn("Approved Product PRD", context.approved_prd_summary)
+        self.assertIn("Use the approved technical plan", context.approved_tech_plan_content)
         self.assertEqual(context.required_outputs, ["implementation.md"])
         self.assertEqual(context.required_evidence, ["self_code_review", "self_verification"])
         self.assertEqual(context.acceptance_matrix[0]["id"], "AC-001")
@@ -161,6 +163,37 @@ class ExecutionContextTests(unittest.TestCase):
         summary = store.load_workflow_summary(session_id)
         summary.artifact_paths["product"] = str(stage_record.artifact_path)
         summary.artifact_paths["prd"] = str(stage_record.artifact_path)
+        store.save_workflow_summary(session, summary)
+
+    def _record_tech_plan_artifact(self, store, session_id: str) -> None:
+        from agent_team.models import EvidenceItem, StageResultEnvelope
+
+        session = store.load_session(session_id)
+        result = StageResultEnvelope(
+            session_id=session_id,
+            contract_id="techplan-contract",
+            stage="TechPlan",
+            status="completed",
+            artifact_name="technical_plan.md",
+            artifact_content=(
+                "# Approved Technical Plan\n\n"
+                "## Implementation Approach\n"
+                "Use the approved technical plan.\n"
+            ),
+            journal="# TechPlan Journal\n",
+            evidence=[
+                EvidenceItem(
+                    name="implementation_plan",
+                    kind="report",
+                    summary="Technical plan documented.",
+                )
+            ],
+            summary="Drafted technical plan.",
+        )
+        stage_record = store.record_stage_result(session_id, result)
+        summary = store.load_workflow_summary(session_id)
+        summary.artifact_paths["techplan"] = str(stage_record.artifact_path)
+        summary.artifact_paths["technical_plan"] = str(stage_record.artifact_path)
         store.save_workflow_summary(session, summary)
 
 

@@ -5,7 +5,15 @@ from dataclasses import replace
 from .models import StageResultEnvelope, WorkflowSummary
 
 
-VALID_REWORK_TARGETS = {"Product", "Dev"}
+VALID_REWORK_TARGETS = {"Product", "TechPlan", "Dev"}
+INTERACTIVE_RUNTIME_MODES = {"runtime_driver_interactive"}
+WAIT_STATES = {
+    "WaitForCEOApproval",
+    "WaitForTechPlanApproval",
+    "WaitForDevApproval",
+    "WaitForQAApproval",
+    "WaitForHumanDecision",
+}
 
 
 class StageTransitionError(ValueError):
@@ -16,7 +24,7 @@ class StageMachine:
     def advance(self, *, summary: WorkflowSummary, stage_result: StageResultEnvelope) -> WorkflowSummary:
         if summary.session_id != stage_result.session_id:
             raise StageTransitionError("Stage result session_id does not match workflow summary.")
-        if summary.current_state in {"WaitForCEOApproval", "WaitForHumanDecision"}:
+        if summary.current_state in WAIT_STATES:
             raise StageTransitionError(
                 f"Cannot advance from {summary.current_state} without an explicit human decision."
             )
@@ -35,7 +43,20 @@ class StageMachine:
                 current_stage="ProductDraft",
                 prd_status="drafted",
             )
+        if stage_result.stage == "TechPlan":
+            return replace(
+                summary,
+                current_state="WaitForTechPlanApproval",
+                current_stage="TechPlan",
+            )
         if stage_result.stage == "Dev":
+            if _is_interactive_runtime(summary):
+                return replace(
+                    summary,
+                    current_state="WaitForDevApproval",
+                    current_stage="Dev",
+                    dev_status="completed",
+                )
             return replace(
                 summary,
                 current_state="QA",
@@ -50,6 +71,14 @@ class StageMachine:
                     current_state="Dev",
                     current_stage="Dev",
                     qa_status="failed",
+                    qa_round=next_qa_round,
+                )
+            if _is_interactive_runtime(summary):
+                return replace(
+                    summary,
+                    current_state="WaitForQAApproval",
+                    current_stage="QA",
+                    qa_status="passed",
                     qa_round=next_qa_round,
                 )
             return replace(
@@ -96,8 +125,8 @@ class StageMachine:
             if normalized == "go":
                 return replace(
                     summary,
-                    current_state="Dev",
-                    current_stage="Dev",
+                    current_state="TechPlan",
+                    current_stage="TechPlan",
                     human_decision=normalized,
                 )
             if normalized == "rework":
@@ -114,6 +143,72 @@ class StageMachine:
                 human_decision=normalized,
             )
 
+        if summary.current_state == "WaitForTechPlanApproval":
+            if normalized == "go":
+                return replace(
+                    summary,
+                    current_state="Dev",
+                    current_stage="Dev",
+                    human_decision=normalized,
+                )
+            if normalized == "rework":
+                return replace(
+                    summary,
+                    current_state="TechPlan",
+                    current_stage="TechPlan",
+                    human_decision=normalized,
+                )
+            return replace(
+                summary,
+                current_state="Done",
+                current_stage="TechPlan",
+                human_decision=normalized,
+            )
+
+        if summary.current_state == "WaitForDevApproval":
+            if normalized == "go":
+                return replace(
+                    summary,
+                    current_state="QA",
+                    current_stage="QA",
+                    human_decision=normalized,
+                )
+            if normalized == "rework":
+                return replace(
+                    summary,
+                    current_state="Dev",
+                    current_stage="Dev",
+                    human_decision=normalized,
+                )
+            return replace(
+                summary,
+                current_state="Done",
+                current_stage="Dev",
+                human_decision=normalized,
+            )
+
+        if summary.current_state == "WaitForQAApproval":
+            if normalized == "go":
+                return replace(
+                    summary,
+                    current_state="Acceptance",
+                    current_stage="Acceptance",
+                    human_decision=normalized,
+                )
+            if normalized == "rework":
+                return replace(
+                    summary,
+                    current_state="Dev",
+                    current_stage="Dev",
+                    human_decision=normalized,
+                )
+            return replace(
+                summary,
+                current_state="Done",
+                current_stage="QA",
+                human_decision=normalized,
+            )
+
         if summary.current_state == "WaitForHumanDecision":
             if normalized in {"go", "no-go"}:
                 return replace(
@@ -124,7 +219,7 @@ class StageMachine:
                 )
             target = target_stage or ""
             if target not in VALID_REWORK_TARGETS:
-                raise StageTransitionError("Rework decisions require target_stage Product or Dev.")
+                raise StageTransitionError("Rework decisions require target_stage Product, TechPlan, or Dev.")
             return replace(
                 summary,
                 current_state=target,
@@ -135,3 +230,7 @@ class StageMachine:
         raise StageTransitionError(
             f"Human decisions are only valid from wait states, not {summary.current_state}."
         )
+
+
+def _is_interactive_runtime(summary: WorkflowSummary) -> bool:
+    return summary.runtime_mode in INTERACTIVE_RUNTIME_MODES

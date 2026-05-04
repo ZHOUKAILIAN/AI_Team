@@ -21,7 +21,7 @@ from .memory_layers import record_learning_layers
 from .status import render_status_markdown
 from .workflow_summary import render_workflow_summary
 
-VALID_ROLE_NAMES = {"Product", "Dev", "QA", "Acceptance", "Ops"}
+VALID_ROLE_NAMES = {"Product", "TechPlan", "Dev", "QA", "Acceptance"}
 ACTIVE_STAGE_RUN_STATES = {"READY", "RUNNING", "SUBMITTED", "VERIFYING"}
 TERMINAL_STAGE_RUN_STATES = {"PASSED", "FAILED", "BLOCKED"}
 
@@ -317,11 +317,17 @@ class StateStore:
         if run.state != "RUNNING":
             raise StageRunStateError(f"Stage run {run.run_id} is {run.state}; expected RUNNING.")
         if run.session_id != result.session_id:
-            raise StageRunStateError("Stage result session_id does not match active run.")
+            raise StageRunStateError(
+                f"Stage result session_id {result.session_id!r} does not match active run session_id {run.session_id!r}."
+            )
         if run.stage != result.stage:
-            raise StageRunStateError("Stage result stage does not match active run.")
+            raise StageRunStateError(
+                f"Stage result stage {result.stage!r} does not match active run stage {run.stage!r}."
+            )
         if run.contract_id != result.contract_id:
-            raise StageRunStateError("Stage result contract_id does not match active run.")
+            raise StageRunStateError(
+                f"Stage result contract_id {result.contract_id!r} does not match active run contract_id {run.contract_id!r}."
+            )
 
         session = self.load_session(run.session_id)
         candidate_path = self._stage_runs_dir(session) / f"{run.run_id}_candidate.json"
@@ -819,6 +825,7 @@ class StateStore:
 def artifact_name_for_stage(stage: str) -> str:
     return {
         "Product": "prd.md",
+        "TechPlan": "technical_plan.md",
         "Dev": "implementation.md",
         "QA": "qa_report.md",
         "Acceptance": "acceptance_report.md",

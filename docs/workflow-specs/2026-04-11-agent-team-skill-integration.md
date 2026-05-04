@@ -64,8 +64,7 @@
 
 例如可以表达为：
 
-- `scripts/` 里有 skill 自带的 bootstrap helper
-- 项目根目录的 `scripts/` 里可能有 runtime helper
+- 项目根目录的 `scripts/agent-team-run.sh` 可以作为 runtime helper
 - `agent-team` 是对外 CLI 入口
 - session artifact 和 review 会落到 runtime state 目录
 
@@ -85,31 +84,18 @@
 - 不应该把 deterministic metadata 当作真实验收证据
 - 不应该依赖绝对路径或用户机器专属路径
 
-## Root Skill 与 Installable Skill 的区别
+## Skill 与 Runtime 的边界
 
-当前仓库里有两类 skill：
+当前 runtime 不再要求生成仓库内 Root Skill、可安装 workflow skill、`.codex/agents/` 或 `.agents/skills/agent-team-run/`。
 
-### 1. 仓库内 Root Skill
+如果目标环境仍然有一个外层 skill，它只应该描述：
 
-适合在 runtime 仓库本身里使用。
+- 什么时候使用 `Agent Team`
+- `agent-team` CLI 在哪里
+- session state 目录在哪里
+- runtime 缺失时如何明确报 blocked
 
-它可以描述：
-
-- 仓库内的角色资产
-- 项目级 helper
-- 生成出来的本地 agent / local run skill
-
-### 2. Installable Skill
-
-适合复制到 `Codex` 的 skill 目录后使用。
-
-它应该优先描述：
-
-- 自身 `scripts/` 目录里的 bootstrap helper
-- vendored runtime 或当前 workspace runtime 的发现逻辑
-- 如果 runtime 缺失，明确报 blocked
-
-Installable Skill 要特别避免写成依赖仓库内部固定目录的说明。
+skill 不负责生成本地 agent bridge，也不负责推进 stage machine。
 
 ## 当前接入建议
 

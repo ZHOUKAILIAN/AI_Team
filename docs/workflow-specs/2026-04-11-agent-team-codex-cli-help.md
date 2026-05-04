@@ -35,14 +35,14 @@
 
 完整最小链路是：
 
-`Product -> CEO approval -> Dev -> QA -> Acceptance -> human Go/No-Go`
+`Product -> CEO approval -> TechPlan -> technical plan approval -> Dev -> QA -> Acceptance -> human Go/No-Go`
 
 ## Codex 的工作方式
 
 ### 1. 启动 session
 
 ```bash
-agent-team start-session --message "执行这个需求：<需求内容>"
+agent-team start-session --message "<需求内容>"
 ```
 
 Codex 需要记住输出里的：
@@ -164,6 +164,8 @@ agent-team step --session-id <session_id>
 ### 8. 等待人工决策时停止
 
 Product 完成后，runtime 会进入 `WaitForCEOApproval`。
+
+TechPlan 完成后，runtime 会进入 `WaitForTechPlanApproval`。
 
 Acceptance 完成后，runtime 会进入 `WaitForHumanDecision`。
 

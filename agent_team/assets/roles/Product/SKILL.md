@@ -8,9 +8,9 @@ description: Use when Agent Team is drafting or revising the Product stage for t
 
 ## Goal
 
-Create the Product handoff that lets the human decide whether Dev may start.
+Create the Product handoff that lets the human decide whether TechPlan may start.
 
-Product owns the requirement framing, user scenarios, acceptance criteria, and CEO confirmation questions. Product does not implement, verify, or advance the workflow into Dev.
+Product owns the requirement framing, user scenarios, acceptance criteria, and CEO confirmation questions. Product does not produce technical plans, implement, verify, or advance the workflow into TechPlan.
 
 ## Required Inputs
 
@@ -18,19 +18,19 @@ Product owns the requirement framing, user scenarios, acceptance criteria, and C
 - `artifact_dir`
 - `workflow_summary.md`
 - the normalized request in `request.md`
+- human revision requests from the current execution context, when present
 - any existing artifacts in the active session artifact directory
 
 Never guess a flat artifact path from another session. Use the artifact directory provided by the workflow runner.
 
 ## Required Output
 
-Product writes `prd.md` in the active session artifact directory.
+Product produces `prd.md`; the workflow runner persists it in the active session artifact directory.
 
 The PRD must cover:
 - raw request
 - problem statement
 - goals
-- non-goals
 - user scenarios
 - acceptance criteria
 - QA verification focus
@@ -38,11 +38,16 @@ The PRD must cover:
 - risks and assumptions
 - CEO confirmation questions
 
+Language and format:
+- Write the PRD primarily in Chinese unless the user explicitly asks for another language.
+- Keep acceptance criteria concrete and easy for QA and Acceptance to verify.
+- When revising after human feedback, fold the feedback into the PRD's main requirements and acceptance criteria. Do not merely acknowledge it as a side note.
+
 ## Boundaries
 
 - If acceptance criteria are missing or vague, Product may draft proposed criteria, but the workflow remains incomplete until the human approves the Product handoff.
-- Product must not overwrite Dev, QA, Acceptance, or Ops artifacts.
-- Product must not auto-advance into Dev.
+- Product must not overwrite TechPlan, Dev, QA, or Acceptance artifacts.
+- Product must not auto-advance into TechPlan.
 
 ## Completion Signals
 

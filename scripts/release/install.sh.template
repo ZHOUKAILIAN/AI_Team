@@ -88,7 +88,7 @@ rm -rf "$candidate_root"
 mkdir -p "$candidate_root"
 
 python3 -m venv "${candidate_root}/venv" || fail "failed to create virtual environment"
-"${candidate_root}/venv/bin/python" -m pip install --no-index "${tmp_dir}/${AGENT_TEAM_WHEEL}" || fail "failed to install ${AGENT_TEAM_WHEEL}"
+"${candidate_root}/venv/bin/python" -m pip install "${tmp_dir}/${AGENT_TEAM_WHEEL}" || fail "failed to install ${AGENT_TEAM_WHEEL}"
 "${candidate_root}/venv/bin/agent-team" --help >/dev/null || fail "candidate ${AGENT_TEAM_VERSION} failed smoke check"
 
 cat > "${candidate_root}/install-manifest.json" <<EOF

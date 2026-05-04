@@ -24,6 +24,7 @@ class CodexExecConfig:
     ignore_rules: bool = True
     disable_plugins: bool = True
     ephemeral: bool = True
+    skip_git_repo_check: bool = True
 
     def build_command(self, prompt: str) -> list[str]:
         command = [
@@ -39,6 +40,8 @@ class CodexExecConfig:
             command.extend(["--disable", "plugins"])
         if self.ephemeral:
             command.append("--ephemeral")
+        if self.skip_git_repo_check:
+            command.append("--skip-git-repo-check")
         if self.output_last_message is not None:
             command.extend(["--output-last-message", str(self.output_last_message)])
         if self.model:
