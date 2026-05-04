@@ -41,6 +41,7 @@ class StageExecutionContext:
     required_outputs: list[str]
     required_evidence: list[str]
     relevant_artifacts: list[ArtifactRef]
+    approved_tech_plan_content: str = ""
     actionable_findings: list[Finding] = field(default_factory=list)
     repo_context_summary: str = ""
     role_context_digest: str = ""
@@ -55,6 +56,7 @@ class StageExecutionContext:
             "contract_id": self.contract_id,
             "original_request_summary": self.original_request_summary,
             "approved_prd_summary": self.approved_prd_summary,
+            "approved_tech_plan_content": self.approved_tech_plan_content,
             "acceptance_matrix": [dict(item) for item in self.acceptance_matrix],
             "constraints": list(self.constraints),
             "required_outputs": list(self.required_outputs),
@@ -80,11 +82,14 @@ def build_stage_execution_context(
     acceptance_contract = state_store.load_acceptance_contract(session_id)
     prd_path = _approved_prd_path(summary.artifact_paths)
     approved_prd = _read_text(prd_path)
+    tech_plan_path = _approved_tech_plan_path(summary.artifact_paths)
+    approved_tech_plan = _read_text(tech_plan_path)
     actionable_findings = _load_actionable_findings(session.session_dir / "session.json", stage)
     round_index = _next_context_round(state_store, session_id, stage)
     artifact_refs = _artifact_refs(
         {
             "prd": prd_path,
+            "technical_plan": tech_plan_path,
             **{key: Path(value) for key, value in summary.artifact_paths.items() if Path(value).exists()},
         }
     )
@@ -99,6 +104,7 @@ def build_stage_execution_context(
         round_index=round_index,
         contract_id=contract.contract_id,
         approved_prd=approved_prd,
+        approved_tech_plan=approved_tech_plan,
         findings=actionable_findings,
     )
 
@@ -110,6 +116,7 @@ def build_stage_execution_context(
         contract_id=contract.contract_id,
         original_request_summary=session.request,
         approved_prd_summary=_summarize(approved_prd),
+        approved_tech_plan_content=_summarize(approved_tech_plan),
         acceptance_matrix=acceptance_matrix,
         constraints=_constraints_from_contract(acceptance_contract),
         required_outputs=list(contract.required_outputs),
@@ -123,6 +130,14 @@ def build_stage_execution_context(
 
 def _approved_prd_path(artifact_paths: dict[str, str]) -> Path | None:
     for key in ("product", "prd"):
+        value = artifact_paths.get(key)
+        if value and Path(value).exists():
+            return Path(value)
+    return None
+
+
+def _approved_tech_plan_path(artifact_paths: dict[str, str]) -> Path | None:
+    for key in ("techplan", "technical_plan"):
         value = artifact_paths.get(key)
         if value and Path(value).exists():
             return Path(value)
@@ -264,6 +279,7 @@ def _context_id(
     round_index: int,
     contract_id: str,
     approved_prd: str,
+    approved_tech_plan: str,
     findings: list[Finding],
 ) -> str:
     payload = json.dumps(
@@ -273,6 +289,7 @@ def _context_id(
             "round_index": round_index,
             "contract_id": contract_id,
             "approved_prd_sha256": hashlib.sha256(approved_prd.encode("utf-8")).hexdigest(),
+            "approved_tech_plan_sha256": hashlib.sha256(approved_tech_plan.encode("utf-8")).hexdigest(),
             "findings": [finding.to_dict() for finding in findings],
         },
         ensure_ascii=False,

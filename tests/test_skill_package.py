@@ -28,7 +28,7 @@ class RuntimePackagingTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertNotIn("install-codex-skill", result.stdout)
         self.assertNotIn("codex-init", result.stdout)
-        self.assertIn("run-requirement", result.stdout)
+        self.assertIn("run", result.stdout)
         self.assertIn("dev", result.stdout)
 
     def test_global_install_script_vendors_runtime_without_installing_workflow_skill(self) -> None:

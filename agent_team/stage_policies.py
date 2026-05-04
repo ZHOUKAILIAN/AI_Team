@@ -139,7 +139,7 @@ def default_policy_registry() -> PolicyRegistry:
                         required_fields=["summary"],
                     )
                 ],
-                failback_targets=["Product", "Dev"],
+                failback_targets=["Product", "TechPlan", "Dev"],
             ),
         ]
     )

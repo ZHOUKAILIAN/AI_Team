@@ -47,7 +47,7 @@ class StageMachineTests(unittest.TestCase):
         with self.assertRaises(StageTransitionError):
             StageMachine().advance(summary=summary, stage_result=result)
 
-    def test_human_go_decision_moves_from_ceo_wait_to_dev(self) -> None:
+    def test_human_go_decision_moves_from_ceo_wait_to_tech_plan(self) -> None:
         from agent_team.models import WorkflowSummary
         from agent_team.stage_machine import StageMachine
 
@@ -60,8 +60,8 @@ class StageMachineTests(unittest.TestCase):
 
         updated = StageMachine().apply_human_decision(summary=summary, decision="go")
 
-        self.assertEqual(updated.current_state, "Dev")
-        self.assertEqual(updated.current_stage, "Dev")
+        self.assertEqual(updated.current_state, "TechPlan")
+        self.assertEqual(updated.current_stage, "TechPlan")
         self.assertEqual(updated.human_decision, "go")
 
     def test_interactive_runtime_walks_through_tech_plan_dev_qa_and_acceptance(self) -> None:

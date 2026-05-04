@@ -59,13 +59,26 @@ class CliTests(unittest.TestCase):
         self.assertNotIn("init-state", result.stdout)
         self.assertNotIn("init-project-structure", result.stdout)
         self.assertIn("start-session", result.stdout)
-        self.assertIn("run-requirement", result.stdout)
+        self.assertIn("run", result.stdout)
+        self.assertNotIn("run-requirement", result.stdout)
         self.assertNotIn("agent-run", result.stdout)
         self.assertNotIn("Demo command: execute the deterministic workflow session", result.stdout)
         self.assertNotIn("codex-init", result.stdout)
         self.assertIn("panel", result.stdout)
         self.assertIn("panel-snapshot", result.stdout)
         self.assertIn("status", result.stdout)
+
+    def test_legacy_run_requirement_alias_still_opens_run_help(self) -> None:
+        result = subprocess.run(
+            [sys.executable, "-m", "agent_team", "run-requirement", "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("usage: agent-team run", result.stdout)
+        self.assertIn("--message", result.stdout)
 
     def test_init_bootstraps_state_and_project_structure(self) -> None:
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
@@ -177,7 +190,7 @@ class CliTests(unittest.TestCase):
             self.assertIn("dev:", result.stdout)
             self.assertTrue((repo_root / ".agent-team" / "skill-preferences.yaml").exists())
 
-    def test_demo_run_commands_are_not_registered(self) -> None:
+    def test_run_is_registered_and_demo_agent_run_is_not_registered(self) -> None:
         run_help = subprocess.run(
             [sys.executable, "-m", "agent_team", "run", "--help"],
             capture_output=True,
@@ -191,9 +204,9 @@ class CliTests(unittest.TestCase):
             check=False,
         )
 
-        self.assertEqual(run_help.returncode, 2)
+        self.assertEqual(run_help.returncode, 0)
         self.assertEqual(agent_run_help.returncode, 2)
-        self.assertIn("invalid choice: 'run'", run_help.stderr)
+        self.assertIn("usage: agent-team run", run_help.stdout)
         self.assertIn("invalid choice: 'agent-run'", agent_run_help.stderr)
 
     def test_start_session_bootstraps_session_from_raw_message(self) -> None:
@@ -269,7 +282,7 @@ class CliTests(unittest.TestCase):
                     str(repo_root),
                     "--state-root",
                     temp_dir,
-                    "run-requirement",
+                    "run",
                     "--message",
                     "执行这个需求：做一个 runtime 强制驱动流程",
                     "--executor",
@@ -302,7 +315,7 @@ class CliTests(unittest.TestCase):
                 "agent_team",
                 "--repo-root",
                 str(repo_root),
-                "run-requirement",
+                "run",
             ],
             capture_output=True,
             text=True,
@@ -311,7 +324,7 @@ class CliTests(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(
-            "run-requirement requires --message or --session-id when stdin/stdout are not interactive.",
+            "run requires --message or --session-id when stdin/stdout are not interactive.",
             result.stderr + result.stdout,
         )
         self.assertNotIn("Traceback", result.stderr + result.stdout)
@@ -331,7 +344,7 @@ class CliTests(unittest.TestCase):
                         str(repo_root),
                         "--state-root",
                         temp_dir,
-                        "run-requirement",
+                        "run",
                         "--executor",
                         "dry-run",
                     ]
@@ -365,7 +378,7 @@ class CliTests(unittest.TestCase):
                         str(repo_root),
                         "--state-root",
                         temp_dir,
-                        "run-requirement",
+                        "run",
                         "--executor",
                         "dry-run",
                         "--auto",
@@ -417,7 +430,7 @@ class CliTests(unittest.TestCase):
                         str(repo_root),
                         "--state-root",
                         temp_dir,
-                        "run-requirement",
+                        "run",
                         "--executor",
                         "dry-run",
                     ]
@@ -452,7 +465,7 @@ class CliTests(unittest.TestCase):
                         str(repo_root),
                         "--state-root",
                         temp_dir,
-                        "run-requirement",
+                        "run",
                         "--message",
                         "写个js文件，并打印hello world",
                         "--executor",
@@ -468,7 +481,7 @@ class CliTests(unittest.TestCase):
             self.assertIn("诊断信息:", output)
             self.assertIn("Session saved.", output)
 
-    def test_run_requirement_dry_run_can_drive_to_acceptance_human_gate(self) -> None:
+    def test_run_requirement_dry_run_stops_at_tech_plan_human_gate_without_auto(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
@@ -481,7 +494,7 @@ class CliTests(unittest.TestCase):
                     str(repo_root),
                     "--state-root",
                     temp_dir,
-                    "run-requirement",
+                    "run",
                     "--message",
                     "执行这个需求：做一个 runtime 强制驱动流程",
                     "--executor",
@@ -495,17 +508,18 @@ class CliTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0)
             self.assertIn("runtime_driver_status: waiting_human", result.stdout)
-            self.assertIn("current_state: WaitForHumanDecision", result.stdout)
-            self.assertIn("acceptance_status: recommended_go", result.stdout)
+            self.assertIn("current_state: WaitForTechPlanApproval", result.stdout)
+            self.assertIn("current_stage: TechPlan", result.stdout)
             output_lines = [line for line in result.stdout.splitlines() if ": " in line]
             output_map = dict(line.split(": ", 1) for line in output_lines)
             session_id = output_map["session_id"]
             session_dir = Path(temp_dir) / session_id
             self.assertTrue((session_dir / "prd.md").exists())
-            self.assertTrue((session_dir / "implementation.md").exists())
-            self.assertTrue((session_dir / "qa_report.md").exists())
-            self.assertTrue((session_dir / "acceptance_report.md").exists())
-            self.assertTrue((session_dir / "stage_runs" / "acceptance-run-1.json").exists())
+            self.assertTrue((session_dir / "technical_plan.md").exists())
+            self.assertFalse((session_dir / "implementation.md").exists())
+            self.assertFalse((session_dir / "qa_report.md").exists())
+            self.assertFalse((session_dir / "acceptance_report.md").exists())
+            self.assertFalse((session_dir / "stage_runs" / "acceptance-run-1.json").exists())
 
     def test_run_requirement_dry_run_can_record_final_human_decision(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
@@ -520,12 +534,13 @@ class CliTests(unittest.TestCase):
                     str(repo_root),
                     "--state-root",
                     temp_dir,
-                    "run-requirement",
+                    "run",
                     "--message",
                     "执行这个需求：做一个 runtime 强制驱动流程",
                     "--executor",
                     "dry-run",
                     "--auto-approve-product",
+                    "--auto",
                     "--auto-final-decision",
                     "go",
                 ],
@@ -571,7 +586,7 @@ class CliTests(unittest.TestCase):
                     str(repo_root),
                     "--state-root",
                     temp_dir,
-                    "run-requirement",
+                    "run",
                     "--message",
                     "执行这个需求：验证 command executor",
                     "--executor",
@@ -1667,7 +1682,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(verify_result.returncode, 0)
             self.assertIn("current_state: WaitForCEOApproval", verify_result.stdout)
 
-    def test_record_human_decision_routes_wait_state_to_dev(self) -> None:
+    def test_record_human_decision_routes_product_approval_to_tech_plan(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
@@ -1816,13 +1831,13 @@ class CliTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0)
-            self.assertIn("current_state: Dev", result.stdout)
-            self.assertIn("current_stage: Dev", result.stdout)
+            self.assertIn("current_state: TechPlan", result.stdout)
+            self.assertIn("current_stage: TechPlan", result.stdout)
             self.assertIn("execution_context:", result.stdout)
-            context_path = Path(temp_dir) / session_id / "execution_context" / "dev_round_1.json"
+            context_path = Path(temp_dir) / session_id / "execution_context" / "techplan_round_1.json"
             self.assertTrue(context_path.exists())
             context_payload = json.loads(context_path.read_text())
-            self.assertEqual(context_payload["stage"], "Dev")
+            self.assertEqual(context_payload["stage"], "TechPlan")
             self.assertIn("Verify the harness.", context_payload["approved_prd_summary"])
 
     def test_record_human_decision_rejects_agent_initiated_session(self) -> None:

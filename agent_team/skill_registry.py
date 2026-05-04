@@ -11,6 +11,7 @@ from .packaged_assets import ASSET_ROOT
 STAGES = ("Dev", "QA", "Acceptance")
 SOURCE_ORDER = {"builtin": 0, "personal": 1, "project": 2}
 SOURCE_LABELS = {"builtin": "built-in", "personal": "personal", "project": "project"}
+SOURCE_SCOPES = {"builtin": "global", "personal": "global", "project": "project"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +161,10 @@ def skill_injection_text(skills: list[Skill]) -> str:
         parts.append(skill.content)
         parts.append("")
     return "\n".join(parts).strip()
+
+
+def skill_scope(source: str) -> str:
+    return SOURCE_SCOPES.get(source, source)
 
 
 def _discover_skill_root(root: Path, *, source: str, stage: str | None = None) -> list[Skill]:

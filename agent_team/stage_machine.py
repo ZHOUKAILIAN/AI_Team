@@ -5,7 +5,7 @@ from dataclasses import replace
 from .models import StageResultEnvelope, WorkflowSummary
 
 
-VALID_REWORK_TARGETS = {"Product", "Dev"}
+VALID_REWORK_TARGETS = {"Product", "TechPlan", "Dev"}
 INTERACTIVE_RUNTIME_MODES = {"runtime_driver_interactive"}
 WAIT_STATES = {
     "WaitForCEOApproval",
@@ -44,16 +44,10 @@ class StageMachine:
                 prd_status="drafted",
             )
         if stage_result.stage == "TechPlan":
-            if _is_interactive_runtime(summary):
-                return replace(
-                    summary,
-                    current_state="WaitForTechPlanApproval",
-                    current_stage="TechPlan",
-                )
             return replace(
                 summary,
-                current_state="Dev",
-                current_stage="Dev",
+                current_state="WaitForTechPlanApproval",
+                current_stage="TechPlan",
             )
         if stage_result.stage == "Dev":
             if _is_interactive_runtime(summary):
@@ -131,8 +125,8 @@ class StageMachine:
             if normalized == "go":
                 return replace(
                     summary,
-                    current_state="TechPlan" if _is_interactive_runtime(summary) else "Dev",
-                    current_stage="TechPlan" if _is_interactive_runtime(summary) else "Dev",
+                    current_state="TechPlan",
+                    current_stage="TechPlan",
                     human_decision=normalized,
                 )
             if normalized == "rework":
@@ -225,7 +219,7 @@ class StageMachine:
                 )
             target = target_stage or ""
             if target not in VALID_REWORK_TARGETS:
-                raise StageTransitionError("Rework decisions require target_stage Product or Dev.")
+                raise StageTransitionError("Rework decisions require target_stage Product, TechPlan, or Dev.")
             return replace(
                 summary,
                 current_state=target,

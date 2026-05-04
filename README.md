@@ -163,7 +163,7 @@ runtime 不再默认拆出 repo 外的 `workspaces/`、`artifacts/`、`sessions/
 
 ## 当前边界
 
-当前这套 runtime 已经能用 `run-requirement` 自动驱动 Product/Dev/QA/Acceptance，并在人工 gate 处停住。仍在演进的部分主要包括：
+当前这套 runtime 已经能用 `run` 自动驱动 Product/TechPlan/Dev/QA/Acceptance，并在人工 gate 处停住。仍在演进的部分主要包括：
 
 - 原生 Codex 插件体验
 - 更完整的扩展注册机制
@@ -235,13 +235,13 @@ agent-team init
 如果本机已经安装并登录 Codex CLI，可以用默认 `codex-exec` 真实跑一条需求：
 
 ```bash
-agent-team run-requirement --message "写个js文件，并打印agent-team-runtime" --auto
+agent-team run --message "写个js文件，并打印agent-team-runtime" --auto
 ```
 
 如果只想先验证安装和 workflow 文件生成，不调用 Codex：
 
 ```bash
-agent-team run-requirement --message "写个js文件，并打印agent-team-runtime" --executor dry-run --auto
+agent-team run --message "写个js文件，并打印agent-team-runtime" --executor dry-run --auto
 ```
 
 ### Interactive terminal workflow
@@ -251,7 +251,7 @@ cd /path/to/project
 agent-team dev
 ```
 
-`agent-team dev` prompts for the requirement, confirms acceptance criteria, asks for a technical plan confirmation, and then can delegate Product / Dev / QA / Acceptance execution through `codex exec` while preserving runtime gates.
+`agent-team dev` prompts for the requirement, confirms acceptance criteria, asks for a technical plan confirmation, and then can delegate the remaining Product / Dev / QA / Acceptance harness chain through `codex exec` while preserving runtime gates. The `agent-team run` path models TechPlan as a first-class runtime stage.
 
 默认执行器是 Codex；也可以切到 Claude Code：
 
@@ -266,6 +266,7 @@ agent-team dev --dev-executor codex --qa-executor claude-code
 ```
 
 `agent-team dev` 支持在 Phase 2 技术方案确认后选择 stage skills。首次默认空选，后续会从 `.agent-team/skill-preferences.yaml` 读取上次偏好。
+每次 stage 执行都会在 `stage_runs/<run_id>_skill_injection.json` 记录这次实际注入的 skill 清单，包含 skill 名称、来源（builtin/personal/project）、作用域（global/project）、delivery、安装路径和对应 prompt 路径。
 
 ```bash
 agent-team skill list
@@ -278,25 +279,25 @@ agent-team dev --skills-empty
 启动一个 session：
 
 ```bash
-agent-team run-requirement --message "执行这个需求：<你的需求>"
+agent-team run --message "<你的需求>"
 ```
 
 默认 executor 是 `codex-exec`，runtime 会逐阶段调用 `codex exec`，并在每个阶段之后提交和验证 `StageResultEnvelope`。每个 stage-run 会生成 `<run_id>_trace.json`，记录不可跳过的 `contract_built`、`execution_context_built`、`stage_run_acquired`、`executor_started`、`executor_completed`、`result_submitted`、`gate_evaluated`、`state_advanced` 链路。Product 完成后默认停在 `WaitForCEOApproval`；如果你想在确认 PRD 后自动流转到 Acceptance 并完成交付，可以加：
 
 ```bash
-agent-team run-requirement --message "执行这个需求：<你的需求>" --auto
+agent-team run --message "<你的需求>" --auto
 ```
 
 测试或离线演示可以用 `dry-run` executor：
 
 ```bash
-agent-team run-requirement --message "执行这个需求：<你的需求>" --executor dry-run
+agent-team run --message "<你的需求>" --executor dry-run
 ```
 
 继续一个已经通过 PRD 审批的 session：
 
 ```bash
-agent-team run-requirement --session-id <session_id> --auto
+agent-team run --session-id <session_id> --auto
 ```
 
 查看当前阶段：

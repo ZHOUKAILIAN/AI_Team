@@ -1079,6 +1079,12 @@ def _stage_artifact_format_instructions(stage: str) -> str:
             "- When human revision requests exist, update the concrete implementation scope, flowchart, "
             "file plan, verification plan, and risks instead of only quoting them in a revision section."
         )
+    if stage == "Dev":
+        return (
+            "- Treat StageExecutionContext.approved_tech_plan_content as the approved implementation plan.\n"
+            "- Implement the technical plan instead of replacing it with a new design.\n"
+            "- If approved_tech_plan_content is empty, fall back to the approved PRD and stage contract."
+        )
     return "- Write artifact_content in the most useful language for the current request and keep it concise."
 
 

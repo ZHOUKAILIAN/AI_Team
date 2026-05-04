@@ -51,7 +51,7 @@ RUN_REQUIREMENT_STAGE_DOCS = {
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(_normalize_command_aliases(sys.argv[1:] if argv is None else argv))
     args.repo_root = args.repo_root.resolve()
     args.state_root = (
         args.state_root.resolve()
@@ -61,6 +61,27 @@ def main(argv: list[str] | None = None) -> int:
     if _should_refresh_workspace_metadata(args.command):
         refresh_workspace_metadata(state_root=args.state_root, repo_root=args.repo_root)
     return args.handler(args)
+
+
+def _normalize_command_aliases(argv: list[str]) -> list[str]:
+    normalized = list(argv)
+    index = 0
+    value_options = {"--repo-root", "--state-root"}
+    while index < len(normalized):
+        token = normalized[index]
+        if token in value_options:
+            index += 2
+            continue
+        if token.startswith("--repo-root=") or token.startswith("--state-root="):
+            index += 1
+            continue
+        if token == "run-requirement":
+            normalized[index] = "run"
+            break
+        if not token.startswith("-"):
+            break
+        index += 1
+    return normalized
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -103,7 +124,7 @@ def build_parser() -> argparse.ArgumentParser:
     start_session_parser.set_defaults(handler=_handle_start_session)
 
     run_requirement_parser = subparsers.add_parser(
-        "run-requirement",
+        "run",
         help="Drive an Agent Team requirement through runtime-controlled stage execution.",
         description=(
             "Create or resume an Agent Team session and let the runtime acquire, execute, submit, "
@@ -637,7 +658,7 @@ def _resolve_run_requirement_target(args: argparse.Namespace, *, interactive: bo
         if not message:
             raise SystemExit("需求不能为空。")
         return message, ""
-    raise SystemExit("run-requirement requires --message or --session-id when stdin/stdout are not interactive.")
+    raise SystemExit("run requires --message or --session-id when stdin/stdout are not interactive.")
 
 
 def _handle_run_requirement_interactive(args: argparse.Namespace, *, message: str, session_id: str) -> int:
@@ -1036,12 +1057,14 @@ def _prompt_run_requirement_decision(
 
 def _prompt_acceptance_rework_target() -> str:
     while True:
-        raw = input("返工目标（Product/Dev）：").strip()
+        raw = input("返工目标（Product/TechPlan/Dev）：").strip()
         if raw.lower() in {"product", "p"}:
             return "Product"
+        if raw.lower() in {"techplan", "tech", "t"}:
+            return "TechPlan"
         if raw.lower() in {"dev", "d"}:
             return "Dev"
-        print("请输入 Product 或 Dev。")
+        print("请输入 Product、TechPlan 或 Dev。")
 
 
 def _run_requirement_prompt_text(stage: str) -> str:
@@ -1122,7 +1145,7 @@ def _run_requirement_resume_command(args: argparse.Namespace, session_id: str) -
         "Resume:\n"
         f"agent-team --repo-root {shlex.quote(str(args.repo_root))} "
         f"--state-root {shlex.quote(str(args.state_root))} "
-        f"run-requirement --session-id {shlex.quote(session_id)}"
+        f"run --session-id {shlex.quote(session_id)}"
     )
 
 
@@ -1751,25 +1774,13 @@ def _handle_record_human_decision(args: argparse.Namespace) -> int:
         decision=args.decision,
         target_stage=args.target_stage,
     )
-    execution_context_path = None
     store.save_workflow_summary(session, updated_summary)
-    if summary.current_state == "WaitForCEOApproval" and updated_summary.current_state == "Dev":
-        contract = build_stage_contract(
-            repo_root=args.repo_root,
-            state_store=store,
-            session_id=args.session_id,
-            stage="Dev",
-        )
-        context = build_stage_execution_context(
-            repo_root=args.repo_root,
-            state_store=store,
-            session_id=args.session_id,
-            stage="Dev",
-            contract=contract,
-        )
-        execution_context_path = store.save_execution_context(context)
-        updated_summary.artifact_paths["execution_context"] = str(execution_context_path)
-        store.save_workflow_summary(session, updated_summary)
+    execution_context_path = _save_next_execution_context_if_needed(
+        args=args,
+        store=store,
+        session=session,
+        summary=updated_summary,
+    )
     store.set_human_decision(args.session_id, updated_summary.human_decision)
     store.record_event(
         args.session_id,
@@ -1787,6 +1798,35 @@ def _handle_record_human_decision(args: argparse.Namespace) -> int:
     if execution_context_path is not None:
         print(f"execution_context: {execution_context_path}")
     return 0
+
+
+def _save_next_execution_context_if_needed(
+    *,
+    args: argparse.Namespace,
+    store: StateStore,
+    session,
+    summary: WorkflowSummary,
+) -> Path | None:
+    if summary.current_state in RUN_REQUIREMENT_STAGE_ORDER:
+        stage = summary.current_state
+        contract = build_stage_contract(
+            repo_root=args.repo_root,
+            state_store=store,
+            session_id=args.session_id,
+            stage=stage,
+        )
+        context = build_stage_execution_context(
+            repo_root=args.repo_root,
+            state_store=store,
+            session_id=args.session_id,
+            stage=stage,
+            contract=contract,
+        )
+        execution_context_path = store.save_execution_context(context)
+        summary.artifact_paths["execution_context"] = str(execution_context_path)
+        store.save_workflow_summary(session, summary)
+        return execution_context_path
+    return None
 
 
 def _handle_record_feedback(args: argparse.Namespace) -> int:

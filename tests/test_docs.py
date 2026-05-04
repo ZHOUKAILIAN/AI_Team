@@ -22,7 +22,7 @@ class DocsTests(unittest.TestCase):
         self.assertIn("releases/download/v0.1.0/install.sh", readme)
         self.assertIn("Python 3.13+", readme)
         self.assertIn("CHANGELOG.md", readme)
-        self.assertIn("agent-team run-requirement", readme)
+        self.assertIn("agent-team run", readme)
         self.assertIn("--executor dry-run", readme)
         self.assertNotIn("--executor deterministic", readme)
         self.assertIn("agent-team start-session", readme)

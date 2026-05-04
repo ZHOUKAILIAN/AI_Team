@@ -34,7 +34,7 @@ Read `prd.md` to understand expected behavior and `implementation.md` to underst
 
 ## Required Output
 
-QA writes `qa_report.md` in the active session artifact directory.
+QA produces `qa_report.md`; the workflow runner persists it in the active session artifact directory.
 
 The report must cover:
 - QA objective for this round

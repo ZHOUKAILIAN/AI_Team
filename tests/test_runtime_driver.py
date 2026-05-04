@@ -139,6 +139,49 @@ class RuntimeDriverSchemaTests(unittest.TestCase):
         self.assertNotIn("Non-Goals", prompt)
         self.assertNotIn("非目标", prompt)
 
+    def test_codex_prompt_instructs_dev_to_follow_approved_tech_plan_content(self) -> None:
+        from agent_team.execution_context import StageExecutionContext
+        from agent_team.models import StageContract
+        from agent_team.runtime_driver import StageExecutionRequest, _build_codex_prompt
+
+        request = StageExecutionRequest(
+            repo_root=Path("/repo"),
+            state_store=None,
+            session_id="session",
+            run_id="dev-run-1",
+            contract=StageContract(
+                session_id="session",
+                stage="Dev",
+                goal="Implement",
+                contract_id="contract",
+                required_outputs=["implementation.md"],
+            ),
+            context=StageExecutionContext(
+                session_id="session",
+                stage="Dev",
+                round_index=1,
+                context_id="context",
+                contract_id="contract",
+                original_request_summary="写个js文件，并打印hello world",
+                approved_prd_summary="# 需求方案",
+                acceptance_matrix=[],
+                constraints=[],
+                required_outputs=["implementation.md"],
+                required_evidence=[],
+                relevant_artifacts=[],
+                approved_tech_plan_content="# 技术方案\n\n- 按 TechPlan 创建 hello.js。\n",
+            ),
+            contract_path=Path("/tmp/contract.json"),
+            context_path=Path("/tmp/context.json"),
+            result_path=Path("/tmp/result.json"),
+            output_schema_path=Path("/tmp/schema.json"),
+        )
+
+        prompt = _build_codex_prompt(request)
+
+        self.assertIn("Treat StageExecutionContext.approved_tech_plan_content as the approved implementation plan", prompt)
+        self.assertIn("按 TechPlan 创建 hello.js", prompt)
+
     def test_dry_run_product_artifact_omits_non_goals(self) -> None:
         from agent_team.execution_context import StageExecutionContext
         from agent_team.models import Finding
@@ -277,7 +320,7 @@ class RuntimeDriverTraceTests(unittest.TestCase):
                     str(repo_root),
                     "--state-root",
                     temp_dir,
-                    "run-requirement",
+                    "run",
                     "--message",
                     "执行这个需求：验证 runtime trace 不允许跳过链路步骤",
                     "--executor",

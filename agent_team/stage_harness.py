@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +12,7 @@ from .executor import StageExecutor
 from .execution_context import build_stage_execution_context
 from .gatekeeper import evaluate_candidate
 from .models import StageContract, StageResultEnvelope, StageRunRecord
-from .skill_registry import Skill, skill_injection_text
+from .skill_registry import Skill, skill_injection_text, skill_scope
 from .stage_contracts import build_stage_contract
 from .stage_machine import StageMachine
 from .state import StateStore
@@ -124,12 +125,25 @@ class StageHarness:
         exec_dir.mkdir(parents=True, exist_ok=True)
         stage_skills = self.enabled_skills_by_stage.get(stage, [])
         _install_sandbox_skills(stage_skills, exec_dir)
+        skill_manifest_path = _write_skill_injection_manifest(
+            session_dir=session.session_dir,
+            exec_dir=exec_dir,
+            session_id=session_id,
+            stage=stage,
+            run_id=run.run_id,
+            round_index=context.round_index,
+            skills=stage_skills,
+        )
+        skill_artifact_paths = {f"{stage.lower()}_skill_injection": str(skill_manifest_path)}
+        run = self.state_store.update_stage_run(run, artifact_paths=skill_artifact_paths)
+        summary.artifact_paths[f"{stage.lower()}_skill_injection"] = str(skill_manifest_path)
+        self.state_store.save_workflow_summary(session, summary)
         prompt = stage_prompt(
             stage=stage,
             execution_context=context.to_dict(),
             contract=contract,
             confirmed_alignment=_alignment_payload(session.session_dir),
-            tech_plan=_tech_plan_payload(session.session_dir),
+            tech_plan=_tech_plan_payload(session.session_dir, summary.artifact_paths),
             prd_content=_read_artifact(summary.artifact_paths, "product"),
             dev_implementation_md=_read_artifact(summary.artifact_paths, "dev"),
             dev_changed_files=_changed_files_snapshot(self.repo_root),
@@ -157,7 +171,12 @@ class StageHarness:
         bundle_path.write_text(json.dumps(envelope.to_dict(), ensure_ascii=False, indent=2))
 
         submitted = self.state_store.submit_stage_run_result(run.run_id, envelope)
-        return self._verify_submitted_run(submitted, contract, envelope)
+        return self._verify_submitted_run(
+            submitted,
+            contract,
+            envelope,
+            extra_artifact_paths=skill_artifact_paths,
+        )
 
     def _executor_for_stage(self, stage: str) -> StageExecutor:
         return self.stage_executors.get(stage, self.executor)
@@ -167,7 +186,9 @@ class StageHarness:
         run: StageRunRecord,
         contract: StageContract,
         envelope: StageResultEnvelope,
+        extra_artifact_paths: dict[str, str] | None = None,
     ) -> StageRunRecord:
+        artifact_paths = dict(extra_artifact_paths or {})
         verifying_run = self.state_store.update_stage_run(run, state="VERIFYING")
         session = self.state_store.load_session(run.session_id)
         summary = self.state_store.load_workflow_summary(run.session_id)
@@ -183,6 +204,7 @@ class StageHarness:
                 state=gate_result.status,
                 gate_result=gate_result,
                 blocked_reason=gate_result.reason,
+                artifact_paths=artifact_paths,
             )
             raise RuntimeError(f"{run.stage} gate failed: {gate_result.reason}")
 
@@ -199,6 +221,7 @@ class StageHarness:
             artifact_paths={
                 normalized.stage.lower(): str(stage_record.artifact_path),
                 **stage_record.supplemental_artifact_paths,
+                **artifact_paths,
             },
         )
         for finding in normalized.findings:
@@ -246,6 +269,8 @@ You are a STAGE AGENT in the Agent Team workflow. These rules apply regardless o
 def _role_instruction_layer(stage: str) -> str:
     if stage == "Product":
         return _product_instruction()
+    if stage == "TechPlan":
+        return _techplan_instruction()
     if stage == "Dev":
         return _dev_instruction()
     if stage == "QA":
@@ -264,6 +289,23 @@ You are the Product stage agent for Agent Team. Write a PRD that preserves the h
 - Write prd.md with product requirements, user scenarios, and explicit acceptance criteria.
 - Preserve the confirmed alignment. Do NOT invent new product scope.
 - Evidence must include "explicit_acceptance_criteria"."""
+
+
+def _techplan_instruction() -> str:
+    return """== TECHPLAN ROLE ==
+
+You are the TechPlan stage agent for Agent Team. Convert the approved PRD into a concrete technical implementation plan.
+
+== BOUNDARY ==
+- Do NOT edit repository source code.
+- Do NOT implement the feature.
+- Do NOT run QA or replace Dev self-verification.
+- Do NOT advance the workflow state machine.
+
+== OUTPUT ==
+- Write technical_plan.md with implementation approach, affected modules, dependencies, implementation steps, risks, and testing strategy.
+- Make the plan specific enough for Dev to execute without guessing.
+- Evidence must include "implementation_plan"."""
 
 
 def _dev_instruction() -> str:
@@ -366,6 +408,56 @@ def _install_sandbox_skills(skills: list[Skill], exec_dir: Path) -> None:
         shutil.copytree(skill.path.parent, destination)
 
 
+def _write_skill_injection_manifest(
+    *,
+    session_dir: Path,
+    exec_dir: Path,
+    session_id: str,
+    stage: str,
+    run_id: str,
+    round_index: int,
+    skills: list[Skill],
+) -> Path:
+    stage_runs_dir = session_dir / "stage_runs"
+    stage_runs_dir.mkdir(parents=True, exist_ok=True)
+    prompt_path = exec_dir / f"{stage.lower()}_prompt.md"
+    manifest_path = stage_runs_dir / f"{run_id}_skill_injection.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "session_id": session_id,
+                "stage": stage,
+                "run_id": run_id,
+                "round_index": round_index,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "prompt_path": str(prompt_path),
+                "skill_count": len(skills),
+                "skills": [_skill_manifest_entry(skill, exec_dir) for skill in skills],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return manifest_path
+
+
+def _skill_manifest_entry(skill: Skill, exec_dir: Path) -> dict[str, Any]:
+    installed_path = exec_dir / ".agent-team" / "skills" / skill.name
+    return {
+        "name": skill.name,
+        "description": skill.description,
+        "source": skill.source,
+        "scope": skill_scope(skill.source),
+        "path": str(skill.path),
+        "stages": list(skill.stages),
+        "delivery": skill.delivery,
+        "included_in_prompt": True,
+        "installed_path": str(installed_path) if skill.delivery == "sandbox" else "",
+        "sandbox_files": list(skill.sandbox_files),
+        "env_vars": list(skill.env_vars),
+    }
+
+
 def _stage_context_layer(
     *,
     stage: str,
@@ -407,7 +499,14 @@ def _stage_context_layer(
     if alignment:
         parts.extend(["", "=== Confirmed Alignment ===", json.dumps(alignment, ensure_ascii=False, indent=2)])
     if tech_plan:
-        parts.extend(["", "=== Technical Plan ===", json.dumps(tech_plan, ensure_ascii=False, indent=2)])
+        artifact_content = str(tech_plan.get("artifact_content", "")).strip()
+        if artifact_content:
+            metadata = {key: value for key, value in tech_plan.items() if key != "artifact_content"}
+            parts.extend(["", "=== Technical Plan ===", artifact_content])
+            if metadata:
+                parts.extend(["", "=== Technical Plan Metadata ===", json.dumps(metadata, ensure_ascii=False, indent=2)])
+        else:
+            parts.extend(["", "=== Technical Plan ===", json.dumps(tech_plan, ensure_ascii=False, indent=2)])
     if raw_request:
         parts.extend(["", "=== Original Request ===", raw_request])
     if prd_content:
@@ -447,9 +546,29 @@ def _alignment_payload(session_dir: Path) -> dict[str, Any]:
     return alignment.to_dict() if alignment is not None else {}
 
 
-def _tech_plan_payload(session_dir: Path) -> dict[str, Any]:
+def _tech_plan_payload(session_dir: Path, artifact_paths: dict[str, str] | None = None) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    path = _tech_plan_artifact_path(artifact_paths or {})
+    if path is not None:
+        payload.update(
+            {
+                "artifact_name": path.name,
+                "artifact_path": str(path),
+                "artifact_content": path.read_text(),
+            }
+        )
     tech_plan = load_confirmed_tech_plan(session_dir)
-    return tech_plan.to_dict() if tech_plan is not None else {}
+    if tech_plan is not None:
+        payload["confirmed_plan"] = tech_plan.to_dict()
+    return payload
+
+
+def _tech_plan_artifact_path(artifact_paths: dict[str, str]) -> Path | None:
+    for key in ("techplan", "technical_plan"):
+        value = artifact_paths.get(key)
+        if value and Path(value).exists():
+            return Path(value)
+    return None
 
 
 def _read_artifact(artifact_paths: dict[str, str], key: str) -> str:

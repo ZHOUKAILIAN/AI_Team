@@ -56,6 +56,32 @@ class StageContractTests(unittest.TestCase):
         self.assertIn("requirements approval", contract.goal)
         self.assertNotIn("CEO approval", contract.goal)
 
+    def test_techplan_contract_uses_independent_role_context(self) -> None:
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
+
+        repo_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session(
+                "Build a harness-first workflow",
+                runtime_mode="harness",
+            )
+
+            contract = build_stage_contract(
+                repo_root=repo_root,
+                state_store=store,
+                session_id=session.session_id,
+                stage="TechPlan",
+            )
+
+        self.assertEqual(contract.stage, "TechPlan")
+        self.assertIn("technical_plan.md", contract.required_outputs)
+        self.assertIn("implementation_plan", contract.evidence_requirements)
+        self.assertIn("TechPlan", contract.role_context)
+        self.assertIn("technical_plan.md", contract.role_context)
+        self.assertIn("TechPlan Context", contract.role_context)
+
     def test_qa_contract_requires_independent_evidence(self) -> None:
         from agent_team.stage_contracts import build_stage_contract
         from agent_team.state import StateStore

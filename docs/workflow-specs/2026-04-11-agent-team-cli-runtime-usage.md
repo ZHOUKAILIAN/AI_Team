@@ -39,7 +39,7 @@ agent-team
 ### 1. 启动一个 session
 
 ```bash
-agent-team start-session --message "执行这个需求：做一个新的功能"
+agent-team start-session --message "做一个新的功能"
 ```
 
 ### 2. 查看当前阶段

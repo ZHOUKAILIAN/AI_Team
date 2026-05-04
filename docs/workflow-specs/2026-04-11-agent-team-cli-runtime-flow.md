@@ -13,6 +13,8 @@ start-session
 -> Intake
 -> Product
 -> WaitForCEOApproval
+-> TechPlan
+-> WaitForTechPlanApproval
 -> Dev
 -> QA
 -> Acceptance
@@ -20,7 +22,7 @@ start-session
 -> Done
 ```
 
-其中 QA 失败会回到 Dev，Acceptance 的人工 `rework` 可以回到 Product 或 Dev。
+其中 QA 失败会回到 Dev，Acceptance 的人工 `rework` 可以回到 Product、TechPlan 或 Dev。
 
 ## 当前关键命令
 
@@ -43,7 +45,7 @@ start-session
 ### 1. 创建 session
 
 ```bash
-agent-team start-session --message "执行这个需求：<你的需求>"
+agent-team start-session --message "<你的需求>"
 ```
 
 创建后，当前 session 的全部运行态文件都会集中在 `.agent-team/<session_id>/`。
@@ -114,8 +116,22 @@ Product 正常完成后进入：
 
 只能通过人工决策推进：
 
-- `go` -> `Dev`
+- `go` -> `TechPlan`
 - `rework` -> `Product`
+- `no-go` -> `Done`
+
+### TechPlan
+
+TechPlan 正常完成后进入：
+
+- `WaitForTechPlanApproval`
+
+### WaitForTechPlanApproval
+
+只能通过人工决策推进：
+
+- `go` -> `Dev`
+- `rework` -> `TechPlan`
 - `no-go` -> `Done`
 
 ### Dev
@@ -151,6 +167,7 @@ Dev 正常完成后进入：
 - `go` -> `Done`
 - `no-go` -> `Done`
 - `rework Product` -> `Product`
+- `rework TechPlan` -> `TechPlan`
 - `rework Dev` -> `Dev`
 
 ## 当前事实来源
