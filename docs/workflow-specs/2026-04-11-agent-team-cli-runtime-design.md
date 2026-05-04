@@ -29,7 +29,7 @@
 
 - 一个可安装的 CLI
 - 一个拥有状态机和契约层的 runtime
-- 一个默认内置 Product / Dev / QA / Acceptance 团队的 framework
+- 一个默认内置 Product / TechPlan / Dev / QA / Acceptance 团队的 framework
 
 ## 为什么不再使用 Harness-First 这个名字
 
@@ -109,7 +109,7 @@ Acceptance 只能建议，最终 Go / No-Go 必须由人来决定。
 
 负责：
 
-- Product / Dev / QA / Acceptance / Ops 这些角色定义
+- Product / TechPlan / Dev / QA / Acceptance 这些角色定义
 - 阶段边界
 - 角色间 handoff 规则
 

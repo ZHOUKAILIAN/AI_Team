@@ -100,6 +100,24 @@ class StateTests(unittest.TestCase):
 
             self.assertFalse((root / "memory" / ".." / ".." / "outside").exists())
 
+    def test_apply_learning_ignores_ops_as_removed_default_role(self) -> None:
+        from agent_team.models import Finding
+        from agent_team.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            root = Path(temp_dir)
+            store = StateStore(root)
+            store.apply_learning(
+                Finding(
+                    source_stage="Acceptance",
+                    target_stage="Ops",
+                    issue="legacy release note follow-up",
+                    lesson="legacy ops learning should not create a default role overlay",
+                )
+            )
+
+            self.assertFalse((root / "memory" / "Ops").exists())
+
     def test_apply_learning_writes_standardized_overlay_sections(self) -> None:
         from agent_team.models import Finding
         from agent_team.state import StateStore
@@ -189,8 +207,10 @@ class StateTests(unittest.TestCase):
             roles = load_role_profiles(repo_root=repo_root, state_root=state_root)
 
             self.assertIn("Product", roles)
+            self.assertIn("TechPlan", roles)
             self.assertIn("Dev", roles)
             self.assertIn("Product Manager Onboarding Manual", roles["Product"].effective_context_text)
+            self.assertIn("TechPlan Context", roles["TechPlan"].effective_context_text)
             self.assertIn("Initialized memory system", roles["Product"].effective_memory_text)
 
     def test_load_role_profiles_uses_packaged_assets_when_repo_roles_are_missing(self) -> None:
@@ -206,13 +226,17 @@ class StateTests(unittest.TestCase):
             roles = load_role_profiles(repo_root=repo_root, state_root=state_root)
 
             self.assertIn("Product", roles)
+            self.assertIn("TechPlan", roles)
             self.assertIn("QA", roles)
+            self.assertNotIn("Ops", roles)
             self.assertIn("Product Manager Onboarding Manual", roles["Product"].effective_context_text)
+            self.assertIn("TechPlan Context", roles["TechPlan"].effective_context_text)
 
-    def test_artifact_name_for_dev_stage_is_implementation(self) -> None:
+    def test_artifact_name_for_stage_keeps_ops_compatibility(self) -> None:
         from agent_team.state import artifact_name_for_stage
 
         self.assertEqual(artifact_name_for_stage("Dev"), "implementation.md")
+        self.assertEqual(artifact_name_for_stage("Ops"), "release_notes.md")
 
     def test_stage_run_lifecycle_persists_active_candidate(self) -> None:
         from agent_team.models import StageResultEnvelope

@@ -6,7 +6,7 @@
 
 - 对外是一个 CLI 产品
 - 对内是一套可扩展的 orchestration framework
-- 默认内置 Product / Dev / QA / Acceptance 团队
+- 默认内置 Product / TechPlan / Dev / QA / Acceptance 团队
 - 能把反馈、返工、证据和人工决策沉淀为可复用的运行时资产
 
 ## 项目定位
@@ -35,18 +35,19 @@
 当前默认团队是：
 
 - `Product`
+- `TechPlan`
 - `Dev`
 - `QA`
 - `Acceptance`
-- `Ops`
 
 当前权威流程链路是：
 
-`Product -> CEO approval -> Dev <-> QA -> Acceptance -> human Go/No-Go`
+`Product -> CEO approval -> TechPlan -> Dev <-> QA -> Acceptance -> human Go/No-Go`
 
 这意味着：
 
 - Product 负责产出 PRD 和验收标准
+- TechPlan 负责产出独立技术方案和验证策略
 - Dev 负责实现、代码自 review 和自验证
 - QA 必须独立验证，不能被 Dev 自测替代
 - Acceptance 负责产品级验收建议
@@ -118,7 +119,6 @@ worker 看到的是 stage contract，不是自由发挥的任务描述。
 - `Dev/`
 - `QA/`
 - `Acceptance/`
-- `Ops/`
 - `agent_team/assets/roles/`
 - `agent_team/assets/skills/`
 
@@ -398,7 +398,7 @@ agent-team serve-board --all-workspaces --port 8765 --poll-interval 5
 
 - `agent_team/`
   - 当前 runtime 核心实现
-- `Product/`, `Dev/`, `QA/`, `Acceptance/`, `Ops/`
+- `Product/`, `TechPlan/`, `Dev/`, `QA/`, `Acceptance/`
   - 角色资产
 - `scripts/`
   - 项目级 helper

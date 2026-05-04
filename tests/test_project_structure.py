@@ -36,6 +36,9 @@ class ProjectStructureTests(unittest.TestCase):
             self.assertTrue((repo_root / "docs" / "requirements").exists())
             self.assertTrue((repo_root / "docs" / "designs").exists())
             self.assertTrue((repo_root / "agent-team" / "project" / "roles" / "product.context.md").exists())
+            self.assertTrue((repo_root / "agent-team" / "project" / "roles" / "techplan.context.md").exists())
+            self.assertTrue((repo_root / "agent-team" / "project" / "roles" / "techplan.contract.md").exists())
+            self.assertFalse((repo_root / "agent-team" / "project" / "roles" / "ops.context.md").exists())
             doc_map = json.loads((repo_root / "agent-team" / "project" / "doc-map.json").read_text())
             self.assertEqual(doc_map["requirements"], "docs/requirements")
 

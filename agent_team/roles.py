@@ -6,7 +6,7 @@ from .models import RoleProfile
 from .packaged_assets import packaged_text
 from .project_structure import resolve_role_context_paths
 
-DEFAULT_ROLE_NAMES = ("Product", "Dev", "QA", "Acceptance", "Ops")
+DEFAULT_ROLE_NAMES = ("Product", "TechPlan", "Dev", "QA", "Acceptance")
 
 
 def load_role_profiles(

@@ -21,7 +21,7 @@ from .memory_layers import record_learning_layers
 from .status import render_status_markdown
 from .workflow_summary import render_workflow_summary
 
-VALID_ROLE_NAMES = {"Product", "TechPlan", "Dev", "QA", "Acceptance", "Ops"}
+VALID_ROLE_NAMES = {"Product", "TechPlan", "Dev", "QA", "Acceptance"}
 ACTIVE_STAGE_RUN_STATES = {"READY", "RUNNING", "SUBMITTED", "VERIFYING"}
 TERMINAL_STAGE_RUN_STATES = {"PASSED", "FAILED", "BLOCKED"}
 

@@ -11,7 +11,8 @@ class DocsTests(unittest.TestCase):
         self.assertIn("CLI-first", readme)
         self.assertIn("orchestration runtime", readme)
         self.assertIn("可自我进化", readme)
-        self.assertIn("Product / Dev / QA / Acceptance", readme)
+        self.assertIn("Product / TechPlan / Dev / QA / Acceptance", readme)
+        self.assertNotIn("Ops", readme)
 
     def test_readme_documents_agent_team_cli_usage(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
@@ -49,10 +50,14 @@ class DocsTests(unittest.TestCase):
         repo_root = Path(__file__).resolve().parents[1]
         readme = (repo_root / "README.md").read_text()
 
-        self.assertIn("Product -> CEO approval -> Dev <-> QA -> Acceptance -> human Go/No-Go", readme)
+        self.assertIn(
+            "Product -> CEO approval -> TechPlan -> Dev <-> QA -> Acceptance -> human Go/No-Go",
+            readme,
+        )
         self.assertIn("QA", readme)
         self.assertIn("Acceptance", readme)
         self.assertIn("human Go/No-Go", readme)
+        self.assertNotIn("Ops", readme)
 
     def test_runtime_docs_use_cli_runtime_naming(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
@@ -124,6 +129,16 @@ class DocsTests(unittest.TestCase):
         self.assertIn("Codex 运行 Help", readme)
         self.assertIn("Stage 资产说明", readme)
         self.assertIn("Codex Harness 方案", readme)
+
+    def test_runtime_docs_do_not_list_ops_as_default_role(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        docs = [
+            repo_root / "docs" / "workflow-specs" / "2026-04-11-agent-team-cli-runtime-design.md",
+            repo_root / "docs" / "workflow-specs" / "2026-04-11-agent-team-codex-harness-solution.md",
+        ]
+
+        for path in docs:
+            self.assertNotIn("Ops", path.read_text(), msg=str(path))
 
     def test_root_and_installable_workflow_skills_are_not_product_entrypoints(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]

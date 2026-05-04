@@ -16,6 +16,12 @@ class PackagedAssetTests(unittest.TestCase):
             self.assertTrue((target / "memory.md").exists())
             self.assertTrue(any(path.name == "context.md" for path in written))
 
+    def test_ops_role_assets_are_removed(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+
+        self.assertFalse((repo_root / "Ops").exists())
+        self.assertFalse((repo_root / "agent_team" / "assets" / "roles" / "Ops").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

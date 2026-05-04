@@ -45,10 +45,10 @@ DOC_CANDIDATES = {
 
 ROLE_SLUGS = {
     "Product": "product",
+    "TechPlan": "techplan",
     "Dev": "dev",
     "QA": "qa",
     "Acceptance": "acceptance",
-    "Ops": "ops",
 }
 
 
