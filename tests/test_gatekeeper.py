@@ -206,6 +206,101 @@ class GatekeeperTests(unittest.TestCase):
 
             self.assertEqual(gate.status, "PASSED")
 
+    def test_evidence_by_name_normalizes_to_exact_contract_key(self) -> None:
+        from agent_team.gatekeeper import Gatekeeper
+        from agent_team.models import EvidenceRequirement, StageContract, StageResultEnvelope
+        from agent_team.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("build an enforced workflow")
+            result = StageResultEnvelope.from_dict(
+                {
+                    "session_id": session.session_id,
+                    "stage": "Implementation",
+                    "status": "completed",
+                    "artifact_name": "implementation.md",
+                    "artifact_content": "# Implementation\n",
+                    "contract_id": "contract-implementation",
+                    "evidence_by_name": {
+                        "self_verification": {
+                            "kind": "command",
+                            "summary": "Semantic checks passed.",
+                            "command": "python scripts/check.py",
+                            "exit_code": 0,
+                        }
+                    },
+                }
+            )
+            contract = StageContract(
+                session_id=session.session_id,
+                stage="Implementation",
+                contract_id="contract-implementation",
+                goal="Implement",
+                required_outputs=["implementation.md"],
+                evidence_requirements=["self_verification"],
+                evidence_specs=[
+                    EvidenceRequirement(
+                        name="self_verification",
+                        allowed_kinds=["command", "artifact", "report"],
+                        required_fields=["summary"],
+                    )
+                ],
+            )
+
+            gate = Gatekeeper().evaluate(session=session, contract=contract, result=result, acceptance_contract=None)
+
+            self.assertEqual([item.name for item in result.evidence], ["self_verification"])
+            self.assertEqual(gate.status, "PASSED")
+
+    def test_structured_sub_evidence_name_does_not_satisfy_parent_requirement(self) -> None:
+        from agent_team.gatekeeper import Gatekeeper
+        from agent_team.models import EvidenceRequirement, StageContract, StageResultEnvelope
+        from agent_team.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("build an enforced workflow")
+            result = StageResultEnvelope(
+                session_id=session.session_id,
+                stage="Implementation",
+                status="completed",
+                artifact_name="implementation.md",
+                artifact_content="# Implementation\n",
+                contract_id="contract-implementation",
+                evidence=[
+                    {
+                        "name": "self_verification_semantics",
+                        "kind": "command",
+                        "summary": "Semantic checks passed.",
+                        "command": "python scripts/check.py",
+                        "exit_code": 0,
+                    }
+                ],
+            )
+            contract = StageContract(
+                session_id=session.session_id,
+                stage="Implementation",
+                contract_id="contract-implementation",
+                goal="Implement",
+                required_outputs=["implementation.md"],
+                evidence_requirements=["self_verification"],
+                evidence_specs=[
+                    EvidenceRequirement(
+                        name="self_verification",
+                        allowed_kinds=["command", "artifact", "report"],
+                        required_fields=["summary"],
+                    )
+                ],
+            )
+
+            gate = Gatekeeper().evaluate(session=session, contract=contract, result=result, acceptance_contract=None)
+
+            self.assertEqual(gate.status, "FAILED")
+            self.assertEqual(gate.missing_evidence, ["self_verification"])
+            self.assertIn("derived key(s): self_verification_semantics", gate.reason)
+            self.assertIn("use the exact required key", gate.reason)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -66,6 +66,9 @@ class RuntimeDriverOptions:
     codex_disable_plugins: bool = True
     codex_ephemeral: bool = False
     codex_skip_git_repo_check: bool = True
+    codex_capability_check: bool = True
+    provider_smoke_check: bool = False
+    provider_smoke_command: str = ""
     interactive: bool = False
     trace_prompts: bool = False
     max_output_repair_attempts: int = 2
@@ -114,6 +117,17 @@ class RuntimeDriverError(RuntimeError):
 
 class StagePayloadProtocolError(ValueError):
     pass
+
+
+MODEL_OUTPUT_FORMAT_STAT_KEYS = (
+    "invalid_json_count",
+    "unsupported_field_count",
+    "runtime_controlled_field_count",
+    "missing_required_evidence_count",
+    "derived_evidence_key_count",
+    "repair_attempt_count",
+    "repair_success_count",
+)
 
 
 class StageExecutor(Protocol):
@@ -171,6 +185,47 @@ def _coerce_stream_text(value: object) -> str:
 
 
 _CODEX_SESSION_ID_RE = re.compile(r'"(?:conversation_id|session_id|id)"\s*:\s*"([^"\s]+)"')
+
+
+_CODEX_EXEC_CAPABILITIES_CACHE: set[str] | None = None
+
+
+def _default_codex_capabilities() -> set[str]:
+    return {
+        "--cd",
+        "--sandbox",
+        "--output-schema",
+        "--json",
+        "-o",
+        "--output-last-message",
+        "--skip-git-repo-check",
+        "--disable",
+        "--ephemeral",
+    }
+
+
+def _codex_exec_capabilities() -> set[str]:
+    global _CODEX_EXEC_CAPABILITIES_CACHE
+    if _CODEX_EXEC_CAPABILITIES_CACHE is not None:
+        return set(_CODEX_EXEC_CAPABILITIES_CACHE)
+    try:
+        completed = subprocess.run(
+            ["codex", "exec", "--help"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        help_text = (completed.stdout or "") + "\n" + (completed.stderr or "")
+    except (FileNotFoundError, subprocess.TimeoutExpired, TypeError):
+        help_text = ""
+    capabilities = {flag for flag in _default_codex_capabilities() if flag in help_text}
+    if "-o," in help_text or "-o " in help_text:
+        capabilities.add("-o")
+    if not capabilities:
+        capabilities = _default_codex_capabilities()
+    _CODEX_EXEC_CAPABILITIES_CACHE = set(capabilities)
+    return set(capabilities)
 
 
 def _load_codex_resume_id(request: StageExecutionRequest) -> str:
@@ -333,6 +388,7 @@ def run_requirement(
         message,
         interactive=opts.interactive,
     )
+    _record_provider_smoke_metadata(store=store, session=session, options=opts)
     if opts.interactive:
         _ensure_interactive_runtime_mode(store=store, session_id=session.session_id)
     executor = build_stage_executor(opts)
@@ -429,6 +485,11 @@ class DryRunStageExecutor:
             summary=f"{stage} dry-run result satisfied the stage contract.",
             acceptance_status="recommended_go" if stage == "Acceptance" else "",
             supplemental_artifacts=_dry_run_supplemental_artifacts(stage, request.context),
+            executor_status="synthetic",
+            executor_exit_code=0,
+            result_parse_status="synthetic",
+            dry_run=True,
+            authoritative=False,
         )
 
 
@@ -457,6 +518,7 @@ class CommandStageExecutor:
         except subprocess.TimeoutExpired as exc:
             stdout = _coerce_stream_text(exc.stdout)
             stderr = _coerce_stream_text(exc.stderr) or f"Executor timed out after {self.timeout_seconds} seconds."
+            _record_stage_status_metadata(request, executor_status="timeout", executor_exit_code=124, result_parse_status="not_produced")
             _write_stage_run_streams(
                 request,
                 stdout=stdout,
@@ -470,14 +532,18 @@ class CommandStageExecutor:
                 exit_code=124,
             )
         _write_stage_run_streams(request, stdout=completed.stdout, stderr=completed.stderr)
+        _record_stage_status_metadata(request, executor_status="completed" if completed.returncode == 0 else "failed", executor_exit_code=completed.returncode)
         if request.result_path.exists():
+            _record_stage_status_metadata(request, result_parse_status="candidate_result_file")
             return _stage_result_from_json_text(
                 request=request,
                 value=request.result_path.read_text(),
                 source=str(request.result_path),
             )
         if completed.stdout.strip():
+            _record_stage_status_metadata(request, result_parse_status="candidate_stdout")
             return _stage_result_from_json_text(request=request, value=completed.stdout, source="stdout")
+        _record_stage_status_metadata(request, result_parse_status="not_produced")
         return _blocked_result_from_process(
             request=request,
             command=self.command,
@@ -502,7 +568,9 @@ class CodexExecStageExecutor:
 
         completed = self._run_codex(request, prompt=prompt, output_path=request.result_path)
         _write_stage_run_streams(request, stdout=completed.stdout, stderr=completed.stderr)
+        _record_stage_status_metadata(request, executor_status="completed" if completed.returncode == 0 else "failed", executor_exit_code=completed.returncode)
         if completed.returncode != 0 and not request.result_path.exists():
+            _record_stage_status_metadata(request, result_parse_status="not_produced")
             return _blocked_result_from_process(
                 request=request,
                 command="codex exec",
@@ -515,8 +583,12 @@ class CodexExecStageExecutor:
 
         raw_output = request.result_path.read_text()
         try:
-            return _parse_stage_result_json_text(request=request, value=raw_output, source=str(request.result_path))
+            result = _parse_stage_result_json_text(request=request, value=raw_output, source=str(request.result_path))
+            _record_stage_status_metadata(request, result_parse_status="parsed")
+            return result
         except StagePayloadProtocolError as exc:
+            _record_stage_status_metadata(request, result_parse_status="protocol_error")
+            _increment_model_output_format_stats(request=request, **_parse_protocol_error_stats(exc))
             if self.options.max_output_repair_attempts <= 0:
                 return _invalid_stage_payload_result(request=request, value=raw_output, source=str(request.result_path), error=exc)
             return self._repair_stage_output(request=request, previous_output=raw_output, error=exc)
@@ -599,6 +671,9 @@ class CodexExecStageExecutor:
         output_path: Path,
         resume_id: str = "",
     ) -> list[str]:
+        capabilities = _codex_exec_capabilities() if self.options.codex_capability_check else _default_codex_capabilities()
+        skipped_flags: list[str] = []
+        output_flag = "-o" if "-o" in capabilities else "--output-last-message"
         if resume_id:
             command = [
                 "codex",
@@ -606,40 +681,71 @@ class CodexExecStageExecutor:
                 "resume",
                 "-c",
                 f'approval_policy="{self.options.codex_approval_policy}"',
-                "--json",
-                "-o",
-                str(output_path),
             ]
+            if "--output-schema" in capabilities:
+                command.extend(["--output-schema", str(request.output_schema_path)])
+            else:
+                skipped_flags.append("--output-schema")
+            if "--json" in capabilities:
+                command.append("--json")
+            else:
+                skipped_flags.append("--json")
+            command.extend([output_flag, str(output_path)])
         else:
-            command = [
-                "codex",
-                "exec",
-                "--cd",
-                str(request.repo_root),
-                "--sandbox",
-                self.options.codex_sandbox,
+            command = ["codex", "exec"]
+            if "--cd" in capabilities:
+                command.extend(["--cd", str(request.repo_root)])
+            else:
+                skipped_flags.append("--cd")
+            if "--sandbox" in capabilities:
+                command.extend(["--sandbox", self.options.codex_sandbox])
+            else:
+                skipped_flags.append("--sandbox")
+            command.extend([
                 "-c",
                 f'approval_policy="{self.options.codex_approval_policy}"',
-                "--output-schema",
-                str(request.output_schema_path),
-                "--json",
-                "-o",
-                str(output_path),
-            ]
+            ])
+            if "--output-schema" in capabilities:
+                command.extend(["--output-schema", str(request.output_schema_path)])
+            else:
+                skipped_flags.append("--output-schema")
+            if "--json" in capabilities:
+                command.append("--json")
+            else:
+                skipped_flags.append("--json")
+            command.extend([output_flag, str(output_path)])
         if self.options.codex_ignore_rules:
-            command.append("--ignore-rules")
+            if "--ignore-rules" in capabilities:
+                command.append("--ignore-rules")
+            else:
+                skipped_flags.append("--ignore-rules")
         if self.options.codex_disable_plugins:
-            command.extend(["--disable", "plugins"])
+            if "--disable" in capabilities:
+                command.extend(["--disable", "plugins"])
+            else:
+                skipped_flags.append("--disable plugins")
         if self.options.codex_ephemeral and not resume_id:
-            command.append("--ephemeral")
+            if "--ephemeral" in capabilities:
+                command.append("--ephemeral")
+            else:
+                skipped_flags.append("--ephemeral")
         if self.options.codex_skip_git_repo_check:
-            command.append("--skip-git-repo-check")
+            if "--skip-git-repo-check" in capabilities:
+                command.append("--skip-git-repo-check")
+            else:
+                skipped_flags.append("--skip-git-repo-check")
         if self.options.codex_model:
             command.extend(["--model", self.options.codex_model])
         command.extend(self.options.codex_extra_args)
         if resume_id:
             command.append(resume_id)
         command.append(prompt)
+        request.executor_metadata["codex_exec_capabilities"] = {
+            "checked": self.options.codex_capability_check,
+            "supported_flags": sorted(capabilities),
+            "skipped_flags": skipped_flags,
+            "output_flag": output_flag,
+        }
         return command
 
     def _repair_stage_output(
@@ -654,6 +760,7 @@ class CodexExecStageExecutor:
         last_source = str(request.result_path)
         max_attempts = max(0, self.options.max_output_repair_attempts)
         for attempt in range(1, max_attempts + 1):
+            _increment_model_output_format_stats(request=request, repair_attempt_count=1)
             repair_path = request.result_path.with_name(
                 f"{request.result_path.stem}-repair-{attempt}{request.result_path.suffix}"
             )
@@ -693,8 +800,13 @@ class CodexExecStageExecutor:
             current_output = repair_path.read_text()
             last_source = str(repair_path)
             try:
-                return _parse_stage_result_json_text(request=request, value=current_output, source=str(repair_path))
+                repaired = _parse_stage_result_json_text(request=request, value=current_output, source=str(repair_path))
+                _record_stage_status_metadata(request, result_parse_status="repaired")
+                _increment_model_output_format_stats(request=request, repair_success_count=1)
+                return repaired
             except StagePayloadProtocolError as repair_error:
+                _record_stage_status_metadata(request, result_parse_status="protocol_error")
+                _increment_model_output_format_stats(request=request, **_parse_protocol_error_stats(repair_error))
                 current_error = StagePayloadProtocolError(
                     f"Stage output protocol repair attempt {attempt} failed: {repair_error}. Original error: {error}"
                 )
@@ -1021,6 +1133,8 @@ def _execute_stage(
         ],
     }
     common_artifact_paths = {"stage_result": str(stage_result_path)}
+    if prompt_path is not None:
+        common_artifact_paths["prompt_bundle"] = str(prompt_path)
     run = store.update_stage_run(run, artifact_paths=common_artifact_paths)
     _add_runtime_trace_step(
         trace_steps,
@@ -1060,7 +1174,7 @@ def _execute_stage(
     request.contract_path.write_text(json.dumps(contract.to_dict(), ensure_ascii=False, indent=2))
     schema_path = request.output_schema_path
     schema_path.parent.mkdir(parents=True, exist_ok=True)
-    schema_path.write_text(json.dumps(_stage_result_schema(), indent=2))
+    schema_path.write_text(json.dumps(_stage_result_schema(contract), indent=2))
     prompt_text = _build_codex_prompt(request)
     if request.prompt_path is not None:
         request.prompt_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1081,6 +1195,10 @@ def _execute_stage(
             "prompt_path": str(request.prompt_path),
             "stage_result_path": str(stage_result_path),
             "skill_count": len(stage_skills),
+            "attempt": run.attempt,
+            "stage_run_id": run.run_id,
+            "actionable_feedback_count": len(context.actionable_findings),
+            "actionable_feedback": [finding.to_dict() for finding in context.actionable_findings],
         },
     )
     worktree_snapshot_before = _capture_worktree_snapshot(
@@ -1090,7 +1208,13 @@ def _execute_stage(
     _add_runtime_trace_step(
         trace_steps,
         step="executor_started",
-        details={"executor": executor.name},
+        details={
+            "attempt": run.attempt,
+            "stage_run_id": run.run_id,
+            "executor": executor.name,
+            "actionable_feedback_count": len(context.actionable_findings),
+            "actionable_feedback": [finding.to_dict() for finding in context.actionable_findings],
+        },
     )
     _write_runtime_trace(
         store=store,
@@ -1109,13 +1233,22 @@ def _execute_stage(
         before=worktree_snapshot_before,
         after=worktree_snapshot_after,
     )
+    _record_stage_status_metadata(
+        request,
+        result_parse_status=request.executor_metadata.get("status", {}).get("result_parse_status", "parsed"),
+    )
     _add_runtime_trace_step(
         trace_steps,
         step="executor_completed",
         status="ok" if result.status != "blocked" else "blocked",
         details={
+            "attempt": run.attempt,
+            "stage_run_id": run.run_id,
             "executor": executor.name,
             "result_status": result.status,
+            "executor_status": result.executor_status or request.executor_metadata.get("status", {}).get("executor_status", ""),
+            "executor_exit_code": result.executor_exit_code,
+            "result_parse_status": result.result_parse_status or request.executor_metadata.get("status", {}).get("result_parse_status", ""),
             "executor_metadata": dict(request.executor_metadata),
         },
     )
@@ -1141,6 +1274,8 @@ def _execute_stage(
         stage=stage,
         trace_steps=trace_steps,
     )
+    _apply_executor_metadata_to_result(request=request, result=result)
+    conflict_gate = _executor_result_conflict_gate(result)
     try:
         submitted = store.submit_stage_run_result(run.run_id, result)
     except StageRunStateError as exc:
@@ -1192,19 +1327,30 @@ def _execute_stage(
         trace_steps=trace_steps,
     )
     verifying_run = store.update_stage_run(submitted, state="VERIFYING")
-    gate_result, normalized_result = _evaluate_stage_result(
-        repo_root=repo_root,
-        store=store,
-        summary=store.load_workflow_summary(session_id),
-        contract=contract,
-        result=result,
-        options=options,
-    )
+    if conflict_gate is not None:
+        gate_result = conflict_gate
+        normalized_result = result
+    else:
+        gate_result, normalized_result = _evaluate_stage_result(
+            repo_root=repo_root,
+            store=store,
+            summary=store.load_workflow_summary(session_id),
+            contract=contract,
+            result=result,
+            options=options,
+        )
+    _record_gate_model_output_format_stats(request=request, gate_result=gate_result)
+    _record_stage_status_metadata(request, gate_status=gate_result.status)
     _add_runtime_trace_step(
         trace_steps,
         step="gate_evaluated",
         status="ok" if gate_result.status == "PASSED" else gate_result.status.lower(),
-        details={"gate_status": gate_result.status, "gate_reason": gate_result.reason},
+        details={
+            "attempt": run.attempt,
+            "stage_run_id": run.run_id,
+            "gate_status": gate_result.status,
+            "gate_reason": gate_result.reason,
+        },
     )
     _write_runtime_trace(
         store=store,
@@ -1217,6 +1363,7 @@ def _execute_stage(
         stage_record = store.record_stage_result(session_id, normalized_result)
         latest_summary = store.load_workflow_summary(session_id)
         updated_summary = StageMachine().advance(summary=latest_summary, stage_result=normalized_result)
+        _record_stage_status_metadata(request, state_transition_status="advanced")
         _add_runtime_trace_step(
             trace_steps,
             step="state_advanced",
@@ -1358,6 +1505,32 @@ def _expected_submission_stage(summary: WorkflowSummary) -> str | None:
     if summary.current_state in EXECUTABLE_STATES:
         return summary.current_state
     return None
+
+
+def _record_provider_smoke_metadata(*, store: StateStore, session, options: RuntimeDriverOptions) -> None:
+    metadata = {
+        "executor": options.executor,
+        "model": options.codex_model or options.model,
+        "smoke_check_enabled": bool(options.provider_smoke_check),
+    }
+    if options.provider_smoke_check:
+        command = options.provider_smoke_command or "codex exec --skip-git-repo-check --sandbox read-only --model {model} reply ok"
+        rendered = command.format(model=metadata["model"])
+        try:
+            completed = subprocess.run(rendered, shell=True, capture_output=True, text=True, timeout=30, check=False)
+            metadata.update({
+                "smoke_status": "passed" if completed.returncode == 0 else "failed",
+                "smoke_exit_code": completed.returncode,
+                "smoke_stdout_preview": (completed.stdout or "")[:500],
+                "smoke_stderr_preview": (completed.stderr or "")[:500],
+            })
+        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+            metadata.update({"smoke_status": "error", "smoke_error": str(exc)})
+    try:
+        summary = store.load_workflow_summary(session.session_id)
+        store.save_workflow_summary(session, replace(summary, provider_model_metadata=metadata))
+    except Exception:
+        return
 
 
 def _result_from_summary(
@@ -1597,6 +1770,105 @@ def _stage_environment(request: StageExecutionRequest) -> dict[str, str]:
     return env
 
 
+def _record_stage_status_metadata(
+    request: StageExecutionRequest,
+    *,
+    executor_status: str = "",
+    executor_exit_code: int | None = None,
+    result_parse_status: str = "",
+    gate_status: str = "",
+    state_transition_status: str = "",
+) -> None:
+    status: dict[str, object] = dict(request.executor_metadata.get("status", {}))
+    if executor_status:
+        status["executor_status"] = executor_status
+    if executor_exit_code is not None:
+        status["executor_exit_code"] = executor_exit_code
+    if result_parse_status:
+        status["result_parse_status"] = result_parse_status
+    if gate_status:
+        status["gate_status"] = gate_status
+    if state_transition_status:
+        status["state_transition_status"] = state_transition_status
+    if status:
+        request.executor_metadata["status"] = status
+
+
+def _executor_result_conflict_gate(result: StageResultEnvelope) -> GateResult | None:
+    if result.dry_run:
+        return None
+    if result.executor_exit_code is None or result.executor_exit_code == 0:
+        return None
+    if result.status != "completed":
+        return None
+    reason = (
+        "executor_result_conflict: executor exited with "
+        f"{result.executor_exit_code} but stage_result.status is completed."
+    )
+    return GateResult(
+        status="BLOCKED",
+        reason=reason,
+        findings=list(result.findings),
+        checked_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+def _apply_executor_metadata_to_result(*, request: StageExecutionRequest, result: StageResultEnvelope) -> None:
+    status = request.executor_metadata.get("status", {})
+    if not isinstance(status, dict):
+        return
+    if not result.executor_status and status.get("executor_status"):
+        result.executor_status = str(status.get("executor_status"))
+    if result.executor_exit_code is None and status.get("executor_exit_code") is not None:
+        try:
+            result.executor_exit_code = int(status.get("executor_exit_code"))
+        except (TypeError, ValueError):
+            pass
+    if not result.result_parse_status and status.get("result_parse_status"):
+        result.result_parse_status = str(status.get("result_parse_status"))
+
+
+def _increment_model_output_format_stats(request: StageExecutionRequest, **increments: int) -> None:
+    store = getattr(request, "state_store", None)
+    if store is None:
+        return
+    nonzero = {key: int(value) for key, value in increments.items() if key in MODEL_OUTPUT_FORMAT_STAT_KEYS and int(value)}
+    if not nonzero:
+        return
+    try:
+        session = store.load_session(request.session_id)
+        summary = store.load_workflow_summary(request.session_id)
+    except Exception:
+        return
+    stats = {key: int(summary.model_output_format_stats.get(key, 0) or 0) for key in MODEL_OUTPUT_FORMAT_STAT_KEYS}
+    for key, value in nonzero.items():
+        stats[key] = stats.get(key, 0) + value
+    store.save_workflow_summary(session, replace(summary, model_output_format_stats=stats))
+
+
+def _parse_protocol_error_stats(error: Exception) -> dict[str, int]:
+    message = str(error)
+    stats: dict[str, int] = {}
+    if "Invalid stage payload JSON" in message:
+        stats["invalid_json_count"] = 1
+    if "unsupported field" in message:
+        stats["unsupported_field_count"] = 1
+    if "runtime-controlled field" in message:
+        stats["runtime_controlled_field_count"] = 1
+    return stats
+
+
+def _record_gate_model_output_format_stats(*, request: StageExecutionRequest, gate_result: GateResult) -> None:
+    if gate_result.status not in {"FAILED", "BLOCKED"}:
+        return
+    stats: dict[str, int] = {}
+    missing_base_names = [item for item in gate_result.missing_evidence if "." not in item]
+    if missing_base_names:
+        stats["missing_required_evidence_count"] = len(missing_base_names)
+    if "derived key(s)" in gate_result.reason:
+        stats["derived_evidence_key_count"] = gate_result.reason.count("derived key(s)")
+    _increment_model_output_format_stats(request=request, **stats)
+
 def _contract_artifact_name(contract: StageContract) -> str:
     required_outputs = list(getattr(contract, "required_outputs", []) or [])
     if required_outputs:
@@ -1717,7 +1989,9 @@ def _build_output_repair_prompt(*, request: StageExecutionRequest, error: str, p
         "Repair only the JSON envelope while preserving the stage document content as much as possible.\n\n"
         "<output_rules>\n"
         "Return only valid JSON stage payload. Remove runtime-controlled fields.\n"
-        "Keep the document in artifact_content and include contract-required evidence.\n"
+        "Keep the document in artifact_content.\n"
+        "Use evidence_by_name for contract evidence: include each required evidence key exactly and fill its value object.\n"
+        "Do not invent derived evidence keys; put sub-checks in metadata.checks or summary.\n"
         "</output_rules>\n\n"
         f"<error>{_xml_cdata(error)}</error>\n\n"
         f"<allowed_fields>{_xml_cdata(allowed_fields)}</allowed_fields>\n"
@@ -1757,8 +2031,11 @@ def _build_codex_prompt(request: StageExecutionRequest) -> str:
         "</alignment_updates>\n\n"
         "<output_rules>\n"
         "Return only JSON stage payload.\n"
-        "Put the stage document in artifact_content.\n"
+        "Keep the document in artifact_content.\n"
         "Human-readable content must be Simplified Chinese.\n"
+        "Use evidence_by_name for contract evidence. Runtime owns evidence keys; you only fill each required key's value object.\n"
+        "For every key in stage_contract.evidence_requirements, include that exact key in evidence_by_name.\n"
+        "Do not invent derived evidence keys such as <required>_check or <required>_semantics; put sub-checks in metadata.checks or summary.\n"
         "</output_rules>\n\n"
         "<stage_rules>\n"
         f"{_xml_cdata(format_instructions)}\n"
@@ -1946,7 +2223,38 @@ def _validate_runtime_trace(
     return GateResult(status="PASSED", reason="Runtime trace contains all non-skippable steps in order.")
 
 
-def _stage_result_schema() -> dict[str, Any]:
+def _stage_result_schema(contract: StageContract | None = None) -> dict[str, Any]:
+    required_evidence = list(getattr(contract, "evidence_requirements", []) or [])
+    evidence_value_schema = {
+        "type": "object",
+        "required": [
+            "kind",
+            "summary",
+            "artifact_path",
+            "command",
+            "exit_code",
+            "producer",
+            "metadata",
+        ],
+        "properties": {
+            "kind": {"type": "string"},
+            "summary": {"type": "string"},
+            "artifact_path": {"type": "string"},
+            "command": {"type": "string"},
+            "exit_code": {"type": ["integer", "null"]},
+            "producer": {"type": "string"},
+            "metadata": {
+                "type": "object",
+                "required": ["checks", "notes"],
+                "properties": {
+                    "checks": {"type": "array", "items": {"type": "string"}},
+                    "notes": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+        },
+        "additionalProperties": False,
+    }
     return {
         "type": "object",
         "required": [
@@ -1955,6 +2263,7 @@ def _stage_result_schema() -> dict[str, Any]:
             "journal",
             "findings",
             "evidence",
+            "evidence_by_name",
             "suggested_next_owner",
             "summary",
             "acceptance_status",
@@ -2021,6 +2330,12 @@ def _stage_result_schema() -> dict[str, Any]:
                     },
                     "additionalProperties": False,
                 },
+            },
+            "evidence_by_name": {
+                "type": "object",
+                "required": required_evidence,
+                "properties": {name: evidence_value_schema for name in required_evidence},
+                "additionalProperties": False,
             },
             "suggested_next_owner": {"type": "string"},
             "summary": {"type": "string"},

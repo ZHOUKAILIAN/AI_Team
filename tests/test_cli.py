@@ -666,6 +666,67 @@ class CliTests(unittest.TestCase):
             self.assertIn("阻塞点:", output)
             self.assertIn("需要补充证据：脱敏 groupId", output)
             self.assertIn("修复失败命令后重新运行：go test ./internal/app/group_pals/service", output)
+            self.assertIn("诊断来源:", output)
+            self.assertIn("stage_run_id:", output)
+            self.assertIn("attempt: 1", output)
+
+    def test_passed_gate_caution_findings_are_reported_as_notes_not_blockers(self) -> None:
+        from agent_team.cli import _print_run_requirement_blocked_summary
+        from agent_team.models import Finding, GateResult, StageResultEnvelope
+        from agent_team.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("治理注意项")
+            run = store.create_stage_run(
+                session_id=session.session_id,
+                stage="GovernanceReview",
+                contract_id="contract-1",
+                required_outputs=["governance-review.md"],
+                required_evidence=["layer_governance_review"],
+                worker="codex-exec",
+            )
+            finding = Finding(
+                source_stage="GovernanceReview",
+                target_stage="GovernanceReview",
+                issue="五层边界说明已记录，后续继续观察。",
+                severity="medium",
+                required_evidence=["layer_governance_review"],
+                completion_signal="note_recorded",
+            )
+            stage_result = StageResultEnvelope(
+                session_id=session.session_id,
+                stage="GovernanceReview",
+                status="completed",
+                artifact_name="governance-review.md",
+                artifact_content="# Governance Review\n\n## Non-blocking Findings / Cautions\n- [medium] 五层边界说明已记录。\n",
+                contract_id="contract-1",
+                findings=[finding],
+            )
+            submitted = store.submit_stage_run_result(run.run_id, stage_result)
+            store.update_stage_run(
+                submitted,
+                state="PASSED",
+                gate_result=GateResult(status="PASSED", reason="passed with cautions", findings=[finding]),
+            )
+            result = type("Result", (), {"gate_status": "PASSED", "gate_reason": "passed with cautions"})()
+
+            stdout = io.StringIO()
+            with patch("sys.stdout", stdout):
+                _print_run_requirement_blocked_summary(
+                    store=store,
+                    session_id=session.session_id,
+                    stage="GovernanceReview",
+                    result=result,
+                )
+
+            output = stdout.getvalue()
+            self.assertIn("Governance Review gate 已通过，但状态未推进", output)
+            self.assertIn("注意项:", output)
+            self.assertIn("[medium] 五层边界说明已记录，后续继续观察。", output)
+            self.assertIn("记录后续对齐证据：layer_governance_review", output)
+            self.assertIn("记录信号：note_recorded", output)
+            self.assertNotIn("需要补充证据：layer_governance_review", output)
 
     def test_blocked_next_step_points_users_to_alignment_questions(self) -> None:
         from agent_team.cli import _run_requirement_blocked_next_step_text, _run_requirement_next_step_text

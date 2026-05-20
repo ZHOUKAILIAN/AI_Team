@@ -171,7 +171,7 @@ class StageMachine:
             )
 
         if stage_result.stage == "GovernanceReview":
-            if stage_result.status == "failed" or stage_result.findings:
+            if stage_result.status == "failed" or _has_blocking_findings(stage_result.findings):
                 return _set_stage_status(
                     summary,
                     "GovernanceReview",
@@ -187,7 +187,7 @@ class StageMachine:
             return _set_stage_status(
                 summary,
                 "GovernanceReview",
-                "passed",
+                "passed_with_cautions" if stage_result.findings else "passed",
                 current_state=next_state,
                 current_stage=next_stage,
             )
@@ -340,6 +340,15 @@ class StageMachine:
 def _is_interactive_runtime(summary: WorkflowSummary) -> bool:
     return summary.runtime_mode in INTERACTIVE_RUNTIME_MODES
 
+
+def _has_blocking_findings(findings: list[object]) -> bool:
+    return any(_finding_severity(item) in {"critical", "high", "blocking", "blocker", "error"} for item in findings)
+
+
+def _finding_severity(finding: object) -> str:
+    if isinstance(finding, dict):
+        return str(finding.get("severity", "") or "").strip().lower()
+    return str(getattr(finding, "severity", "") or "").strip().lower()
 
 def _parse_route_packet(stage_result: StageResultEnvelope) -> tuple[list[str], dict[str, dict[str, str]], str]:
     payload = json.loads(stage_result.artifact_content)

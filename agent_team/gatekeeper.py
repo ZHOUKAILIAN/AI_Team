@@ -40,8 +40,13 @@ def evaluate_candidate(
     checked_at = datetime.now(timezone.utc).isoformat()
 
     structural_issues: list[str] = []
+    evidence_items = list(normalized.evidence)
     missing_outputs = _missing_outputs(contract=contract, result=normalized)
-    missing_evidence = _missing_evidence(contract=contract, evidence=list(normalized.evidence))
+    missing_evidence = _missing_evidence(contract=contract, evidence=evidence_items)
+    evidence_diagnostics = _evidence_name_diagnostics(
+        evidence=evidence_items,
+        missing_evidence=missing_evidence,
+    )
 
     if contract.session_id != normalized.session_id:
         structural_issues.append("stage result session_id does not match contract")
@@ -82,6 +87,7 @@ def evaluate_candidate(
             issue_parts.append("missing outputs: " + ", ".join(missing_outputs))
         if missing_evidence:
             issue_parts.append("missing evidence: " + ", ".join(missing_evidence))
+        issue_parts.extend(evidence_diagnostics)
         return (
             GateResult(
                 status="FAILED",
@@ -178,3 +184,25 @@ def _missing_evidence(*, contract: StageContract, evidence: list[EvidenceItem]) 
                     missing.append(f"{required_name}.{field_name}")
 
     return sorted(set(missing))
+
+
+def _evidence_name_diagnostics(
+    *,
+    evidence: list[EvidenceItem],
+    missing_evidence: list[str],
+) -> list[str]:
+    evidence_names = sorted({item.name for item in evidence if item.name})
+    diagnostics: list[str] = []
+    for missing in missing_evidence:
+        if "." in missing:
+            continue
+        near_matches = [name for name in evidence_names if name.startswith(f"{missing}_")]
+        if not near_matches:
+            continue
+        diagnostics.append(
+            "protocol violation: required evidence key "
+            f"'{missing}' is missing; found derived key(s): "
+            + ", ".join(near_matches)
+            + "; use the exact required key and move sub-check details into metadata."
+        )
+    return diagnostics
