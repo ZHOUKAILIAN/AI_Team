@@ -278,6 +278,7 @@ class StageMachine:
                 current_state="Done",
                 current_stage="ProductDefinition",
                 human_decision=normalized,
+                blocked_reason="",
             )
 
         if summary.current_state == "WaitForTechnicalDesignApproval":
@@ -308,6 +309,7 @@ class StageMachine:
                 current_state="Done",
                 current_stage="TechnicalDesign",
                 human_decision=normalized,
+                blocked_reason="",
             )
 
         if summary.current_state == "WaitForHumanDecision":
@@ -317,6 +319,7 @@ class StageMachine:
                     current_state="Done",
                     current_stage="SessionHandoff",
                     human_decision=normalized,
+                    blocked_reason="",
                 )
             target = target_stage or ""
             if target not in HUMAN_REWORK_TARGETS:
