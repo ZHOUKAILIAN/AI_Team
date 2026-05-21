@@ -65,7 +65,7 @@ class RuntimeDriverOptions:
     codex_isolate_home: bool = True
     codex_ignore_rules: bool = True
     codex_disable_plugins: bool = False
-    codex_ephemeral: bool = False
+    codex_ephemeral: bool = True
     codex_skip_git_repo_check: bool = True
     codex_capability_check: bool = True
     provider_smoke_check: bool = False
