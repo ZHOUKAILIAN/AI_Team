@@ -353,6 +353,42 @@ class StageMachineTests(unittest.TestCase):
         self.assertEqual(updated.stage_statuses["GovernanceReview"], "blocked")
         self.assertEqual(updated.blocked_reason, "发现阻塞治理问题。")
 
+    def test_route_required_stage_objects_are_parsed_and_normalized(self) -> None:
+        from agent_team.models import StageResultEnvelope, WorkflowSummary
+        from agent_team.stage_machine import StageMachine
+
+        route_packet = (
+            '{"required_stages":['
+            '{"stage":"ProjectRuntime","reason":"目录落位"},'
+            '{"stage":"TechnicalDesign","reason":"设计"},'
+            '{"stage":"Implementation","reason":"实现"},'
+            '{"stage":"Verification","reason":"验证"},'
+            '{"stage":"GovernanceReview","reason":"治理"}'
+            ']}'
+        )
+
+        summary = StageMachine().advance(
+            summary=WorkflowSummary(session_id="session-1", runtime_mode="harness", current_state="Route", current_stage="Route"),
+            stage_result=StageResultEnvelope(
+                session_id="session-1",
+                stage="Route",
+                status="completed",
+                artifact_name="route-packet.json",
+                artifact_content=route_packet,
+            ),
+        )
+
+        self.assertEqual(summary.route_required_stages, [
+            "ProjectRuntime",
+            "TechnicalDesign",
+            "Implementation",
+            "Verification",
+            "GovernanceReview",
+            "Acceptance",
+            "SessionHandoff",
+        ])
+        self.assertEqual(summary.current_state, "ProjectRuntime")
+
     def test_route_required_stages_preserve_post_implementation_governance_chain(self) -> None:
         from agent_team.models import StageResultEnvelope, WorkflowSummary
         from agent_team.stage_machine import StageMachine
