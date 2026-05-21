@@ -341,6 +341,19 @@ def _is_interactive_runtime(summary: WorkflowSummary) -> bool:
     return summary.runtime_mode in INTERACTIVE_RUNTIME_MODES
 
 
+def _route_required_stage_names(raw_required_stages: object) -> list[str]:
+    names: list[str] = []
+    if not isinstance(raw_required_stages, list):
+        return names
+    for item in raw_required_stages:
+        if isinstance(item, str):
+            names.append(item)
+        elif isinstance(item, dict):
+            value = item.get("stage", "")
+            if value:
+                names.append(str(value))
+    return names
+
 def _normalize_required_stages(route_required_stages: list[str]) -> list[str]:
     ordered = ordered_required_stages([str(stage) for stage in route_required_stages])
     if any(stage in ordered for stage in ("Implementation", "Verification", "GovernanceReview")):
@@ -360,7 +373,7 @@ def _finding_severity(finding: object) -> str:
 
 def _parse_route_packet(stage_result: StageResultEnvelope) -> tuple[list[str], dict[str, dict[str, str]], str]:
     payload = json.loads(stage_result.artifact_content)
-    required_stages = _normalize_required_stages(list(payload.get("required_stages", [])))
+    required_stages = _normalize_required_stages(_route_required_stage_names(payload.get("required_stages", [])))
     stage_decisions = {
         str(name): {str(key): str(value) for key, value in dict(item).items()}
         for name, item in dict(payload.get("stage_decisions", {})).items()
