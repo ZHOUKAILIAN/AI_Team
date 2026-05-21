@@ -491,7 +491,9 @@ class RuntimeDriverSchemaTests(unittest.TestCase):
 
         self.assertIn("resume", command)
         self.assertNotIn("--output-schema", command)
+        self.assertNotIn("-o", command)
         self.assertIn("resume --output-schema", request.executor_metadata["codex_exec_capabilities"]["skipped_flags"])
+        self.assertIn("resume output file", request.executor_metadata["codex_exec_capabilities"]["skipped_flags"])
 
     def test_codex_exec_does_not_disable_plugins_by_default(self) -> None:
         from agent_team.runtime_driver import CodexExecStageExecutor, RuntimeDriverOptions
@@ -755,11 +757,21 @@ class RuntimeDriverSchemaTests(unittest.TestCase):
 
         def fake_run(command, *, cwd, capture_output, text, timeout, check, env=None, stdin=None):
             commands.append(command)
-            write_product_definition_result(Path(command[command.index("-o") + 1]), summary="resumed")
+            message = json.dumps({
+                "status": "completed",
+                "artifact_content": "# Product Definition Delta\n",
+                "journal": "",
+                "findings": [],
+                "evidence": [],
+                "suggested_next_owner": "",
+                "summary": "resumed",
+                "acceptance_status": "",
+                "blocked_reason": "",
+            })
             return subprocess.CompletedProcess(
                 command,
                 0,
-                stdout=json.dumps({"type": "session_meta", "payload": {"id": resume_id}}) + "\n",
+                stdout=json.dumps({"type": "session_meta", "payload": {"id": resume_id}}) + "\n" + json.dumps({"type": "agent_message", "payload": {"message": message}}) + "\n",
                 stderr="",
             )
 
@@ -781,7 +793,9 @@ class RuntimeDriverSchemaTests(unittest.TestCase):
         self.assertIn(resume_id, commands[0])
         self.assertIn("--json", commands[0])
         self.assertNotIn("--output-schema", commands[0])
+        self.assertNotIn("-o", commands[0])
         self.assertIn("resume --output-schema", request.executor_metadata["codex_exec_capabilities"]["skipped_flags"])
+        self.assertIn("resume output file", request.executor_metadata["codex_exec_capabilities"]["skipped_flags"])
         self.assertNotIn("--cd", commands[0])
         self.assertNotIn("--sandbox", commands[0])
         self.assertNotIn("--ephemeral", commands[0])

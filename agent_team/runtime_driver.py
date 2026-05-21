@@ -148,6 +148,37 @@ def _write_stage_run_streams(request: StageExecutionRequest, *, stdout: object, 
     stderr_path.write_text(_coerce_stream_text(stderr))
 
 
+def _write_resume_stdout_result_if_needed(request: StageExecutionRequest, completed: subprocess.CompletedProcess[str], *, resume_id: str) -> None:
+    if not resume_id or request.result_path.exists() or completed.returncode != 0:
+        return
+    extracted = _extract_codex_last_message(completed.stdout)
+    if extracted:
+        request.result_path.parent.mkdir(parents=True, exist_ok=True)
+        request.result_path.write_text(extracted)
+
+
+def _extract_codex_last_message(stdout: object) -> str:
+    text = _coerce_stream_text(stdout)
+    last = ""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            event = json.loads(stripped)
+        except json.JSONDecodeError:
+            last = stripped
+            continue
+        payload = event.get("payload") if isinstance(event, dict) else None
+        if not isinstance(payload, dict):
+            continue
+        for key in ("message", "text", "content"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                last = value
+    return last
+
+
 def _skill_trace_entry(skill: Skill, skill_asset_root: Path, included_in_prompt: bool) -> dict[str, Any]:
     installed_path = skill_asset_root / skill.name
     return {
@@ -555,6 +586,7 @@ class CommandStageExecutor:
                 stderr=stderr,
                 exit_code=124,
             )
+        _write_resume_stdout_result_if_needed(request, completed, resume_id=getattr(completed, "_agent_team_resume_id", ""))
         _write_stage_run_streams(request, stdout=completed.stdout, stderr=completed.stderr)
         _record_stage_status_metadata(request, executor_status="completed" if completed.returncode == 0 else "failed", executor_exit_code=completed.returncode)
         if request.result_path.exists():
@@ -591,6 +623,7 @@ class CodexExecStageExecutor:
             request.prompt_path.write_text(prompt)
 
         completed = self._run_codex(request, prompt=prompt, output_path=request.result_path)
+        _write_resume_stdout_result_if_needed(request, completed, resume_id=getattr(completed, "_agent_team_resume_id", ""))
         _write_stage_run_streams(request, stdout=completed.stdout, stderr=completed.stderr)
         _record_stage_status_metadata(request, executor_status="completed" if completed.returncode == 0 else "failed", executor_exit_code=completed.returncode)
         if completed.returncode != 0 and not request.result_path.exists():
@@ -674,6 +707,10 @@ class CodexExecStageExecutor:
             ephemeral=self.options.codex_ephemeral,
             returncode=completed.returncode,
         )
+        try:
+            setattr(completed, "_agent_team_resume_id", resume_id)
+        except Exception:
+            pass
         return completed
 
     def _build_codex_command(
@@ -703,7 +740,7 @@ class CodexExecStageExecutor:
                 command.append("--json")
             else:
                 skipped_flags.append("--json")
-            command.extend([output_flag, str(output_path)])
+            skipped_flags.append("resume output file")
         else:
             command = ["codex", "exec"]
             if "--cd" in capabilities:
