@@ -335,6 +335,21 @@ class StageMachine:
                 human_decision=normalized,
             )
 
+        if normalized == "rework":
+            target = target_stage or summary.current_stage or summary.current_state
+            if target not in HUMAN_REWORK_TARGETS:
+                raise StageTransitionError(
+                    "Rework decisions require a five-layer target stage before SessionHandoff."
+                )
+            return _set_stage_status(
+                summary,
+                target,
+                "rework_requested",
+                current_state=target,
+                current_stage=target,
+                human_decision=normalized,
+            )
+
         raise StageTransitionError(
             f"Human decisions are only valid from wait states, not {summary.current_state}."
         )
