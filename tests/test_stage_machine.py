@@ -389,6 +389,25 @@ class StageMachineTests(unittest.TestCase):
         self.assertEqual(updated.stage_statuses["GovernanceReview"], "blocked")
         self.assertEqual(updated.blocked_reason, "发现阻塞治理问题。")
 
+    def test_final_human_decision_clears_previous_blocked_reason(self) -> None:
+        from agent_team.models import WorkflowSummary
+        from agent_team.stage_machine import StageMachine
+
+        updated = StageMachine().apply_human_decision(
+            summary=WorkflowSummary(
+                session_id="session-1",
+                runtime_mode="harness",
+                current_state="WaitForHumanDecision",
+                current_stage="SessionHandoff",
+                blocked_reason="旧阻塞原因",
+            ),
+            decision="go",
+        )
+
+        self.assertEqual(updated.current_state, "Done")
+        self.assertEqual(updated.human_decision, "go")
+        self.assertEqual(updated.blocked_reason, "")
+
     def test_route_required_stage_aliases_are_normalized(self) -> None:
         from agent_team.models import StageResultEnvelope, WorkflowSummary
         from agent_team.stage_machine import StageMachine
