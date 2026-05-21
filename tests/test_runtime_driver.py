@@ -673,6 +673,39 @@ class RuntimeDriverSchemaTests(unittest.TestCase):
         self.assertIn("CODEX_HOME", captured_env)
         self.assertNotIn("DATABASE_URL", captured_env)
 
+
+    def test_codex_exec_recovers_result_from_jsonl_stdout_when_output_file_missing(self) -> None:
+        from agent_team.runtime_driver import CodexExecStageExecutor, RuntimeDriverOptions
+
+        commands = []
+
+        def fake_run(command, *, cwd, capture_output, text, timeout, check, env=None, stdin=None, start_new_session=None):
+            commands.append(command)
+            message = json.dumps({
+                "status": "completed",
+                "artifact_content": "# Product Definition Delta\n",
+                "journal": "",
+                "findings": [],
+                "evidence": [],
+                "suggested_next_owner": "",
+                "summary": "stdout recovered",
+                "acceptance_status": "",
+                "blocked_reason": "",
+            })
+            stdout = json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": message}}) + "\n"
+            return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            root = Path(temp_dir)
+            request = product_definition_request(root)
+            with patch("agent_team.runtime_driver.subprocess.run", fake_run):
+                envelope = CodexExecStageExecutor(RuntimeDriverOptions()).execute(request)
+            result_exists = request.result_path.exists()
+
+        self.assertTrue(commands)
+        self.assertEqual(envelope.summary, "stdout recovered")
+        self.assertTrue(result_exists)
+
     def test_codex_exec_stage_executor_persists_resume_id_from_json_stream(self) -> None:
         from agent_team.runtime_driver import CodexExecStageExecutor, RuntimeDriverOptions
         from agent_team.state import StateStore

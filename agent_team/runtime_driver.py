@@ -148,8 +148,8 @@ def _write_stage_run_streams(request: StageExecutionRequest, *, stdout: object, 
     stderr_path.write_text(_coerce_stream_text(stderr))
 
 
-def _write_resume_stdout_result_if_needed(request: StageExecutionRequest, completed: subprocess.CompletedProcess[str], *, resume_id: str) -> None:
-    if not resume_id or request.result_path.exists() or completed.returncode != 0:
+def _write_codex_stdout_result_if_needed(request: StageExecutionRequest, completed: subprocess.CompletedProcess[str]) -> None:
+    if request.result_path.exists() or completed.returncode != 0:
         return
     extracted = _extract_codex_last_message(completed.stdout)
     if extracted:
@@ -170,12 +170,15 @@ def _extract_codex_last_message(stdout: object) -> str:
             last = stripped
             continue
         payload = event.get("payload") if isinstance(event, dict) else None
-        if not isinstance(payload, dict):
-            continue
-        for key in ("message", "text", "content"):
-            value = payload.get(key)
-            if isinstance(value, str) and value.strip():
-                last = value
+        item = event.get("item") if isinstance(event, dict) else None
+        containers = [candidate for candidate in (payload, item) if isinstance(candidate, dict)]
+        for container in containers:
+            if container.get("type") not in (None, "agent_message"):
+                continue
+            for key in ("message", "text", "content"):
+                value = container.get(key)
+                if isinstance(value, str) and value.strip():
+                    last = value
     return last
 
 
@@ -586,7 +589,7 @@ class CommandStageExecutor:
                 stderr=stderr,
                 exit_code=124,
             )
-        _write_resume_stdout_result_if_needed(request, completed, resume_id=getattr(completed, "_agent_team_resume_id", ""))
+        _write_codex_stdout_result_if_needed(request, completed)
         _write_stage_run_streams(request, stdout=completed.stdout, stderr=completed.stderr)
         _record_stage_status_metadata(request, executor_status="completed" if completed.returncode == 0 else "failed", executor_exit_code=completed.returncode)
         if request.result_path.exists():
@@ -623,7 +626,7 @@ class CodexExecStageExecutor:
             request.prompt_path.write_text(prompt)
 
         completed = self._run_codex(request, prompt=prompt, output_path=request.result_path)
-        _write_resume_stdout_result_if_needed(request, completed, resume_id=getattr(completed, "_agent_team_resume_id", ""))
+        _write_codex_stdout_result_if_needed(request, completed)
         _write_stage_run_streams(request, stdout=completed.stdout, stderr=completed.stderr)
         _record_stage_status_metadata(request, executor_status="completed" if completed.returncode == 0 else "failed", executor_exit_code=completed.returncode)
         if completed.returncode != 0 and not request.result_path.exists():
