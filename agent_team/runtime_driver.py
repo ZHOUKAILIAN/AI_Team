@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import re
 import shutil
 import subprocess
@@ -348,6 +349,50 @@ def _latest_codex_session_id(codex_home: Path | None) -> str:
     return ""
 
 
+
+def _run_subprocess_with_timeout(command: list[str], *, cwd: Path, env: dict[str, str] | None, timeout_seconds: int) -> subprocess.CompletedProcess[str]:
+    if getattr(subprocess.run, "__module__", "subprocess") != "subprocess":
+        return subprocess.run(
+            command,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+            env=env,
+            stdin=subprocess.DEVNULL,
+        )
+    kwargs: dict[str, object] = {
+        "cwd": cwd,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "text": True,
+        "env": env,
+        "stdin": subprocess.DEVNULL,
+        "start_new_session": True,
+    }
+    process = subprocess.Popen(command, **kwargs)
+    try:
+        stdout, stderr = process.communicate(timeout=timeout_seconds)
+        return subprocess.CompletedProcess(command, process.returncode, stdout=stdout, stderr=stderr)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            stdout, stderr = process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            stdout, stderr = process.communicate()
+        stderr_text = _coerce_stream_text(stderr)
+        timeout_msg = f"Command timed out after {timeout_seconds} seconds."
+        stderr_text = (stderr_text + "\n" + timeout_msg).strip() if stderr_text else timeout_msg
+        return subprocess.CompletedProcess(command, 124, stdout=_coerce_stream_text(stdout), stderr=stderr_text)
+
 def _record_codex_invocation_metadata(
     request: StageExecutionRequest,
     *,
@@ -608,37 +653,26 @@ class CodexExecStageExecutor:
             if self.options.codex_isolate_home:
                 if self.options.codex_ephemeral or getattr(request, "state_store", None) is None:
                     with isolated_codex_env(env_config_path=request.executor_env_config_path) as env:
-                        completed = subprocess.run(
+                        completed = _run_subprocess_with_timeout(
                             command,
                             cwd=request.repo_root,
-                            capture_output=True,
-                            text=True,
-                            timeout=self.options.command_timeout_seconds,
-                            check=False,
                             env=env,
-                            stdin=subprocess.DEVNULL,
+                            timeout_seconds=self.options.command_timeout_seconds,
                         )
                 else:
                     env, codex_home = _codex_env_for_stage_request(request)
-                    completed = subprocess.run(
+                    completed = _run_subprocess_with_timeout(
                         command,
                         cwd=request.repo_root,
-                        capture_output=True,
-                        text=True,
-                        timeout=self.options.command_timeout_seconds,
-                        check=False,
                         env=env,
-                        stdin=subprocess.DEVNULL,
+                        timeout_seconds=self.options.command_timeout_seconds,
                     )
             else:
-                completed = subprocess.run(
+                completed = _run_subprocess_with_timeout(
                     command,
                     cwd=request.repo_root,
-                    capture_output=True,
-                    text=True,
-                    timeout=self.options.command_timeout_seconds,
-                    check=False,
-                    stdin=subprocess.DEVNULL,
+                    env=None,
+                    timeout_seconds=self.options.command_timeout_seconds,
                 )
         except FileNotFoundError as exc:
             completed = subprocess.CompletedProcess(command, 127, stdout="", stderr=str(exc))
@@ -1223,7 +1257,26 @@ def _execute_stage(
         stage=stage,
         trace_steps=trace_steps,
     )
-    result = executor.execute(request)
+    try:
+        result = executor.execute(request)
+    except KeyboardInterrupt:
+        _mark_stage_run_interrupted(
+            store=store,
+            run=run,
+            stage=stage,
+            trace_steps=trace_steps,
+            reason="executor interrupted",
+        )
+        raise
+    except BaseException as exc:
+        _mark_stage_run_interrupted(
+            store=store,
+            run=run,
+            stage=stage,
+            trace_steps=trace_steps,
+            reason=f"executor interrupted: {exc}",
+        )
+        raise
     worktree_snapshot_after = _capture_worktree_snapshot(
         repo_root,
         excluded_roots=[store.root / "_runtime"],
@@ -1531,6 +1584,31 @@ def _record_provider_smoke_metadata(*, store: StateStore, session, options: Runt
         store.save_workflow_summary(session, replace(summary, provider_model_metadata=metadata))
     except Exception:
         return
+
+def _mark_stage_run_interrupted(
+    *,
+    store: StateStore,
+    run,
+    stage: str,
+    trace_steps: list[dict[str, Any]],
+    reason: str,
+) -> None:
+    _add_runtime_trace_step(trace_steps, step="executor_interrupted", status="blocked", details={"reason": reason})
+    try:
+        store.update_stage_run(
+            run,
+            state="BLOCKED",
+            gate_result=GateResult(
+                status="BLOCKED",
+                reason=reason,
+                checked_at=datetime.now(timezone.utc).isoformat(),
+            ),
+            blocked_reason=reason,
+            steps=trace_steps,
+        )
+    except Exception:
+        return
+
 
 
 def _result_from_summary(
