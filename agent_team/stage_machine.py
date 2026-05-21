@@ -4,7 +4,7 @@ import json
 from dataclasses import replace
 
 from .models import StageResultEnvelope, WorkflowSummary
-from .workflow import HUMAN_REWORK_TARGETS, WAIT_STATES, next_required_stage, ordered_required_stages
+from .workflow import HUMAN_REWORK_TARGETS, STAGES, WAIT_STATES, next_required_stage, ordered_required_stages
 
 
 INTERACTIVE_RUNTIME_MODES = {"runtime_driver_interactive"}
@@ -341,6 +341,14 @@ def _is_interactive_runtime(summary: WorkflowSummary) -> bool:
     return summary.runtime_mode in INTERACTIVE_RUNTIME_MODES
 
 
+def _normalize_required_stages(route_required_stages: list[str]) -> list[str]:
+    ordered = ordered_required_stages([str(stage) for stage in route_required_stages])
+    if any(stage in ordered for stage in ("Implementation", "Verification", "GovernanceReview")):
+        for stage in ("Verification", "GovernanceReview", "Acceptance", "SessionHandoff"):
+            if stage not in ordered:
+                ordered.append(stage)
+    return [stage for stage in STAGES if stage in ordered]
+
 def _has_blocking_findings(findings: list[object]) -> bool:
     return any(_finding_severity(item) in {"critical", "high", "blocking", "blocker", "error"} for item in findings)
 
@@ -352,7 +360,7 @@ def _finding_severity(finding: object) -> str:
 
 def _parse_route_packet(stage_result: StageResultEnvelope) -> tuple[list[str], dict[str, dict[str, str]], str]:
     payload = json.loads(stage_result.artifact_content)
-    required_stages = ordered_required_stages(list(payload.get("required_stages", [])))
+    required_stages = _normalize_required_stages(list(payload.get("required_stages", [])))
     stage_decisions = {
         str(name): {str(key): str(value) for key, value in dict(item).items()}
         for name, item in dict(payload.get("stage_decisions", {})).items()
