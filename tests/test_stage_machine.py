@@ -315,6 +315,42 @@ class StageMachineTests(unittest.TestCase):
         self.assertEqual(updated.stage_statuses["GovernanceReview"], "passed_with_cautions")
         self.assertEqual(updated.blocked_reason, "")
 
+    def test_governance_review_success_clears_previous_blocked_reason(self) -> None:
+        from agent_team.models import Finding, StageResultEnvelope, WorkflowSummary
+        from agent_team.stage_machine import StageMachine
+
+        summary = WorkflowSummary(
+            session_id="session-1",
+            runtime_mode="harness",
+            current_state="GovernanceReview",
+            current_stage="GovernanceReview",
+            route_required_stages=["GovernanceReview", "Acceptance"],
+            blocked_reason="旧阻塞原因",
+        )
+
+        updated = StageMachine().advance(
+            summary=summary,
+            stage_result=StageResultEnvelope(
+                session_id="session-1",
+                stage="GovernanceReview",
+                status="completed",
+                artifact_name="governance-review.md",
+                artifact_content="# Governance Review\n",
+                findings=[
+                    Finding(
+                        source_stage="GovernanceReview",
+                        target_stage="GovernanceReview",
+                        issue="记录后续对齐。",
+                        severity="medium",
+                    )
+                ],
+            ),
+        )
+
+        self.assertEqual(updated.current_state, "Acceptance")
+        self.assertEqual(updated.stage_statuses["GovernanceReview"], "passed_with_cautions")
+        self.assertEqual(updated.blocked_reason, "")
+
     def test_governance_review_blocking_finding_still_blocks(self) -> None:
         from agent_team.models import Finding, StageResultEnvelope, WorkflowSummary
         from agent_team.stage_machine import StageMachine

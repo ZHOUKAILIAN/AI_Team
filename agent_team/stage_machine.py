@@ -437,4 +437,6 @@ def _next_stage_after(*, required_stages: list[str], after_stage: str) -> str | 
 def _set_stage_status(summary: WorkflowSummary, stage: str, status: str, **changes: object) -> WorkflowSummary:
     stage_statuses = dict(summary.stage_statuses)
     stage_statuses[stage] = status
+    if status not in {"blocked", "failed"} and "blocked_reason" not in changes:
+        changes["blocked_reason"] = ""
     return replace(summary, stage_statuses=stage_statuses, **changes)
