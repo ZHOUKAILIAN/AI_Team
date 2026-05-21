@@ -353,6 +353,31 @@ class StageMachineTests(unittest.TestCase):
         self.assertEqual(updated.stage_statuses["GovernanceReview"], "blocked")
         self.assertEqual(updated.blocked_reason, "发现阻塞治理问题。")
 
+    def test_route_required_stage_aliases_are_normalized(self) -> None:
+        from agent_team.models import StageResultEnvelope, WorkflowSummary
+        from agent_team.stage_machine import StageMachine
+
+        summary = StageMachine().advance(
+            summary=WorkflowSummary(session_id="session-1", runtime_mode="harness", current_state="Route", current_stage="Route"),
+            stage_result=StageResultEnvelope(
+                session_id="session-1",
+                stage="Route",
+                status="completed",
+                artifact_name="route-packet.json",
+                artifact_content='{"required_stages":[{"stage":"Design"},{"stage":"Implement"},{"stage":"Verify"}]}',
+            ),
+        )
+
+        self.assertEqual(summary.route_required_stages, [
+            "TechnicalDesign",
+            "Implementation",
+            "Verification",
+            "GovernanceReview",
+            "Acceptance",
+            "SessionHandoff",
+        ])
+        self.assertEqual(summary.current_state, "TechnicalDesign")
+
     def test_route_required_stage_objects_are_parsed_and_normalized(self) -> None:
         from agent_team.models import StageResultEnvelope, WorkflowSummary
         from agent_team.stage_machine import StageMachine
