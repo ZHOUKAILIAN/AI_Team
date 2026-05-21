@@ -1446,6 +1446,52 @@ class CliTests(unittest.TestCase):
             self.assertIn("human_decision: rework", result.stdout)
 
 
+    def test_friendly_feedback_rework_can_target_non_wait_stage(self) -> None:
+        from agent_team.cli import main
+        from agent_team.models import WorkflowSummary
+        from agent_team.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            root = Path(temp_dir)
+            repo_root = root / "repo"
+            state_root = root / "state"
+            repo_root.mkdir()
+            store = StateStore(state_root)
+            session = store.create_session("返工", runtime_mode="runtime_driver")
+            store.save_workflow_summary(
+                session,
+                WorkflowSummary(
+                    session_id=session.session_id,
+                    runtime_mode="runtime_driver",
+                    current_state="Verification",
+                    current_stage="Verification",
+                    blocked_reason="验证失败",
+                ),
+            )
+
+            code = main([
+                "--repo-root",
+                str(repo_root),
+                "--state-root",
+                str(state_root),
+                "feedback",
+                "Implementation",
+                "改成自包含 check",
+                "--session-id",
+                session.session_id,
+                "--source-stage",
+                "Verification",
+                "--severity",
+                "high",
+                "--rework",
+            ])
+            updated = store.load_workflow_summary(session.session_id)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(updated.current_state, "Implementation")
+        self.assertEqual(updated.current_stage, "Implementation")
+        self.assertEqual(updated.stage_statuses["Implementation"], "rework_requested")
+
     def test_friendly_feedback_can_apply_rework_decision(self) -> None:
         from agent_team.models import WorkflowSummary
         from agent_team.state import StateStore

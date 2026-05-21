@@ -389,6 +389,27 @@ class StageMachineTests(unittest.TestCase):
         self.assertEqual(updated.stage_statuses["GovernanceReview"], "blocked")
         self.assertEqual(updated.blocked_reason, "发现阻塞治理问题。")
 
+    def test_rework_decision_can_target_current_non_wait_stage(self) -> None:
+        from agent_team.models import WorkflowSummary
+        from agent_team.stage_machine import StageMachine
+
+        updated = StageMachine().apply_human_decision(
+            summary=WorkflowSummary(
+                session_id="session-1",
+                runtime_mode="harness",
+                current_state="Verification",
+                current_stage="Verification",
+                blocked_reason="验证失败",
+            ),
+            decision="rework",
+            target_stage="Implementation",
+        )
+
+        self.assertEqual(updated.current_state, "Implementation")
+        self.assertEqual(updated.current_stage, "Implementation")
+        self.assertEqual(updated.stage_statuses["Implementation"], "rework_requested")
+        self.assertEqual(updated.human_decision, "rework")
+
     def test_final_human_decision_clears_previous_blocked_reason(self) -> None:
         from agent_team.models import WorkflowSummary
         from agent_team.stage_machine import StageMachine
