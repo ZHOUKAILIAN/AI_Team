@@ -470,6 +470,7 @@ class RuntimeDriverSchemaTests(unittest.TestCase):
             "--sandbox",
             "--output-schema",
             "--ignore-rules",
+            "--ephemeral",
         ])
 
 
@@ -576,7 +577,7 @@ class RuntimeDriverSchemaTests(unittest.TestCase):
             )
 
             with patch("agent_team.runtime_driver.subprocess.run", fake_run):
-                envelope = CodexExecStageExecutor(RuntimeDriverOptions()).execute(request)
+                envelope = CodexExecStageExecutor(RuntimeDriverOptions(codex_ephemeral=False)).execute(request)
 
         self.assertEqual(len(commands), 1)
         self.assertIn("--skip-git-repo-check", commands[0])
@@ -701,7 +702,7 @@ class RuntimeDriverSchemaTests(unittest.TestCase):
 
             with patch("agent_team.runtime_driver.default_codex_home", lambda: source_home):
                 with patch("agent_team.runtime_driver.subprocess.run", fake_run):
-                    envelope = CodexExecStageExecutor(RuntimeDriverOptions()).execute(request)
+                    envelope = CodexExecStageExecutor(RuntimeDriverOptions(codex_ephemeral=False)).execute(request)
 
             saved = store.load_codex_exec_state(session.session_id)
             codex_home = store.codex_home_path(session.session_id)
@@ -737,7 +738,7 @@ class RuntimeDriverSchemaTests(unittest.TestCase):
 
             with patch("agent_team.runtime_driver.default_codex_home", lambda: source_home):
                 with patch("agent_team.runtime_driver.subprocess.run", fake_run):
-                    CodexExecStageExecutor(RuntimeDriverOptions()).execute(request)
+                    CodexExecStageExecutor(RuntimeDriverOptions(codex_ephemeral=False)).execute(request)
 
             codex_home = store.codex_home_path(session.session_id)
             auth_exists = (codex_home / "auth.json").exists()
@@ -786,7 +787,7 @@ class RuntimeDriverSchemaTests(unittest.TestCase):
 
             with patch("agent_team.runtime_driver.default_codex_home", lambda: source_home):
                 with patch("agent_team.runtime_driver.subprocess.run", fake_run):
-                    envelope = CodexExecStageExecutor(RuntimeDriverOptions()).execute(request)
+                    envelope = CodexExecStageExecutor(RuntimeDriverOptions(codex_ephemeral=False)).execute(request)
 
         self.assertEqual(envelope.summary, "resumed")
         self.assertEqual(commands[0][:3], ["codex", "exec", "resume"])
