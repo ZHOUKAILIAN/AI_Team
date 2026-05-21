@@ -64,7 +64,7 @@ class RuntimeDriverOptions:
     enabled_skills_by_stage: dict[str, list[Skill]] = field(default_factory=dict)
     codex_isolate_home: bool = True
     codex_ignore_rules: bool = True
-    codex_disable_plugins: bool = True
+    codex_disable_plugins: bool = False
     codex_ephemeral: bool = False
     codex_skip_git_repo_check: bool = True
     codex_capability_check: bool = True
@@ -733,6 +733,10 @@ class CodexExecStageExecutor:
             else:
                 skipped_flags.append("--ignore-rules")
         if self.options.codex_disable_plugins:
+            # Modern Codex exposes --disable <FEATURE>, but available feature names
+            # are not discoverable from `codex exec --help`. Some versions reject
+            # `plugins` with `Unknown feature flag: plugins`, so this opt-in flag is
+            # intentionally disabled by default.
             if "--disable" in capabilities:
                 command.extend(["--disable", "plugins"])
             else:
