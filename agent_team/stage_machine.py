@@ -341,17 +341,48 @@ def _is_interactive_runtime(summary: WorkflowSummary) -> bool:
     return summary.runtime_mode in INTERACTIVE_RUNTIME_MODES
 
 
+ROUTE_STAGE_ALIASES = {
+    "design": "TechnicalDesign",
+    "technicaldesign": "TechnicalDesign",
+    "technical_design": "TechnicalDesign",
+    "technical-design": "TechnicalDesign",
+    "implement": "Implementation",
+    "implementation": "Implementation",
+    "verify": "Verification",
+    "verification": "Verification",
+    "governance": "GovernanceReview",
+    "governancereview": "GovernanceReview",
+    "governance_review": "GovernanceReview",
+    "governance-review": "GovernanceReview",
+    "accept": "Acceptance",
+    "acceptance": "Acceptance",
+    "handoff": "SessionHandoff",
+    "sessionhandoff": "SessionHandoff",
+    "session_handoff": "SessionHandoff",
+    "session-handoff": "SessionHandoff",
+    "productdefinition": "ProductDefinition",
+    "product_definition": "ProductDefinition",
+    "product-definition": "ProductDefinition",
+    "projectruntime": "ProjectRuntime",
+    "project_runtime": "ProjectRuntime",
+    "project-runtime": "ProjectRuntime",
+}
+
+
 def _route_required_stage_names(raw_required_stages: object) -> list[str]:
     names: list[str] = []
     if not isinstance(raw_required_stages, list):
         return names
     for item in raw_required_stages:
+        raw_name = ""
         if isinstance(item, str):
-            names.append(item)
+            raw_name = item
         elif isinstance(item, dict):
-            value = item.get("stage", "")
-            if value:
-                names.append(str(value))
+            raw_name = str(item.get("stage", "") or "")
+        if not raw_name:
+            continue
+        normalized_key = raw_name.strip().replace(" ", "").lower()
+        names.append(ROUTE_STAGE_ALIASES.get(normalized_key, raw_name))
     return names
 
 def _normalize_required_stages(route_required_stages: list[str]) -> list[str]:
