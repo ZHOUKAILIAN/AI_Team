@@ -1107,6 +1107,39 @@ class RuntimeDriverTraceTests(unittest.TestCase):
         self.assertEqual(result.status, "BLOCKED")
         self.assertIn("state_advanced", result.reason)
 
+    def test_command_executor_timeout_blocks_without_leaving_active_run(self) -> None:
+        from agent_team.runtime_driver import RuntimeDriverOptions, run_requirement
+        from agent_team.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            root = Path(temp_dir)
+            repo_root = root / "repo"
+            state_root = root / "state"
+            repo_root.mkdir()
+            worker_path = root / "slow_worker.py"
+            worker_path.write_text("import time\ntime.sleep(30)\n")
+
+            result = run_requirement(
+                repo_root=repo_root,
+                state_root=state_root,
+                message="验证 timeout",
+                options=RuntimeDriverOptions(
+                    executor="command",
+                    executor_command=f"{sys.executable} {worker_path}",
+                    command_timeout_seconds=1,
+                    max_stage_runs=1,
+                ),
+            )
+            store = StateStore(state_root)
+            run = store.latest_stage_run(result.session_id, stage="Route")
+            session_id = run.session_id if run is not None else result.session_id
+
+            self.assertIsNotNone(run)
+            self.assertEqual(run.state if run else "", "BLOCKED")
+            active_runs = [item for item in store.stage_runs(session_id) if item.state == "RUNNING"]
+            self.assertEqual(active_runs, [])
+            self.assertIn("exit code 124", run.blocked_reason if run else "")
+
     def test_executor_nonzero_completed_result_blocks_as_conflict(self) -> None:
         from agent_team.runtime_driver import RuntimeDriverOptions, run_requirement
         from agent_team.state import StateStore
