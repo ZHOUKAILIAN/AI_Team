@@ -408,6 +408,76 @@ class StageMachineTests(unittest.TestCase):
         self.assertEqual(updated.human_decision, "go")
         self.assertEqual(updated.blocked_reason, "")
 
+    def test_route_without_required_stages_uses_affected_layers_and_mandatory_closure(self) -> None:
+        from agent_team.models import StageResultEnvelope, WorkflowSummary
+        from agent_team.stage_machine import StageMachine
+
+        summary = StageMachine().advance(
+            summary=WorkflowSummary(session_id="session-1", runtime_mode="harness", current_state="Route", current_stage="Route"),
+            stage_result=StageResultEnvelope(
+                session_id="session-1",
+                stage="Route",
+                status="completed",
+                artifact_name="route-packet.json",
+                artifact_content='{"affected_layers":["L1"]}',
+            ),
+        )
+
+        self.assertEqual(summary.route_required_stages, [
+            "ProductDefinition",
+            "Verification",
+            "GovernanceReview",
+            "Acceptance",
+            "SessionHandoff",
+        ])
+        self.assertEqual(summary.current_state, "ProductDefinition")
+
+    def test_every_requirement_preserves_mandatory_closure_chain(self) -> None:
+        from agent_team.models import StageResultEnvelope, WorkflowSummary
+        from agent_team.stage_machine import StageMachine
+
+        summary = StageMachine().advance(
+            summary=WorkflowSummary(session_id="session-1", runtime_mode="harness", current_state="Route", current_stage="Route"),
+            stage_result=StageResultEnvelope(
+                session_id="session-1",
+                stage="Route",
+                status="completed",
+                artifact_name="route-packet.json",
+                artifact_content='{"required_stages":[{"stage":"Design"}]}',
+            ),
+        )
+
+        self.assertEqual(summary.route_required_stages, [
+            "TechnicalDesign",
+            "Verification",
+            "GovernanceReview",
+            "Acceptance",
+            "SessionHandoff",
+        ])
+
+    def test_empty_route_still_preserves_mandatory_closure_chain(self) -> None:
+        from agent_team.models import StageResultEnvelope, WorkflowSummary
+        from agent_team.stage_machine import StageMachine
+
+        summary = StageMachine().advance(
+            summary=WorkflowSummary(session_id="session-1", runtime_mode="harness", current_state="Route", current_stage="Route"),
+            stage_result=StageResultEnvelope(
+                session_id="session-1",
+                stage="Route",
+                status="completed",
+                artifact_name="route-packet.json",
+                artifact_content='{"required_stages":[]}',
+            ),
+        )
+
+        self.assertEqual(summary.route_required_stages, [
+            "Verification",
+            "GovernanceReview",
+            "Acceptance",
+            "SessionHandoff",
+        ])
+        self.assertEqual(summary.current_state, "Verification")
+
     def test_route_required_stage_aliases_are_normalized(self) -> None:
         from agent_team.models import StageResultEnvelope, WorkflowSummary
         from agent_team.stage_machine import StageMachine
