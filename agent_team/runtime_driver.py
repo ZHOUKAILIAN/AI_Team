@@ -351,47 +351,26 @@ def _latest_codex_session_id(codex_home: Path | None) -> str:
 
 
 def _run_subprocess_with_timeout(command: list[str], *, cwd: Path, env: dict[str, str] | None, timeout_seconds: int) -> subprocess.CompletedProcess[str]:
-    if getattr(subprocess.run, "__module__", "subprocess") != "subprocess":
-        return subprocess.run(
-            command,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds,
-            check=False,
-            env=env,
-            stdin=subprocess.DEVNULL,
-        )
-    kwargs: dict[str, object] = {
+    kwargs = {
         "cwd": cwd,
-        "stdout": subprocess.PIPE,
-        "stderr": subprocess.PIPE,
+        "capture_output": True,
         "text": True,
+        "timeout": timeout_seconds,
+        "check": False,
         "env": env,
         "stdin": subprocess.DEVNULL,
-        "start_new_session": True,
     }
-    process = subprocess.Popen(command, **kwargs)
+    if getattr(subprocess.run, "__module__", "subprocess") == "subprocess":
+        kwargs["start_new_session"] = True
     try:
-        stdout, stderr = process.communicate(timeout=timeout_seconds)
-        return subprocess.CompletedProcess(command, process.returncode, stdout=stdout, stderr=stderr)
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        try:
-            stdout, stderr = process.communicate(timeout=5)
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            stdout, stderr = process.communicate()
-        stderr_text = _coerce_stream_text(stderr)
+        return subprocess.run(command, **kwargs)
+    except subprocess.TimeoutExpired as exc:
+        stdout = _coerce_stream_text(exc.stdout)
+        stderr = _coerce_stream_text(exc.stderr)
         timeout_msg = f"Command timed out after {timeout_seconds} seconds."
-        stderr_text = (stderr_text + "\n" + timeout_msg).strip() if stderr_text else timeout_msg
-        return subprocess.CompletedProcess(command, 124, stdout=_coerce_stream_text(stdout), stderr=stderr_text)
+        stderr = (stderr + "\n" + timeout_msg).strip() if stderr else timeout_msg
+        return subprocess.CompletedProcess(command, 124, stdout=stdout, stderr=stderr)
+
 
 def _record_codex_invocation_metadata(
     request: StageExecutionRequest,
