@@ -695,10 +695,10 @@ class CodexExecStageExecutor:
                 "-c",
                 f'approval_policy="{self.options.codex_approval_policy}"',
             ]
-            if "--output-schema" in capabilities:
-                command.extend(["--output-schema", str(request.output_schema_path)])
-            else:
-                skipped_flags.append("--output-schema")
+            # `codex exec resume --help` currently does not accept --output-schema even
+            # when the top-level `codex exec --help` advertises it. Keep resume
+            # compatible and let runtime validation enforce the contract.
+            skipped_flags.append("resume --output-schema")
             if "--json" in capabilities:
                 command.append("--json")
             else:
