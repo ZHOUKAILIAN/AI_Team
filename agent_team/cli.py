@@ -389,12 +389,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Extra argument passed through to codex exec. Repeat for multiple arguments.",
     )
     run_requirement_parser.add_argument(
-        "--codex-ephemeral",
+        "--codex-persistent",
         action="store_true",
         help=(
-            "Run codex-exec without persisting Codex session files. This disables automatic "
-            "codex exec resume for later stage attempts."
+            "Persist Codex session files and allow codex exec resume for later stage attempts. "
+            "By default, codex-exec uses ephemeral sessions for CLI compatibility."
         ),
+    )
+    run_requirement_parser.add_argument(
+        "--codex-ephemeral",
+        action="store_true",
+        help="Deprecated compatibility flag; codex-exec is ephemeral by default.",
     )
     run_requirement_parser.add_argument(
         "--trace-prompts",
@@ -768,7 +773,7 @@ def _runtime_driver_options_from_args(args: argparse.Namespace, *, interactive: 
         codex_sandbox=args.codex_sandbox,
         codex_approval_policy=args.codex_approval_policy,
         codex_extra_args=list(args.codex_extra_arg),
-        codex_ephemeral=bool(getattr(args, "codex_ephemeral", False)),
+        codex_ephemeral=not bool(getattr(args, "codex_persistent", False)),
         enabled_skills_by_stage=_resolve_run_enabled_skills(args, skill_registry),
         interactive=interactive,
         trace_prompts=bool(args.trace_prompts),
