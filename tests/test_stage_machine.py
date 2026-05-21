@@ -353,6 +353,71 @@ class StageMachineTests(unittest.TestCase):
         self.assertEqual(updated.stage_statuses["GovernanceReview"], "blocked")
         self.assertEqual(updated.blocked_reason, "发现阻塞治理问题。")
 
+    def test_route_required_stages_preserve_post_implementation_governance_chain(self) -> None:
+        from agent_team.models import StageResultEnvelope, WorkflowSummary
+        from agent_team.stage_machine import StageMachine
+
+        route_packet = (
+            '{"affected_layers":["L3","L2","L4"],'
+            '"required_stages":["ProjectRuntime","TechnicalDesign","Implementation","GovernanceReview"],'
+            '"baseline_sources":[],"red_lines":[],"unresolved_questions":[]}'
+        )
+        summary = StageMachine().advance(
+            summary=WorkflowSummary(session_id="session-1", runtime_mode="harness", current_state="Route", current_stage="Route"),
+            stage_result=StageResultEnvelope(
+                session_id="session-1",
+                stage="Route",
+                status="completed",
+                artifact_name="route-packet.json",
+                artifact_content=route_packet,
+            ),
+        )
+
+        self.assertEqual(summary.route_required_stages, [
+            "ProjectRuntime",
+            "TechnicalDesign",
+            "Implementation",
+            "Verification",
+            "GovernanceReview",
+            "Acceptance",
+            "SessionHandoff",
+        ])
+
+        summary = StageMachine().advance(
+            summary=summary,
+            stage_result=StageResultEnvelope(
+                session_id="session-1",
+                stage="ProjectRuntime",
+                status="completed",
+                artifact_name="project-landing-delta.md",
+                artifact_content="# Project Runtime\n",
+            ),
+        )
+        summary = StageMachine().advance(
+            summary=summary,
+            stage_result=StageResultEnvelope(
+                session_id="session-1",
+                stage="TechnicalDesign",
+                status="completed",
+                artifact_name="technical-design.md",
+                artifact_content="# Technical Design\n",
+            ),
+        )
+        summary = StageMachine().apply_human_decision(summary=summary, decision="go")
+        summary = StageMachine().advance(
+            summary=summary,
+            stage_result=StageResultEnvelope(
+                session_id="session-1",
+                stage="Implementation",
+                status="completed",
+                artifact_name="implementation.md",
+                artifact_content="# Implementation\n",
+            ),
+        )
+
+        self.assertEqual(summary.current_state, "Verification")
+        self.assertEqual(summary.current_stage, "Verification")
+
     def test_route_required_stages_drive_remaining_runtime_successors(self) -> None:
         from agent_team.models import StageResultEnvelope, WorkflowSummary
         from agent_team.stage_machine import StageMachine
