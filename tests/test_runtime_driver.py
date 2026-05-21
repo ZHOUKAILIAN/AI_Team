@@ -1419,7 +1419,7 @@ class RuntimeDriverInteractiveFlowTests(unittest.TestCase):
                 "stage = os.environ['AGENT_TEAM_STAGE']\n"
                 "contract = json.loads(open(os.environ['AGENT_TEAM_CONTRACT_PATH']).read())\n"
                 "payloads = {\n"
-                "  'Route': {'status': 'completed', 'artifact_content': '{\"affected_layers\":[\"L1\"]}', 'journal': '', 'findings': [], 'evidence': [{'name': 'route_classification', 'kind': 'artifact', 'summary': 'routed'}], 'summary': 'route'},\n"
+                "  'Route': {'status': 'completed', 'artifact_content': '{\"affected_layers\":[\"L1\",\"L2\",\"L3\"],\"required_stages\":[\"ProductDefinition\",\"ProjectRuntime\",\"TechnicalDesign\"]}', 'journal': '', 'findings': [], 'evidence': [{'name': 'route_classification', 'kind': 'artifact', 'summary': 'routed'}], 'summary': 'route'},\n"
                 "  'ProductDefinition': {'status': 'completed', 'artifact_content': '# Product Definition Delta\\n', 'journal': '', 'findings': [], 'evidence': [{'name': 'l1_classification', 'kind': 'artifact', 'summary': 'l1'}], 'summary': 'l1'},\n"
                 "  'ProjectRuntime': {'status': 'completed', 'artifact_content': '# Project Landing Delta\\n', 'journal': '', 'findings': [], 'evidence': [{'name': 'project_landing_review', 'kind': 'report', 'summary': 'l3'}], 'summary': 'l3'},\n"
                 "  'TechnicalDesign': {'status': 'completed', 'artifact_content': '# Technical Design\\n', 'journal': '', 'findings': [], 'evidence': [{'name': 'technical_design_plan', 'kind': 'report', 'summary': 'design'}], 'summary': 'design', 'stage': 'Route'},\n"

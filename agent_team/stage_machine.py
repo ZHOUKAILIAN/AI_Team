@@ -388,12 +388,26 @@ def _route_required_stage_names(raw_required_stages: object) -> list[str]:
         names.append(ROUTE_STAGE_ALIASES.get(normalized_key, raw_name))
     return names
 
+def _route_required_stages_from_affected_layers(raw_affected_layers: object) -> list[str]:
+    if not isinstance(raw_affected_layers, list):
+        return []
+    layers = {str(layer).strip().upper() for layer in raw_affected_layers}
+    stages: list[str] = []
+    if "L1" in layers:
+        stages.append("ProductDefinition")
+    if "L3" in layers:
+        stages.append("ProjectRuntime")
+    if "L2" in layers:
+        stages.extend(["TechnicalDesign", "Implementation"])
+    if "L4" in layers:
+        stages.append("GovernanceReview")
+    return stages
+
 def _normalize_required_stages(route_required_stages: list[str]) -> list[str]:
     ordered = ordered_required_stages([str(stage) for stage in route_required_stages])
-    if any(stage in ordered for stage in ("Implementation", "Verification", "GovernanceReview")):
-        for stage in ("Verification", "GovernanceReview", "Acceptance", "SessionHandoff"):
-            if stage not in ordered:
-                ordered.append(stage)
+    for stage in ("Verification", "GovernanceReview", "Acceptance", "SessionHandoff"):
+        if stage not in ordered:
+            ordered.append(stage)
     return [stage for stage in STAGES if stage in ordered]
 
 def _has_blocking_findings(findings: list[object]) -> bool:
@@ -407,7 +421,10 @@ def _finding_severity(finding: object) -> str:
 
 def _parse_route_packet(stage_result: StageResultEnvelope) -> tuple[list[str], dict[str, dict[str, str]], str]:
     payload = json.loads(stage_result.artifact_content)
-    required_stages = _normalize_required_stages(_route_required_stage_names(payload.get("required_stages", [])))
+    required_stages = _route_required_stage_names(payload.get("required_stages", []))
+    if not required_stages:
+        required_stages = _route_required_stages_from_affected_layers(payload.get("affected_layers", []))
+    required_stages = _normalize_required_stages(required_stages)
     stage_decisions = {
         str(name): {str(key): str(value) for key, value in dict(item).items()}
         for name, item in dict(payload.get("stage_decisions", {})).items()
