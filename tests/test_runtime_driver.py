@@ -473,6 +473,26 @@ class RuntimeDriverSchemaTests(unittest.TestCase):
         ])
 
 
+
+    def test_codex_exec_resume_skips_output_schema(self) -> None:
+        from agent_team.runtime_driver import CodexExecStageExecutor, RuntimeDriverOptions
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            root = Path(temp_dir)
+            request = product_definition_request(root)
+            request.output_schema_path.write_text("{}")
+            with patch("agent_team.runtime_driver._codex_exec_capabilities", lambda: {"--json", "-o", "--output-schema"}):
+                command = CodexExecStageExecutor(RuntimeDriverOptions())._build_codex_command(
+                    request,
+                    prompt="reply",
+                    output_path=root / "result.json",
+                    resume_id="resume-123",
+                )
+
+        self.assertIn("resume", command)
+        self.assertNotIn("--output-schema", command)
+        self.assertIn("resume --output-schema", request.executor_metadata["codex_exec_capabilities"]["skipped_flags"])
+
     def test_codex_exec_does_not_disable_plugins_by_default(self) -> None:
         from agent_team.runtime_driver import CodexExecStageExecutor, RuntimeDriverOptions
 
@@ -760,7 +780,8 @@ class RuntimeDriverSchemaTests(unittest.TestCase):
         self.assertEqual(commands[0][:3], ["codex", "exec", "resume"])
         self.assertIn(resume_id, commands[0])
         self.assertIn("--json", commands[0])
-        self.assertIn("--output-schema", commands[0])
+        self.assertNotIn("--output-schema", commands[0])
+        self.assertIn("resume --output-schema", request.executor_metadata["codex_exec_capabilities"]["skipped_flags"])
         self.assertNotIn("--cd", commands[0])
         self.assertNotIn("--sandbox", commands[0])
         self.assertNotIn("--ephemeral", commands[0])
