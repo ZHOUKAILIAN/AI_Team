@@ -204,6 +204,8 @@ class StateStore:
         raw_stage_statuses = payload.get("stage_statuses", {})
         raw_route_required_stages = payload.get("route_required_stages", [])
         raw_route_stage_decisions = payload.get("route_stage_decisions", {})
+        raw_model_output_format_stats = payload.get("model_output_format_stats", {})
+        raw_provider_model_metadata = payload.get("provider_model_metadata", {})
         stage_statuses = (
             {str(key): str(value) for key, value in raw_stage_statuses.items()}
             if isinstance(raw_stage_statuses, dict)
@@ -221,6 +223,11 @@ class StateStore:
                 if isinstance(item, dict)
             }
             if isinstance(raw_route_stage_decisions, dict)
+            else {}
+        )
+        model_output_format_stats = (
+            {str(key): int(value or 0) for key, value in raw_model_output_format_stats.items()}
+            if isinstance(raw_model_output_format_stats, dict)
             else {}
         )
         legacy_status_map = {
@@ -246,6 +253,10 @@ class StateStore:
             route_stage_decisions=route_stage_decisions,
             verification_mode=str(payload.get("verification_mode", "")),
             product_definition_outcome=str(payload.get("product_definition_outcome", "")),
+            model_output_format_stats=model_output_format_stats,
+            provider_model_metadata=(
+                dict(raw_provider_model_metadata) if isinstance(raw_provider_model_metadata, dict) else {}
+            ),
         )
 
     def load_acceptance_contract(self, session_id: str) -> AcceptanceContract | None:
@@ -571,6 +582,10 @@ class StateStore:
                     path
                     for path in context_root.glob("attempt-*/execution-contexts/*-input-context.json")
                 )
+                candidates.extend(
+                    path
+                    for path in context_root.glob("attempt-*/execution-contexts/*-task-contract.json")
+                )
         legacy_context_root = session.session_dir / "execution-contexts" / stage_slug
         candidates.extend(
             path
@@ -586,7 +601,7 @@ class StateStore:
             )
         if not candidates:
             return None
-        return sorted(candidates, key=lambda path: (_round_index_from_context_path(path), path.name))[-1]
+        return sorted(candidates, key=lambda path: (_round_index_from_context_path(path), str(path)))[-1]
 
     def load_execution_context(self, session_id: str, stage: str) -> dict[str, object] | None:
         path = self.latest_execution_context_path(session_id, stage)

@@ -183,6 +183,8 @@ class WorkflowSummary:
     route_stage_decisions: dict[str, dict[str, str]] = field(default_factory=dict)
     verification_mode: str = ""
     product_definition_outcome: str = ""
+    model_output_format_stats: dict[str, int] = field(default_factory=dict)
+    provider_model_metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -203,6 +205,8 @@ class WorkflowSummary:
             },
             "verification_mode": self.verification_mode,
             "product_definition_outcome": self.product_definition_outcome,
+            "model_output_format_stats": dict(self.model_output_format_stats),
+            "provider_model_metadata": dict(self.provider_model_metadata),
         }
 
 
@@ -324,6 +328,20 @@ class StageContract:
         }
 
 
+def _stage_evidence_from_payload(payload: dict[str, Any]) -> list[EvidenceItem]:
+    evidence = [EvidenceItem.from_value(item) for item in payload.get("evidence", [])]
+    evidence_by_name = payload.get("evidence_by_name")
+    if isinstance(evidence_by_name, dict):
+        for name, value in evidence_by_name.items():
+            if isinstance(value, dict):
+                item_payload = dict(value)
+                item_payload.setdefault("name", str(name))
+                evidence.append(EvidenceItem.from_value(item_payload))
+            else:
+                evidence.append(EvidenceItem.from_value({"name": str(name), "summary": str(value)}))
+    return evidence
+
+
 @model_dataclass
 class StageResultEnvelope:
     session_id: str
@@ -348,6 +366,11 @@ class StageResultEnvelope:
     service_profile: str = ""
     flow_ids: list[str] = field(default_factory=list)
     evidence_paths: list[str] = field(default_factory=list)
+    executor_status: str = ""
+    executor_exit_code: int | None = None
+    result_parse_status: str = ""
+    dry_run: bool = False
+    authoritative: bool = True
 
     def __post_init__(self) -> None:
         self.evidence = [EvidenceItem.from_value(item) for item in self.evidence]
@@ -375,7 +398,7 @@ class StageResultEnvelope:
             contract_id=payload.get("contract_id", ""),
             journal=payload.get("journal", ""),
             findings=[Finding.from_dict(item) for item in payload.get("findings", [])],
-            evidence=[EvidenceItem.from_value(item) for item in payload.get("evidence", [])],
+            evidence=_stage_evidence_from_payload(payload),
             suggested_next_owner=payload.get("suggested_next_owner", ""),
             summary=payload.get("summary", ""),
             acceptance_status=payload.get("acceptance_status", ""),
@@ -392,6 +415,11 @@ class StageResultEnvelope:
             service_profile=payload.get("service_profile", ""),
             flow_ids=list(payload.get("flow_ids", [])),
             evidence_paths=list(payload.get("evidence_paths", [])),
+            executor_status=payload.get("executor_status", ""),
+            executor_exit_code=payload.get("executor_exit_code"),
+            result_parse_status=payload.get("result_parse_status", ""),
+            dry_run=bool(payload.get("dry_run", False)),
+            authoritative=bool(payload.get("authoritative", True)),
         )
 
     def to_dict(
@@ -434,6 +462,16 @@ class StageResultEnvelope:
             payload["flow_ids"] = list(self.flow_ids)
         if self.evidence_paths:
             payload["evidence_paths"] = list(self.evidence_paths)
+        if self.executor_status:
+            payload["executor_status"] = self.executor_status
+        if self.executor_exit_code is not None:
+            payload["executor_exit_code"] = self.executor_exit_code
+        if self.result_parse_status:
+            payload["result_parse_status"] = self.result_parse_status
+        if self.dry_run:
+            payload["dry_run"] = self.dry_run
+        if not self.authoritative:
+            payload["authoritative"] = self.authoritative
         if include_supplemental_artifacts and self.supplemental_artifacts:
             payload["supplemental_artifacts"] = dict(self.supplemental_artifacts)
         if include_artifact_content:

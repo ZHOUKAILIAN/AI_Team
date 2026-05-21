@@ -5,7 +5,7 @@ import json
 import shlex
 import sys
 import threading
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .execution_context import build_stage_execution_context
@@ -117,6 +117,8 @@ class RunRequirementBlockedSummary:
     errors: list[str]
     issues: list[str]
     blockers: list[str]
+    cautions: list[str] = field(default_factory=list)
+    source: list[str] = field(default_factory=list)
 
 
 def _prepare_new_run_workspace(args: argparse.Namespace, *, message: str) -> TaskWorktree | None:
@@ -1385,6 +1387,10 @@ def _print_run_requirement_blocked_summary(
     _print_run_requirement_summary_section("错误", summary.errors)
     _print_run_requirement_summary_section("问题", summary.issues)
     _print_run_requirement_summary_section("阻塞点", summary.blockers)
+    if summary.cautions:
+        _print_run_requirement_summary_section("注意项", summary.cautions)
+    if summary.source:
+        _print_run_requirement_summary_section("诊断来源", summary.source)
 
 
 def _print_run_requirement_summary_section(title: str, lines: list[str]) -> None:
@@ -1408,6 +1414,10 @@ def _run_requirement_blocked_summary(
     runtime_stage = _runtime_stage_for_run_requirement_stage(stage)
     run = store.latest_stage_run(session_id, stage=runtime_stage)
     gate_result = run.gate_result if run is not None else None
+    diagnostic_source: list[str] = []
+    if run is not None:
+        _append_unique(diagnostic_source, f"stage_run_id: {run.run_id}")
+        _append_unique(diagnostic_source, f"attempt: {run.attempt}")
     gate_status = str(getattr(result, "gate_status", "") or getattr(gate_result, "status", "") or "BLOCKED")
     gate_reason = str(
         getattr(result, "gate_reason", "")
@@ -1420,7 +1430,13 @@ def _run_requirement_blocked_summary(
     evidence = _run_requirement_evidence(stage_result)
 
     errors: list[str] = []
-    _append_unique(errors, f"{_run_requirement_stage_label(stage)} 阶段没有推进：门禁判定为 {gate_status}。")
+    if gate_status.upper() == "PASSED":
+        _append_unique(
+            errors,
+            f"{_run_requirement_stage_label(stage)} gate 已通过，但状态未推进；请检查状态机流转或当前 workflow state。",
+        )
+    else:
+        _append_unique(errors, f"{_run_requirement_stage_label(stage)} 阶段没有推进：门禁判定为 {gate_status}。")
     if gate_reason:
         _append_unique(errors, gate_reason)
 
@@ -1430,6 +1446,14 @@ def _run_requirement_blocked_summary(
             _append_unique(issues, "缺少必需产物：" + "、".join(gate_result.missing_outputs))
         if gate_result.missing_evidence:
             _append_unique(issues, "缺少必需证据：" + "、".join(gate_result.missing_evidence))
+    caution_findings: list[object] = []
+    blocking_findings: list[object] = []
+    for finding in findings:
+        if _is_blocking_finding(finding):
+            blocking_findings.append(finding)
+        else:
+            caution_findings.append(finding)
+
     for finding in findings:
         issue = _finding_field(finding, "issue")
         severity = _finding_field(finding, "severity")
@@ -1447,12 +1471,24 @@ def _run_requirement_blocked_summary(
         _append_unique(issues, gate_reason)
 
     blockers: list[str] = []
-    for finding in findings:
+    cautions: list[str] = []
+    for finding in blocking_findings:
         for required in _finding_required_evidence(finding):
             _append_unique(blockers, f"需要补充证据：{required}")
         completion_signal = _finding_field(finding, "completion_signal")
         if completion_signal:
             _append_unique(blockers, completion_signal)
+    for finding in caution_findings:
+        issue = _finding_field(finding, "issue")
+        severity = _finding_field(finding, "severity")
+        if issue:
+            prefix = f"[{severity}] " if severity else ""
+            _append_unique(cautions, prefix + issue)
+        for required in _finding_required_evidence(finding):
+            _append_unique(cautions, f"记录后续对齐证据：{required}")
+        completion_signal = _finding_field(finding, "completion_signal")
+        if completion_signal:
+            _append_unique(cautions, f"记录信号：{completion_signal}")
     for item in evidence:
         exit_code = _evidence_exit_code(item)
         command = _evidence_field(item, "command")
@@ -1466,7 +1502,16 @@ def _run_requirement_blocked_summary(
     if not blockers and gate_reason:
         _append_unique(blockers, "按 gate_reason 补齐运行条件或修复失败项后重新执行当前阶段。")
 
-    return RunRequirementBlockedSummary(errors=errors, issues=issues, blockers=blockers)
+    context_path = store.latest_execution_context_path(session_id, runtime_stage)
+    if context_path is not None:
+        _append_unique(diagnostic_source, f"execution_context: {context_path}")
+    return RunRequirementBlockedSummary(
+        errors=errors,
+        issues=issues,
+        blockers=blockers,
+        cautions=cautions,
+        source=diagnostic_source,
+    )
 
 
 def _load_run_requirement_stage_result(*, store: StateStore, run) -> StageResultEnvelope | None:
@@ -1502,6 +1547,10 @@ def _finding_field(finding: object, field_name: str) -> str:
     if isinstance(finding, dict):
         return str(finding.get(field_name, "") or "").strip()
     return str(getattr(finding, field_name, "") or "").strip()
+
+
+def _is_blocking_finding(finding: object) -> bool:
+    return _finding_field(finding, "severity").lower() in {"critical", "high", "blocking", "blocker", "error"}
 
 
 def _finding_required_evidence(finding: object) -> list[str]:

@@ -278,6 +278,81 @@ class StageMachineTests(unittest.TestCase):
         self.assertEqual(summary.current_stage, "SessionHandoff")
         self.assertEqual(summary.human_decision, "pending")
 
+    def test_governance_review_medium_finding_continues_with_cautions(self) -> None:
+        from agent_team.models import Finding, StageResultEnvelope, WorkflowSummary
+        from agent_team.stage_machine import StageMachine
+
+        summary = WorkflowSummary(
+            session_id="session-1",
+            runtime_mode="harness",
+            current_state="GovernanceReview",
+            current_stage="GovernanceReview",
+            route_required_stages=["GovernanceReview", "Acceptance"],
+        )
+
+        updated = StageMachine().advance(
+            summary=summary,
+            stage_result=StageResultEnvelope(
+                session_id="session-1",
+                stage="GovernanceReview",
+                status="completed",
+                artifact_name="governance-review.md",
+                artifact_content="# Governance Review\n\n## Non-blocking Findings / Cautions\n- [medium] 记录给后续对齐。\n",
+                findings=[
+                    Finding(
+                        source_stage="GovernanceReview",
+                        target_stage="GovernanceReview",
+                        issue="记录给后续对齐。",
+                        severity="medium",
+                        required_evidence=["layer_governance_review"],
+                        completion_signal="note_recorded",
+                    )
+                ],
+            ),
+        )
+
+        self.assertEqual(updated.current_state, "Acceptance")
+        self.assertEqual(updated.stage_statuses["GovernanceReview"], "passed_with_cautions")
+        self.assertEqual(updated.blocked_reason, "")
+
+    def test_governance_review_blocking_finding_still_blocks(self) -> None:
+        from agent_team.models import Finding, StageResultEnvelope, WorkflowSummary
+        from agent_team.stage_machine import StageMachine
+
+        summary = WorkflowSummary(
+            session_id="session-1",
+            runtime_mode="harness",
+            current_state="GovernanceReview",
+            current_stage="GovernanceReview",
+            route_required_stages=["GovernanceReview", "Acceptance"],
+        )
+
+        updated = StageMachine().advance(
+            summary=summary,
+            stage_result=StageResultEnvelope(
+                session_id="session-1",
+                stage="GovernanceReview",
+                status="completed",
+                artifact_name="governance-review.md",
+                artifact_content="# Governance Review\n",
+                summary="发现阻塞治理问题。",
+                findings=[
+                    Finding(
+                        source_stage="GovernanceReview",
+                        target_stage="Implementation",
+                        issue="Implementation 超出当前需求范围。",
+                        severity="high",
+                        required_evidence=["scope_cleanup"],
+                        completion_signal="remove_out_of_scope_files",
+                    )
+                ],
+            ),
+        )
+
+        self.assertEqual(updated.current_state, "Blocked")
+        self.assertEqual(updated.stage_statuses["GovernanceReview"], "blocked")
+        self.assertEqual(updated.blocked_reason, "发现阻塞治理问题。")
+
     def test_route_required_stages_drive_remaining_runtime_successors(self) -> None:
         from agent_team.models import StageResultEnvelope, WorkflowSummary
         from agent_team.stage_machine import StageMachine

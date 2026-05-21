@@ -98,6 +98,44 @@ class RuntimeDriverSchemaTests(unittest.TestCase):
 
         assert_strict_objects(_stage_result_schema(), "$")
 
+
+    def test_stage_result_schema_uses_contract_required_evidence_keys(self) -> None:
+        from agent_team.models import StageContract
+        from agent_team.runtime_driver import _stage_result_schema
+
+        schema = _stage_result_schema(
+            StageContract(
+                session_id="session",
+                stage="Implementation",
+                goal="Implement",
+                evidence_requirements=["self_code_review", "self_verification"],
+            )
+        )
+        evidence_by_name = schema["properties"]["evidence_by_name"]
+
+        self.assertEqual(evidence_by_name["required"], ["self_code_review", "self_verification"])
+        self.assertEqual(set(evidence_by_name["properties"]), {"self_code_review", "self_verification"})
+        self.assertFalse(evidence_by_name["additionalProperties"])
+        self.assertNotIn("self_verification_check", evidence_by_name["properties"])
+
+    def test_stage_output_schema_file_is_contract_specific(self) -> None:
+        from agent_team.models import StageContract
+        from agent_team.runtime_driver import _stage_result_schema
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            schema_path = Path(temp_dir) / "schema.json"
+            contract = StageContract(
+                session_id="session",
+                stage="Implementation",
+                goal="Implement",
+                evidence_requirements=["self_verification"],
+            )
+            schema_path.write_text(json.dumps(_stage_result_schema(contract), indent=2))
+            payload = json.loads(schema_path.read_text())
+
+        self.assertEqual(payload["properties"]["evidence_by_name"]["required"], ["self_verification"])
+        self.assertIn("self_verification", payload["properties"]["evidence_by_name"]["properties"])
+
     def test_stage_result_schema_excludes_runtime_control_fields(self) -> None:
         from agent_team.runtime_driver import _stage_result_schema
         from agent_team.stage_payload import FORBIDDEN_STAGE_PAYLOAD_FIELDS
@@ -161,7 +199,8 @@ class RuntimeDriverSchemaTests(unittest.TestCase):
         self.assertIn("<alignment_updates>", prompt)
         self.assertIn("corrected artifact feeds later stages", prompt)
         self.assertNotIn("<human_revision_requests>", prompt)
-        self.assertIn("Put the stage document in artifact_content", prompt)
+        self.assertIn("Keep the document in artifact_content", prompt)
+        self.assertIn("Use evidence_by_name for contract evidence", prompt)
         self.assertIn("product-definition-delta.md", prompt)
         self.assertIn("If unclear or missing an L1 product decision", prompt)
         self.assertIn("return status `blocked`", prompt)
@@ -335,6 +374,8 @@ class RuntimeDriverSchemaTests(unittest.TestCase):
 
     def test_dry_run_product_definition_artifact_records_l1_and_non_l1(self) -> None:
         from agent_team.execution_context import StageExecutionContext
+        from dataclasses import replace
+
         from agent_team.models import Finding
         from agent_team.runtime_driver import _dry_run_artifact_content, _dry_run_supplemental_artifacts
 
@@ -370,6 +411,67 @@ class RuntimeDriverSchemaTests(unittest.TestCase):
         self.assertIn("非 L1 内容", artifact)
         self.assertNotIn("Non-Goals", artifact)
         self.assertEqual(_dry_run_supplemental_artifacts("ProductDefinition", context), {})
+
+
+    def test_dry_run_executor_marks_result_non_authoritative(self) -> None:
+        from agent_team.runtime_driver import DryRunStageExecutor
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            root = Path(temp_dir)
+            request = product_definition_request(root)
+            result = DryRunStageExecutor().execute(request)
+
+        self.assertTrue(result.dry_run)
+        self.assertFalse(result.authoritative)
+        self.assertEqual(result.executor_status, "synthetic")
+        self.assertEqual(result.result_parse_status, "synthetic")
+
+    def test_provider_smoke_metadata_is_recorded_without_running_check_by_default(self) -> None:
+        from agent_team.runtime_driver import RuntimeDriverOptions, run_requirement
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            root = Path(temp_dir)
+            state_root = root / "state"
+            result = run_requirement(
+                repo_root=root,
+                state_root=state_root,
+                message="记录 provider metadata",
+                options=RuntimeDriverOptions(executor="dry-run", max_stage_runs=0),
+            )
+            from agent_team.state import StateStore
+
+            summary = StateStore(state_root).load_workflow_summary(result.session_id)
+
+        self.assertEqual(summary.provider_model_metadata["executor"], "dry-run")
+        self.assertEqual(summary.provider_model_metadata["model"], "gpt-5.4")
+        self.assertFalse(summary.provider_model_metadata["smoke_check_enabled"])
+
+    def test_codex_capability_check_skips_unsupported_prompt_protection_flags(self) -> None:
+        from agent_team.runtime_driver import CodexExecStageExecutor, RuntimeDriverOptions
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            root = Path(temp_dir)
+            request = product_definition_request(root)
+            request.output_schema_path.write_text("{}")
+            with patch("agent_team.runtime_driver._codex_exec_capabilities", lambda: {"--json", "-o", "--skip-git-repo-check"}):
+                command = CodexExecStageExecutor(RuntimeDriverOptions())._build_codex_command(
+                    request,
+                    prompt="reply",
+                    output_path=root / "result.json",
+                    resume_id="",
+                )
+
+        self.assertNotIn("--ignore-rules", command)
+        self.assertNotIn("plugins", command)
+        self.assertNotIn("--output-schema", command)
+        self.assertIn("--json", command)
+        self.assertEqual(request.executor_metadata["codex_exec_capabilities"]["skipped_flags"], [
+            "--cd",
+            "--sandbox",
+            "--output-schema",
+            "--ignore-rules",
+            "--disable plugins",
+        ])
 
     def test_codex_exec_stage_executor_skips_git_repo_check(self) -> None:
         from agent_team.execution_context import StageExecutionContext
@@ -640,9 +742,9 @@ class RuntimeDriverSchemaTests(unittest.TestCase):
         self.assertEqual(commands[0][:3], ["codex", "exec", "resume"])
         self.assertIn(resume_id, commands[0])
         self.assertIn("--json", commands[0])
+        self.assertIn("--output-schema", commands[0])
         self.assertNotIn("--cd", commands[0])
         self.assertNotIn("--sandbox", commands[0])
-        self.assertNotIn("--output-schema", commands[0])
         self.assertNotIn("--ephemeral", commands[0])
         self.assertEqual(request.executor_metadata["codex_exec"]["resume_id"], resume_id)
         self.assertEqual(request.executor_metadata["codex_exec"]["mode"], "resume")
@@ -663,6 +765,7 @@ class RuntimeDriverSchemaTests(unittest.TestCase):
         from agent_team.execution_context import StageExecutionContext
         from agent_team.models import StageContract
         from agent_team.runtime_driver import CodexExecStageExecutor, RuntimeDriverOptions, StageExecutionRequest
+        from agent_team.state import StateStore
 
         commands = []
 
@@ -706,20 +809,22 @@ class RuntimeDriverSchemaTests(unittest.TestCase):
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
             root = Path(temp_dir)
+            store = StateStore(root / "state")
+            session = store.create_session("demo")
             request = StageExecutionRequest(
                 repo_root=root,
-                state_store=None,
-                session_id="session",
+                state_store=store,
+                session_id=session.session_id,
                 run_id="product-definition-run-1",
                 contract=StageContract(
-                    session_id="session",
+                    session_id=session.session_id,
                     stage="ProductDefinition",
                     goal="Write an L1 delta.",
                     contract_id="contract",
                     required_outputs=["product-definition-delta.md"],
                 ),
                 context=StageExecutionContext(
-                    session_id="session",
+                    session_id=session.session_id,
                     stage="ProductDefinition",
                     round_index=1,
                     context_id="context",
@@ -743,6 +848,7 @@ class RuntimeDriverSchemaTests(unittest.TestCase):
 
             with patch("agent_team.runtime_driver.subprocess.run", fake_run):
                 envelope = CodexExecStageExecutor(RuntimeDriverOptions()).execute(request)
+            stats = store.load_workflow_summary(session.session_id).model_output_format_stats
 
         self.assertEqual(len(commands), 2)
         self.assertIn("<agent_team_output_repair", commands[1][-1])
@@ -750,6 +856,10 @@ class RuntimeDriverSchemaTests(unittest.TestCase):
         self.assertEqual(envelope.status, "completed")
         self.assertEqual(envelope.summary, "repaired envelope")
         self.assertEqual(envelope.stage, "ProductDefinition")
+        self.assertEqual(stats["runtime_controlled_field_count"], 1)
+        self.assertEqual(stats["invalid_json_count"], 1)
+        self.assertEqual(stats["repair_attempt_count"], 1)
+        self.assertEqual(stats["repair_success_count"], 1)
 
     def test_codex_exec_repairs_output_protocol_error_twice_before_blocking_user(self) -> None:
         from agent_team.execution_context import StageExecutionContext
@@ -996,6 +1106,132 @@ class RuntimeDriverTraceTests(unittest.TestCase):
 
         self.assertEqual(result.status, "BLOCKED")
         self.assertIn("state_advanced", result.reason)
+
+    def test_executor_nonzero_completed_result_blocks_as_conflict(self) -> None:
+        from agent_team.runtime_driver import RuntimeDriverOptions, run_requirement
+        from agent_team.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            root = Path(temp_dir)
+            repo_root = root / "repo"
+            state_root = root / "state"
+            repo_root.mkdir()
+            worker_path = root / "stage_worker.py"
+            worker_path.write_text(
+                "import json, os, sys\n"
+                "from pathlib import Path\n"
+                "stage = os.environ['AGENT_TEAM_STAGE']\n"
+                "payload = {\n"
+                "  'status': 'completed',\n"
+                "  'artifact_content': '# Stage\\n',\n"
+                "  'journal': '',\n"
+                "  'findings': [],\n"
+                "  'evidence': [],\n"
+                "  'suggested_next_owner': '',\n"
+                "  'summary': stage + ' completed despite executor failure',\n"
+                "  'acceptance_status': '',\n"
+                "  'blocked_reason': '',\n"
+                "}\n"
+                "Path(os.environ['AGENT_TEAM_RESULT_BUNDLE']).write_text(json.dumps(payload))\n"
+                "sys.exit(2)\n"
+            )
+
+            result = run_requirement(
+                repo_root=repo_root,
+                state_root=state_root,
+                message="执行这个需求：验证 executor/result 冲突",
+                options=RuntimeDriverOptions(
+                    executor="command",
+                    executor_command=f"{sys.executable} {worker_path}",
+                    max_stage_runs=1,
+                ),
+            )
+            run = StateStore(state_root).latest_stage_run(result.session_id, stage="Route")
+
+        self.assertIsNotNone(run)
+        self.assertEqual(run.state if run is not None else "", "BLOCKED")
+        self.assertIn("executor_result_conflict", run.gate_result.reason if run and run.gate_result else "")
+        self.assertEqual(result.status.lower(), "blocked")
+
+    def test_rework_feedback_is_injected_into_next_attempt_prompt_and_trace(self) -> None:
+        from dataclasses import replace
+
+        from agent_team.models import Finding
+        from agent_team.runtime_driver import RuntimeDriverOptions, run_requirement
+        from agent_team.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            root = Path(temp_dir)
+            repo_root = root / "repo"
+            state_root = root / "state"
+            repo_root.mkdir()
+            store = StateStore(state_root)
+            session = store.create_session("验证返工反馈进入下一轮 prompt", runtime_mode="runtime_driver")
+            summary = store.load_workflow_summary(session.session_id)
+            store.save_workflow_summary(session, replace(summary, current_state="Route", current_stage="Route"))
+            store.record_feedback(
+                session.session_id,
+                Finding(
+                    source_stage="Verification",
+                    target_stage="Route",
+                    issue="必须使用 exact self_verification，不要再输出 self_verification_check。",
+                    severity="high",
+                    required_evidence=["self_verification"],
+                    completion_signal="evidence_by_name.self_verification is present",
+                ),
+            )
+            worker_path = root / "stage_worker.py"
+            worker_path.write_text(
+                "import json, os\n"
+                "from pathlib import Path\n"
+                "payload = {\n"
+                "  'status': 'completed',\n"
+                "  'artifact_content': '{\\\"affected_layers\\\":[\\\"L1\\\"],\\\"required_stages\\\":[]}',\n"
+                "  'journal': '',\n"
+                "  'findings': [],\n"
+                "  'evidence': [{'name': 'route_classification', 'kind': 'artifact', 'summary': 'routed'}],\n"
+                "  'suggested_next_owner': '',\n"
+                "  'summary': 'route completed',\n"
+                "  'acceptance_status': '',\n"
+                "  'blocked_reason': '',\n"
+                "}\n"
+                "Path(os.environ['AGENT_TEAM_RESULT_BUNDLE']).write_text(json.dumps(payload))\n"
+            )
+
+            result = run_requirement(
+                repo_root=repo_root,
+                state_root=state_root,
+                session_id=session.session_id,
+                message="继续",
+                options=RuntimeDriverOptions(
+                    executor="command",
+                    executor_command=f"{sys.executable} {worker_path}",
+                    max_stage_runs=1,
+                    trace_prompts=True,
+                ),
+            )
+            store = StateStore(state_root)
+            run = store.latest_stage_run(result.session_id, stage="Route")
+            context_path = store.latest_execution_context_path(result.session_id, "Route")
+
+            self.assertIsNotNone(run)
+            self.assertIsNotNone(context_path)
+            prompt_bundle = (
+                Path(run.artifact_paths.get("prompt_bundle", ""))
+                if run is not None
+                else Path("missing")
+            )
+            if not prompt_bundle.exists():
+                self.fail(f"prompt bundle missing: {prompt_bundle}; artifacts={run.artifact_paths if run else {}}")
+            prompt_text = prompt_bundle.read_text()
+            self.assertIn("必须使用 exact self_verification", prompt_text)
+            self.assertIn("self_verification_check", prompt_text)
+            self.assertTrue(any(
+                step.get("step") == "executor_started"
+                and step.get("details", {}).get("attempt") == 1
+                and step.get("details", {}).get("actionable_feedback_count") == 1
+                for step in (run.steps if run is not None else [])
+            ))
 
     def test_command_stage_records_worktree_changes(self) -> None:
         from agent_team.runtime_driver import RuntimeDriverOptions, run_requirement
