@@ -148,7 +148,7 @@ class StageMachine:
 
         if stage_result.stage == "Verification":
             next_verification_round = summary.verification_round + 1
-            if stage_result.status == "failed" or stage_result.findings:
+            if stage_result.status == "failed" or _has_blocking_findings(stage_result.findings):
                 return _set_stage_status(
                     summary,
                     "Verification",
@@ -164,7 +164,7 @@ class StageMachine:
             return _set_stage_status(
                 summary,
                 "Verification",
-                "passed",
+                "passed_with_cautions" if stage_result.findings else "passed",
                 current_state=next_state,
                 current_stage=next_stage,
                 verification_round=next_verification_round,
