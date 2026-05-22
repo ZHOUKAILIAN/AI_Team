@@ -182,6 +182,7 @@ class WorkflowSummary:
     route_required_stages: list[str] = field(default_factory=list)
     route_stage_decisions: dict[str, dict[str, str]] = field(default_factory=dict)
     verification_mode: str = ""
+    verification_profile: str = ""
     product_definition_outcome: str = ""
     model_output_format_stats: dict[str, int] = field(default_factory=dict)
     provider_model_metadata: dict[str, Any] = field(default_factory=dict)
@@ -204,6 +205,7 @@ class WorkflowSummary:
                 for stage, item in self.route_stage_decisions.items()
             },
             "verification_mode": self.verification_mode,
+            "verification_profile": self.verification_profile,
             "product_definition_outcome": self.product_definition_outcome,
             "model_output_format_stats": dict(self.model_output_format_stats),
             "provider_model_metadata": dict(self.provider_model_metadata),
@@ -364,6 +366,7 @@ class StageResultEnvelope:
     verification_mode: str = ""
     product_definition_outcome: str = ""
     service_profile: str = ""
+    verification_profile: str = ""
     flow_ids: list[str] = field(default_factory=list)
     evidence_paths: list[str] = field(default_factory=list)
     executor_status: str = ""
@@ -413,6 +416,7 @@ class StageResultEnvelope:
             verification_mode=payload.get("verification_mode", ""),
             product_definition_outcome=payload.get("product_definition_outcome", ""),
             service_profile=payload.get("service_profile", ""),
+            verification_profile=payload.get("verification_profile", ""),
             flow_ids=list(payload.get("flow_ids", [])),
             evidence_paths=list(payload.get("evidence_paths", [])),
             executor_status=payload.get("executor_status", ""),
@@ -458,6 +462,8 @@ class StageResultEnvelope:
             payload["product_definition_outcome"] = self.product_definition_outcome
         if self.service_profile:
             payload["service_profile"] = self.service_profile
+        if self.verification_profile:
+            payload["verification_profile"] = self.verification_profile
         if self.flow_ids:
             payload["flow_ids"] = list(self.flow_ids)
         if self.evidence_paths:
