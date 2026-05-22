@@ -604,6 +604,22 @@ def build_parser() -> argparse.ArgumentParser:
     review_parser.add_argument("--session-id", help="Specific session ID to inspect.")
     review_parser.set_defaults(handler=_handle_review)
 
+    go_parser = subparsers.add_parser("go", help="Approve the latest waiting workflow session with no session-id typing.")
+    go_parser.add_argument("--session-id", help="Specific session ID. Defaults to the latest session.")
+    go_parser.set_defaults(handler=_handle_go)
+
+    fix_parser = subparsers.add_parser("fix", help="Record one-line rework feedback for the current stage.")
+    fix_parser.add_argument("issue", help="One-line feedback / rework request.")
+    fix_parser.add_argument("--session-id", help="Specific session ID. Defaults to the latest session.")
+    fix_parser.add_argument("--stage", choices=list(STAGES), default="", help="Target stage. Defaults to the current stage.")
+    fix_parser.add_argument("--severity", default="high", help="Feedback severity. Defaults to high because fix implies rework.")
+    fix_parser.add_argument("--no-rework", action="store_true", help="Only record feedback; do not route workflow back.")
+    fix_parser.set_defaults(handler=_handle_fix)
+
+    detail_parser = subparsers.add_parser("detail", help="Show detailed AGT continue diagnostics for the latest session.")
+    detail_parser.add_argument("--session-id", help="Specific session ID. Defaults to the latest session.")
+    detail_parser.set_defaults(handler=_handle_detail)
+
     continue_parser = subparsers.add_parser(
         "continue",
         help="Show the recommended next human action for the latest workflow session.",
@@ -2474,6 +2490,55 @@ def _handle_review(args: argparse.Namespace) -> int:
     store = StateStore(args.state_root)
     print(store.read_review(session_id=args.session_id))
     return 0
+
+
+def _handle_go(args: argparse.Namespace) -> int:
+    args.session_id = args.session_id or StateStore(args.state_root).latest_session_id()
+    if not args.session_id:
+        raise SystemExit("No workflow session exists yet.")
+    code = _handle_approve(args)
+    if code == 0:
+        print("已确认 Go。下一步可运行：agt continue")
+    return code
+
+
+def _handle_fix(args: argparse.Namespace) -> int:
+    store = StateStore(args.state_root)
+    session_id = args.session_id or store.latest_session_id()
+    if not session_id:
+        raise SystemExit("No workflow session exists yet.")
+    summary = store.load_workflow_summary(session_id)
+    target_stage = args.stage or _run_requirement_stage_for_summary(summary)
+    feedback_args = argparse.Namespace(
+        repo_root=args.repo_root,
+        state_root=args.state_root,
+        session_id=session_id,
+        stage=target_stage,
+        issue=args.issue,
+        source_stage=summary.current_stage or target_stage,
+        severity=args.severity,
+        lesson="",
+        context_update="",
+        contract_update="",
+        evidence="",
+        evidence_kind="",
+        required_evidence=[],
+        completion_signal="human_short_fix",
+        rework=not bool(getattr(args, "no_rework", False)),
+    )
+    code = _handle_feedback(feedback_args)
+    if code == 0:
+        if feedback_args.rework:
+            print("已记录返工意见并切回对应阶段。下一步可运行：agt continue")
+        else:
+            print("已记录反馈。下一步可运行：agt continue")
+    return code
+
+
+def _handle_detail(args: argparse.Namespace) -> int:
+    args.details = True
+    return _handle_continue(args)
+
 
 
 def _handle_continue(args: argparse.Namespace) -> int:

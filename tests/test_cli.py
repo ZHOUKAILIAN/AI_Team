@@ -42,6 +42,9 @@ class CliTests(unittest.TestCase):
         self.assertIn("status", result.stdout)
         self.assertIn("continue", result.stdout)
         self.assertIn("next", result.stdout)
+        self.assertIn("go", result.stdout)
+        self.assertIn("fix", result.stdout)
+        self.assertIn("detail", result.stdout)
         self.assertNotIn("agent-run", result.stdout)
 
     def test_project_scripts_include_short_agt_alias(self) -> None:
@@ -746,7 +749,7 @@ class CliTests(unittest.TestCase):
 
         summary = WorkflowSummary(
             session_id="session-1",
-            runtime_mode="runtime_driver",
+            runtime_mode="harness",
             current_state="WaitForTechnicalDesignApproval",
             current_stage="TechnicalDesign",
             stage_statuses={"Route": "completed", "ProductDefinition": "skipped", "TechnicalDesign": "drafted"},
@@ -1225,6 +1228,73 @@ class CliTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertEqual(payload["session"]["session_id"], session_id)
 
+
+
+    def test_short_human_commands_go_fix_and_detail(self) -> None:
+        from agent_team.models import WorkflowSummary
+        from agent_team.state import StateStore
+
+        repo_root = Path(__file__).resolve().parents[1]
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            state_root = Path(temp_dir) / ".agent-team"
+            store = StateStore(state_root)
+            session = store.create_session("执行这个需求：短命令人类操作", initiator="human")
+            store.save_workflow_summary(
+                session,
+                WorkflowSummary(
+                    session_id=session.session_id,
+                    runtime_mode="harness",
+                    current_state="WaitForTechnicalDesignApproval",
+                    current_stage="TechnicalDesign",
+                    stage_statuses={"Route": "completed", "TechnicalDesign": "drafted"},
+                    route_required_stages=["TechnicalDesign", "Verification", "GovernanceReview", "Acceptance", "SessionHandoff"],
+                )
+            )
+
+            detail = subprocess.run(
+                [sys.executable, "-m", "agent_team", "--repo-root", str(repo_root), "--state-root", str(state_root), "detail"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(detail.returncode, 0, detail.stderr)
+            self.assertIn("AGT Continue", detail.stdout)
+            self.assertIn("详情:", detail.stdout)
+
+            fix = subprocess.run(
+                [sys.executable, "-m", "agent_team", "--repo-root", str(repo_root), "--state-root", str(state_root), "fix", "设计里补边界说明"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(fix.returncode, 0, fix.stderr)
+            self.assertIn("已记录返工意见", fix.stdout)
+            updated = store.load_workflow_summary(session.session_id)
+            self.assertEqual(updated.current_state, "TechnicalDesign")
+            self.assertEqual(updated.stage_statuses["TechnicalDesign"], "rework_requested")
+
+            store.save_workflow_summary(
+                session,
+                WorkflowSummary(
+                    session_id=session.session_id,
+                    runtime_mode="harness",
+                    current_state="WaitForHumanDecision",
+                    current_stage="SessionHandoff",
+                    stage_statuses={"Route": "completed", "TechnicalDesign": "approved", "SessionHandoff": "completed"},
+                    route_required_stages=["TechnicalDesign", "Verification", "GovernanceReview", "Acceptance", "SessionHandoff"],
+                    acceptance_status="accepted",
+                    human_decision="pending",
+                )
+            )
+            go = subprocess.run(
+                [sys.executable, "-m", "agent_team", "--repo-root", str(repo_root), "--state-root", str(state_root), "go"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(go.returncode, 0, go.stderr)
+            self.assertIn("已确认 Go", go.stdout)
 
     def test_continue_prints_recommended_human_action(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
