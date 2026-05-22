@@ -2547,8 +2547,124 @@ def _handle_continue(args: argparse.Namespace) -> int:
     if not session_id:
         raise SystemExit("No workflow session exists yet.")
     summary = store.load_workflow_summary(session_id)
-    _print_next_human_summary(store=store, summary=summary, repo_root=args.repo_root, details=bool(getattr(args, "details", False)))
+    details = bool(getattr(args, "details", False))
+    _print_next_human_summary(store=store, summary=summary, repo_root=args.repo_root, details=details)
+    if not details and sys.stdin.isatty() and sys.stdout.isatty():
+        return _prompt_continue_action(args=args, store=store, summary=summary)
     return 0
+
+
+def _prompt_continue_action(*, args: argparse.Namespace, store: StateStore, summary: WorkflowSummary) -> int:
+    action, _reason, _commands = _next_human_action(summary)
+    prompt = "Enter 执行建议"
+    if summary.current_state in WAIT_STATES:
+        prompt += "，r 返工，d 详情，q 退出"
+    elif summary.blocked_reason:
+        prompt += "，r 自定义返工，d 详情，q 退出"
+    elif summary.current_state == "Done":
+        prompt = "按 Enter 退出，d 详情"
+    else:
+        prompt += "，d 详情，q 退出"
+    choice = input(f"\n{prompt}: ").strip().lower()
+    if choice in {"q", "quit", "退出"}:
+        print("已退出。")
+        return 0
+    if choice in {"d", "detail", "详情"}:
+        _print_next_human_summary(store=store, summary=summary, repo_root=args.repo_root, details=True)
+        return 0
+    if choice in {"r", "fix", "返工"}:
+        target = _prompt_rework_stage(summary)
+        issue = input("请输入返工意见: ").strip()
+        if not issue:
+            print("未输入返工意见，已取消。")
+            return 0
+        fix_args = argparse.Namespace(
+            repo_root=args.repo_root,
+            state_root=args.state_root,
+            session_id=summary.session_id,
+            stage=target,
+            issue=issue,
+            severity="high",
+            no_rework=False,
+        )
+        return _handle_fix(fix_args)
+    if summary.current_state == "Done":
+        return 0
+    return _run_recommended_continue_action(args=args, summary=summary, action_label=action)
+
+
+def _run_recommended_continue_action(*, args: argparse.Namespace, summary: WorkflowSummary, action_label: str) -> int:
+    if summary.current_state in WAIT_STATES:
+        print(f"\n→ {action_label}")
+        return _with_spinner(lambda: _handle_go(argparse.Namespace(repo_root=args.repo_root, state_root=args.state_root, session_id=summary.session_id)), label=action_label)
+    if summary.blocked_reason:
+        target = _run_requirement_stage_for_summary(summary)
+        print(f"\n→ 需要返工：{_run_requirement_stage_label(target)}")
+        issue = input("请输入返工意见: ").strip()
+        if not issue:
+            print("未输入返工意见，已取消。")
+            return 0
+        fix_args = argparse.Namespace(repo_root=args.repo_root, state_root=args.state_root, session_id=summary.session_id, stage=target, issue=issue, severity="high", no_rework=False)
+        return _handle_fix(fix_args)
+    print(f"\n→ {action_label}")
+    run_args = argparse.Namespace(**vars(args))
+    run_args.session_id = summary.session_id
+    run_args.message = None
+    run_args.message_arg = None
+    run_args.continue_run = False
+    return _with_spinner(lambda: _handle_run_requirement(run_args), label=action_label)
+
+
+def _prompt_rework_stage(summary: WorkflowSummary) -> str:
+    stages = [stage for stage in (summary.route_required_stages or RUN_REQUIREMENT_STAGE_ORDER) if stage in HUMAN_REWORK_TARGETS]
+    current = _run_requirement_stage_for_summary(summary)
+    if current not in stages:
+        stages.insert(0, current)
+    print("返工阶段:")
+    for index, stage in enumerate(stages, start=1):
+        default = "（默认）" if stage == current else ""
+        print(f"{index}. {_run_requirement_stage_label(stage)} {default}")
+    raw = input(f"选择 [1]: ").strip()
+    if not raw:
+        return stages[0]
+    try:
+        choice = int(raw)
+    except ValueError:
+        return current
+    if 1 <= choice <= len(stages):
+        return stages[choice - 1]
+    return current
+
+
+def _with_spinner(fn, *, label: str) -> int:
+    if not sys.stdout.isatty():
+        return fn()
+    import itertools
+    import threading
+    import time
+
+    done = False
+
+    def spin() -> None:
+        start = time.monotonic()
+        for frame in itertools.cycle("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"):
+            if done:
+                break
+            elapsed = int(time.monotonic() - start)
+            sys.stdout.write(f"\r{frame} {label} · {elapsed//60:02d}:{elapsed%60:02d}")
+            sys.stdout.flush()
+            time.sleep(0.12)
+        sys.stdout.write("\r" + " " * (len(label) + 20) + "\r")
+        sys.stdout.flush()
+
+    thread = threading.Thread(target=spin, daemon=True)
+    thread.start()
+    try:
+        return fn()
+    finally:
+        done = True
+        thread.join(timeout=0.5)
+
 
 
 def _print_next_human_summary(*, store: StateStore, summary: WorkflowSummary, repo_root: Path, details: bool = False) -> None:
@@ -2557,13 +2673,17 @@ def _print_next_human_summary(*, store: StateStore, summary: WorkflowSummary, re
     total = max(len(stages), 1)
     stage = _run_requirement_stage_for_summary(summary)
     action, reason, commands = _next_human_action(summary)
-    print("AGT Continue")
     request_text = getattr(summary, "request", "") or summary.session_id
-    print(f"需求: {request_text[:120]}")
-    print(f"当前: {_run_requirement_stage_label(stage)} / {summary.current_state}")
-    print(f"进度: {completed}/{total} 阶段完成")
-    print(f"建议: {action}")
-    print(f"原因: {reason}")
+    _print_box(
+        "AGT Continue",
+        [
+            request_text[:120],
+            f"当前：{_run_requirement_stage_label(stage)} / {_human_state_label(summary.current_state)}",
+            f"进度：{_progress_bar(completed, total)} {completed}/{total}",
+            f"建议：{action}",
+            f"原因：{reason}",
+        ],
+    )
     if commands:
         print("可执行:")
         for command in commands:
@@ -2577,6 +2697,35 @@ def _print_next_human_summary(*, store: StateStore, summary: WorkflowSummary, re
         print(f"- acceptance_status: {summary.acceptance_status}")
         print(f"- human_decision: {summary.human_decision}")
         _print_stage_timings(store, summary.session_id)
+
+
+def _print_box(title: str, lines: list[str]) -> None:
+    width = max([len(title)] + [len(_strip_wide_hint(line)) for line in lines]) + 4
+    print(f"╭─ {title} " + "─" * max(width - len(title) - 4, 0) + "╮")
+    for line in lines:
+        print(f"│ {line.ljust(max(width - 2, 0))} │")
+    print("╰" + "─" * width + "╯")
+
+
+def _strip_wide_hint(value: str) -> str:
+    return value
+
+
+def _progress_bar(done: int, total: int, *, width: int = 10) -> str:
+    total = max(total, 1)
+    filled = min(width, max(0, round(width * done / total)))
+    return "█" * filled + "░" * (width - filled)
+
+
+def _human_state_label(state: str) -> str:
+    labels = {
+        "WaitForHumanDecision": "等待最终 Go",
+        "WaitForProductDefinitionApproval": "等待产品定义审批",
+        "WaitForTechnicalDesignApproval": "等待技术设计审批",
+        "Done": "已完成",
+    }
+    return labels.get(state, state)
+
 
 
 def _next_human_action(summary: WorkflowSummary) -> tuple[str, str, list[str]]:
