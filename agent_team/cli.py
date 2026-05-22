@@ -580,6 +580,14 @@ def build_parser() -> argparse.ArgumentParser:
     review_parser.add_argument("--session-id", help="Specific session ID to inspect.")
     review_parser.set_defaults(handler=_handle_review)
 
+    next_parser = subparsers.add_parser(
+        "next",
+        help="Show the recommended next human action for the latest workflow session.",
+    )
+    next_parser.add_argument("--session-id", help="Specific session ID to inspect. Defaults to the latest session.")
+    next_parser.add_argument("--details", action="store_true", help="Include debug/session identifiers and stage timing details.")
+    next_parser.set_defaults(handler=_handle_next)
+
     status_parser = subparsers.add_parser(
         "status",
         help="Print a user-friendly project, role, and status summary for a session.",
@@ -2434,6 +2442,112 @@ def _handle_review(args: argparse.Namespace) -> int:
     store = StateStore(args.state_root)
     print(store.read_review(session_id=args.session_id))
     return 0
+
+
+def _handle_next(args: argparse.Namespace) -> int:
+    store = StateStore(args.state_root)
+    session_id = args.session_id or store.latest_session_id()
+    if not session_id:
+        raise SystemExit("No workflow session exists yet.")
+    summary = store.load_workflow_summary(session_id)
+    _print_next_human_summary(store=store, summary=summary, repo_root=args.repo_root, details=bool(getattr(args, "details", False)))
+    return 0
+
+
+def _print_next_human_summary(*, store: StateStore, summary: WorkflowSummary, repo_root: Path, details: bool = False) -> None:
+    stages = list(summary.route_required_stages or RUN_REQUIREMENT_STAGE_ORDER)
+    completed = sum(1 for stage in stages if summary.stage_statuses.get(stage) in {"completed", "approved", "passed", "passed_with_cautions", "go", "accepted", "accepted_with_risks", "go_recommended_with_product_gap_noted"})
+    total = max(len(stages), 1)
+    stage = _run_requirement_stage_for_summary(summary)
+    action, reason, commands = _next_human_action(summary)
+    print("AGT 下一步")
+    request_text = getattr(summary, "request", "") or summary.session_id
+    print(f"需求: {request_text[:120]}")
+    print(f"当前: {_run_requirement_stage_label(stage)} / {summary.current_state}")
+    print(f"进度: {completed}/{total} 阶段完成")
+    print(f"建议: {action}")
+    print(f"原因: {reason}")
+    if commands:
+        print("可执行:")
+        for command in commands:
+            print(f"- {command}")
+    _print_next_stage_overview(summary, stages=stages)
+    _print_next_delivery_overview(repo_root=repo_root)
+    if details:
+        print("详情:")
+        print(f"- session_id: {summary.session_id}")
+        print(f"- current_stage: {summary.current_stage}")
+        print(f"- acceptance_status: {summary.acceptance_status}")
+        print(f"- human_decision: {summary.human_decision}")
+        _print_stage_timings(store, summary.session_id)
+
+
+def _next_human_action(summary: WorkflowSummary) -> tuple[str, str, list[str]]:
+    session_flag = f"--session-id {summary.session_id}"
+    if summary.current_state in WAIT_STATES:
+        if summary.current_state == "WaitForHumanDecision":
+            return (
+                "确认最终 Go / No-Go",
+                "所有必需阶段已完成，当前只等待人工最终决策。",
+                [f"agt approve {session_flag}", f"agt reject {session_flag}"],
+            )
+        return (
+            f"审批 {_run_requirement_stage_label(summary.current_stage)}",
+            "当前阶段产物已生成，等待人工确认继续、返工或拒绝。",
+            [f"agt approve {session_flag}", f"agt feedback {summary.current_stage} '<你的返工意见>' {session_flag} --rework"],
+        )
+    if summary.blocked_reason:
+        target = _run_requirement_stage_for_summary(summary)
+        return (
+            f"处理 {_run_requirement_stage_label(target)} 阻塞",
+            summary.blocked_reason,
+            [f"agt feedback {target} '<你的返工意见>' {session_flag} --rework", f"agt run {session_flag}"],
+        )
+    if summary.current_state == "Done":
+        return ("无需操作", "流程已完成。", [])
+    return (
+        "继续运行",
+        "当前没有等待人工审批，下一步是让 AGT 继续推进流程。",
+        [f"agt run {session_flag}"],
+    )
+
+
+def _print_next_stage_overview(summary: WorkflowSummary, *, stages: list[str]) -> None:
+    print("阶段:")
+    for stage in stages:
+        status = summary.stage_statuses.get(stage, "pending")
+        marker = "✓" if status in {"completed", "approved", "passed", "passed_with_cautions", "go", "accepted", "accepted_with_risks", "go_recommended_with_product_gap_noted"} else ("→" if stage == summary.current_stage else "·")
+        print(f"- {marker} {_run_requirement_stage_label(stage)}: {status}")
+
+
+def _print_next_delivery_overview(*, repo_root: Path) -> None:
+    try:
+        completed = subprocess.run(["git", "status", "--short"], cwd=repo_root, capture_output=True, text=True, check=False, timeout=10)
+    except Exception:
+        return
+    if completed.returncode != 0:
+        return
+    product: list[str] = []
+    runtime_noise: list[str] = []
+    for raw in completed.stdout.splitlines():
+        path = raw[3:] if len(raw) > 3 else raw
+        if path.startswith(".agt/") or path.startswith(".worktrees/") or path == ".agt/workspace.json":
+            runtime_noise.append(raw)
+        else:
+            product.append(raw)
+    if product:
+        print("正式交付候选:")
+        for line in product[:12]:
+            print(f"- {line}")
+        if len(product) > 12:
+            print(f"- ... 还有 {len(product) - 12} 项")
+    if runtime_noise:
+        print("运行态噪声（默认不提交）:")
+        for line in runtime_noise[:8]:
+            print(f"- {line}")
+        if len(runtime_noise) > 8:
+            print(f"- ... 还有 {len(runtime_noise) - 8} 项")
+
 
 
 def _handle_status(args: argparse.Namespace) -> int:
