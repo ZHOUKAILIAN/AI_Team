@@ -40,6 +40,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("run", result.stdout)
         self.assertIn("panel", result.stdout)
         self.assertIn("status", result.stdout)
+        self.assertIn("continue", result.stdout)
         self.assertIn("next", result.stdout)
         self.assertNotIn("agent-run", result.stdout)
 
@@ -1225,7 +1226,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(payload["session"]["session_id"], session_id)
 
 
-    def test_next_prints_recommended_human_action(self) -> None:
+    def test_continue_prints_recommended_human_action(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
 
         with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
@@ -1261,6 +1262,60 @@ class CliTests(unittest.TestCase):
                     str(repo_root),
                     "--state-root",
                     str(state_root),
+                    "continue",
+                    "--session-id",
+                    session_id,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("AGT Continue", result.stdout)
+            self.assertIn("当前:", result.stdout)
+            self.assertIn("进度:", result.stdout)
+            self.assertIn("建议:", result.stdout)
+            self.assertIn("可执行:", result.stdout)
+            self.assertNotIn("stage_run_id", result.stdout)
+
+
+    def test_next_alias_prints_recommended_human_action(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            state_root = Path(temp_dir) / ".agent-team"
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "agent_team",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    str(state_root),
+                    "run",
+                    "--message",
+                    "执行这个需求：做一个 continue 摘要",
+                    "--executor",
+                    "dry-run",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+            session_id = _session_id_from_stdout(bootstrap.stdout)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "agent_team",
+                    "--repo-root",
+                    str(repo_root),
+                    "--state-root",
+                    str(state_root),
                     "next",
                     "--session-id",
                     session_id,
@@ -1271,12 +1326,8 @@ class CliTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("AGT 下一步", result.stdout)
-            self.assertIn("当前:", result.stdout)
-            self.assertIn("进度:", result.stdout)
+            self.assertIn("AGT Continue", result.stdout)
             self.assertIn("建议:", result.stdout)
-            self.assertIn("可执行:", result.stdout)
-            self.assertNotIn("stage_run_id", result.stdout)
 
     def test_status_prints_user_friendly_project_role_and_status(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]

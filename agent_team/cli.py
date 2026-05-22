@@ -224,7 +224,7 @@ def _normalize_command_aliases(argv: list[str]) -> list[str]:
         if token == "run-requirement":
             normalized[index] = "run"
             break
-        if token == "continue":
+        if token == "continue" and _continue_should_drive_run(normalized[index + 1 :]):
             normalized[index] = "run"
             normalized.insert(index + 1, "--continue")
             maybe_session_index = index + 2
@@ -235,6 +235,30 @@ def _normalize_command_aliases(argv: list[str]) -> list[str]:
             break
         index += 1
     return normalized
+
+
+def _continue_should_drive_run(args: list[str]) -> bool:
+    if args and not args[0].startswith("-"):
+        return True
+    run_only_flags = {
+        "--message",
+        "--executor",
+        "--executor-command",
+        "--command-timeout-seconds",
+        "--auto",
+        "--max-stage-runs",
+        "--judge",
+        "--model",
+        "--codex-model",
+        "--trace-prompts",
+        "--model-output",
+    }
+    for token in args:
+        if token in run_only_flags:
+            return True
+        if any(token.startswith(flag + "=") for flag in run_only_flags):
+            return True
+    return False
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -580,13 +604,21 @@ def build_parser() -> argparse.ArgumentParser:
     review_parser.add_argument("--session-id", help="Specific session ID to inspect.")
     review_parser.set_defaults(handler=_handle_review)
 
+    continue_parser = subparsers.add_parser(
+        "continue",
+        help="Show the recommended next human action for the latest workflow session.",
+    )
+    continue_parser.add_argument("--session-id", help="Specific session ID to inspect. Defaults to the latest session.")
+    continue_parser.add_argument("--details", action="store_true", help="Include debug/session identifiers and stage timing details.")
+    continue_parser.set_defaults(handler=_handle_continue)
+
     next_parser = subparsers.add_parser(
         "next",
-        help="Show the recommended next human action for the latest workflow session.",
+        help="Alias for `continue`.",
     )
     next_parser.add_argument("--session-id", help="Specific session ID to inspect. Defaults to the latest session.")
     next_parser.add_argument("--details", action="store_true", help="Include debug/session identifiers and stage timing details.")
-    next_parser.set_defaults(handler=_handle_next)
+    next_parser.set_defaults(handler=_handle_continue)
 
     status_parser = subparsers.add_parser(
         "status",
@@ -2444,7 +2476,7 @@ def _handle_review(args: argparse.Namespace) -> int:
     return 0
 
 
-def _handle_next(args: argparse.Namespace) -> int:
+def _handle_continue(args: argparse.Namespace) -> int:
     store = StateStore(args.state_root)
     session_id = args.session_id or store.latest_session_id()
     if not session_id:
@@ -2460,7 +2492,7 @@ def _print_next_human_summary(*, store: StateStore, summary: WorkflowSummary, re
     total = max(len(stages), 1)
     stage = _run_requirement_stage_for_summary(summary)
     action, reason, commands = _next_human_action(summary)
-    print("AGT 下一步")
+    print("AGT Continue")
     request_text = getattr(summary, "request", "") or summary.session_id
     print(f"需求: {request_text[:120]}")
     print(f"当前: {_run_requirement_stage_label(stage)} / {summary.current_state}")
