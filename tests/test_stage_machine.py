@@ -744,6 +744,59 @@ class StageMachineTests(unittest.TestCase):
         self.assertEqual(updated.acceptance_status, "recommended_go")
 
 
+
+    def test_product_definition_only_verification_blocker_routes_to_product_definition(self) -> None:
+        from agent_team.models import Finding, StageResultEnvelope, WorkflowSummary
+        from agent_team.stage_machine import StageMachine
+
+        summary = WorkflowSummary(
+            session_id="session-1",
+            runtime_mode="harness",
+            current_state="Verification",
+            current_stage="Verification",
+            route_required_stages=["ProductDefinition", "Verification", "GovernanceReview", "Acceptance", "SessionHandoff"],
+        )
+        result = StageResultEnvelope(
+            session_id="session-1",
+            stage="Verification",
+            status="completed",
+            artifact_name="verification-report.md",
+            artifact_content="# Verification Report\n",
+            findings=[Finding(source_stage="Verification", target_stage="ProductDefinition", issue="Formal product document missing.", severity="high")],
+        )
+
+        updated = StageMachine().advance(summary=summary, stage_result=result)
+
+        self.assertEqual(updated.current_state, "ProductDefinition")
+        self.assertEqual(updated.current_stage, "ProductDefinition")
+        self.assertEqual(updated.stage_statuses["Verification"], "failed")
+
+    def test_verification_blocker_without_implementation_falls_back_to_previous_required_stage(self) -> None:
+        from agent_team.models import Finding, StageResultEnvelope, WorkflowSummary
+        from agent_team.stage_machine import StageMachine
+
+        summary = WorkflowSummary(
+            session_id="session-1",
+            runtime_mode="harness",
+            current_state="Verification",
+            current_stage="Verification",
+            route_required_stages=["ProductDefinition", "Verification", "GovernanceReview", "Acceptance", "SessionHandoff"],
+        )
+        result = StageResultEnvelope(
+            session_id="session-1",
+            stage="Verification",
+            status="failed",
+            artifact_name="verification-report.md",
+            artifact_content="# Verification Report\n",
+            findings=[Finding(source_stage="Verification", target_stage="Implementation", issue="Formal product document missing.", severity="high")],
+        )
+
+        updated = StageMachine().advance(summary=summary, stage_result=result)
+
+        self.assertEqual(updated.current_state, "ProductDefinition")
+        self.assertEqual(updated.current_stage, "ProductDefinition")
+        self.assertEqual(updated.stage_statuses["Verification"], "failed")
+
     def test_verification_non_blocking_findings_advance_with_cautions(self) -> None:
         from agent_team.models import Finding, StageResultEnvelope, WorkflowSummary
         from agent_team.stage_machine import StageMachine

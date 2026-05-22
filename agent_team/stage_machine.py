@@ -149,12 +149,13 @@ class StageMachine:
         if stage_result.stage == "Verification":
             next_verification_round = summary.verification_round + 1
             if stage_result.status == "failed" or _has_blocking_findings(stage_result.findings):
+                target_stage = _verification_rework_target(summary.route_required_stages, stage_result.findings)
                 return _set_stage_status(
                     summary,
                     "Verification",
                     "failed",
-                    current_state="Implementation",
-                    current_stage="Implementation",
+                    current_state=target_stage,
+                    current_stage=target_stage,
                     verification_round=next_verification_round,
                 )
             next_state, next_stage = _transition_to_next_stage(
@@ -424,6 +425,27 @@ def _normalize_required_stages(route_required_stages: list[str]) -> list[str]:
         if stage not in ordered:
             ordered.append(stage)
     return [stage for stage in STAGES if stage in ordered]
+
+def _verification_rework_target(required_stages: list[str], findings: list[object]) -> str:
+    for finding in findings:
+        if _finding_severity(finding) not in {"critical", "high", "blocking", "blocker", "error"}:
+            continue
+        target = _finding_target_stage(finding)
+        if target in HUMAN_REWORK_TARGETS and (not required_stages or target in required_stages):
+            return target
+    if not required_stages or "Implementation" in required_stages:
+        return "Implementation"
+    for stage in reversed(ordered_required_stages(required_stages)):
+        if stage in {"ProductDefinition", "ProjectRuntime", "TechnicalDesign"}:
+            return stage
+    return "Verification"
+
+
+def _finding_target_stage(finding: object) -> str:
+    if isinstance(finding, dict):
+        return str(finding.get("target_stage", "") or "")
+    return str(getattr(finding, "target_stage", "") or "")
+
 
 def _has_blocking_findings(findings: list[object]) -> bool:
     return any(_finding_severity(item) in {"critical", "high", "blocking", "blocker", "error"} for item in findings)
