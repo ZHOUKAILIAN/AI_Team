@@ -33,6 +33,7 @@ ALLOWED_STAGE_PAYLOAD_FIELDS = frozenset(
         "verification_mode",
         "product_definition_outcome",
         "service_profile",
+        "verification_profile",
         "flow_ids",
         "evidence_paths",
     }
@@ -81,6 +82,7 @@ def envelope_from_stage_payload(
         "verification_mode": payload.get("verification_mode", ""),
         "product_definition_outcome": payload.get("product_definition_outcome", ""),
         "service_profile": payload.get("service_profile", ""),
+        "verification_profile": payload.get("verification_profile", ""),
         "flow_ids": payload.get("flow_ids", []),
         "evidence_paths": payload.get("evidence_paths", []),
         "supplemental_artifacts": {},

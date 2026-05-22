@@ -88,6 +88,7 @@ class StateTests(unittest.TestCase):
                 route_required_stages=["TechnicalDesign", "Implementation", "Verification"],
                 route_stage_decisions={"ProductDefinition": {"decision": "skipped", "reason": "no_l1_delta"}},
                 verification_mode="static_only",
+                verification_profile="service_health",
                 product_definition_outcome="no_l1_delta",
             )
 
@@ -100,6 +101,7 @@ class StateTests(unittest.TestCase):
                 {"ProductDefinition": {"decision": "skipped", "reason": "no_l1_delta"}},
             )
             self.assertEqual(loaded.verification_mode, "static_only")
+            self.assertEqual(loaded.verification_profile, "service_health")
             self.assertEqual(loaded.product_definition_outcome, "no_l1_delta")
 
     def test_state_store_persists_codex_exec_resume_state(self) -> None:

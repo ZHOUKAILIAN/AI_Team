@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from .memory_layers import MemoryRetrievalResult, retrieve_role_memory
-from .models import StageContract
+from .models import EvidenceRequirement, StageContract
 from .roles import load_role_profiles
 from .state import StateStore
 from .stage_inputs import stage_input_artifact_paths
@@ -47,11 +47,15 @@ def build_stage_contract(
     role = roles.get(stage)
     registry = default_policy_registry()
     policy = registry.get(stage)
-    retrieved_memory = retrieve_role_memory(
-        state_root=state_store.root,
-        role_name=stage,
-        query=session.request,
-        max_results=8,
+    retrieved_memory = (
+        None
+        if stage == "SessionHandoff"
+        else retrieve_role_memory(
+            state_root=state_store.root,
+            role_name=stage,
+            query=session.request,
+            max_results=8,
+        )
     )
 
     input_artifacts = stage_input_artifact_paths(
@@ -59,13 +63,15 @@ def build_stage_contract(
         stage=stage,
     )
     required_outputs = list(policy.required_outputs)
+    evidence_specs = _evidence_specs_for_summary(stage=stage, summary=summary, base_specs=policy.evidence_specs)
+    evidence_requirements = [spec.name for spec in evidence_specs if spec.required]
 
     contract_id = _build_contract_id(
         session_id=session_id,
         stage=stage,
         summary=summary,
         required_outputs=required_outputs,
-        evidence_requirements=policy.evidence_requirements,
+        evidence_requirements=evidence_requirements,
     )
 
     return StageContract(
@@ -76,10 +82,41 @@ def build_stage_contract(
         input_artifacts=input_artifacts,
         required_outputs=list(policy.required_outputs),
         forbidden_actions=list(COMMON_FORBIDDEN_ACTIONS),
-        evidence_requirements=policy.evidence_requirements,
-        evidence_specs=list(policy.evidence_specs),
+        evidence_requirements=evidence_requirements,
+        evidence_specs=evidence_specs,
         role_context=_compose_role_context(role, retrieved_memory),
     )
+
+
+def _evidence_specs_for_summary(*, stage: str, summary, base_specs: list[EvidenceRequirement]) -> list[EvidenceRequirement]:
+    specs = list(base_specs)
+    if stage != "Verification":
+        return specs
+    profile = str(getattr(summary, "verification_profile", "") or "").strip()
+    if profile != "service_health":
+        return specs
+    names = {spec.name for spec in specs}
+    additions = [
+        EvidenceRequirement(
+            name="service_health_contract",
+            allowed_kinds=["command", "artifact", "report"],
+            required_fields=["summary"],
+        ),
+        EvidenceRequirement(
+            name="service_health_in_process",
+            allowed_kinds=["command", "artifact", "report"],
+            required_fields=["summary"],
+        ),
+        EvidenceRequirement(
+            name="service_health_capability",
+            allowed_kinds=["command", "artifact", "report"],
+            required_fields=["summary"],
+        ),
+    ]
+    for spec in additions:
+        if spec.name not in names:
+            specs.append(spec)
+    return specs
 
 
 def _build_contract_id(

@@ -129,6 +129,70 @@ class StageContractTests(unittest.TestCase):
         self.assertIn("Review empty-state behavior before handoff.", contract.role_context)
         self.assertIn("Require visible empty-state evidence", contract.role_context)
 
+
+    def test_service_health_verification_profile_adds_required_evidence(self) -> None:
+        from dataclasses import replace
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
+
+        repo_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("Add minimal API health service", runtime_mode="harness")
+            summary = store.load_workflow_summary(session.session_id)
+            store.save_workflow_summary(
+                session,
+                replace(
+                    summary,
+                    current_state="Verification",
+                    current_stage="Verification",
+                    verification_profile="service_health",
+                ),
+            )
+
+            contract = build_stage_contract(
+                repo_root=repo_root,
+                state_store=store,
+                session_id=session.session_id,
+                stage="Verification",
+            )
+
+        self.assertIn("independent_verification", contract.evidence_requirements)
+        self.assertIn("service_health_contract", contract.evidence_requirements)
+        self.assertIn("service_health_in_process", contract.evidence_requirements)
+        self.assertIn("service_health_capability", contract.evidence_requirements)
+
+    def test_session_handoff_contract_does_not_include_retrieved_memory(self) -> None:
+        from agent_team.models import Finding
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
+
+        repo_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("Add minimal API health service", runtime_mode="harness")
+            store.apply_learning(
+                Finding(
+                    source_stage="GovernanceReview",
+                    target_stage="SessionHandoff",
+                    issue="Old governance mapping defect should not leak into unrelated handoffs.",
+                    lesson="Mention agt-control/project/doc-map.json governance mapping.",
+                    proposed_context_update="Old governance mapping issue from another session.",
+                    proposed_contract_update="Old unrelated requirement.",
+                )
+            )
+
+            contract = build_stage_contract(
+                repo_root=repo_root,
+                state_store=store,
+                session_id=session.session_id,
+                stage="SessionHandoff",
+            )
+
+        self.assertIn("Current-Session Only", contract.role_context)
+        self.assertNotIn("Relevant Memory", contract.role_context)
+        self.assertNotIn("doc-map.json governance mapping", contract.role_context)
+
     def test_implementation_contract_excludes_state_artifacts_from_inputs(self) -> None:
         from agent_team.execution_context import build_stage_execution_context
         from agent_team.models import EvidenceItem, StageResultEnvelope

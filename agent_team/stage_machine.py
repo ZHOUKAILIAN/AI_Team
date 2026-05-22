@@ -43,7 +43,7 @@ class StageMachine:
             )
 
         if stage_result.stage == "Route":
-            required_stages, stage_decisions, verification_mode = _parse_route_packet(stage_result)
+            required_stages, stage_decisions, verification_mode, verification_profile = _parse_route_packet(stage_result)
             next_state, next_stage = _transition_to_next_stage(required_stages=required_stages, after_stage="Route")
             updated = _set_stage_status(
                 summary,
@@ -54,6 +54,7 @@ class StageMachine:
                 route_required_stages=required_stages,
                 route_stage_decisions=stage_decisions,
                 verification_mode=verification_mode,
+                verification_profile=verification_profile,
             )
             for stage_name, item in stage_decisions.items():
                 if item.get("decision") == "skipped":
@@ -456,7 +457,7 @@ def _finding_severity(finding: object) -> str:
         return str(finding.get("severity", "") or "").strip().lower()
     return str(getattr(finding, "severity", "") or "").strip().lower()
 
-def _parse_route_packet(stage_result: StageResultEnvelope) -> tuple[list[str], dict[str, dict[str, str]], str]:
+def _parse_route_packet(stage_result: StageResultEnvelope) -> tuple[list[str], dict[str, dict[str, str]], str, str]:
     payload = json.loads(stage_result.artifact_content)
     required_stages = _route_required_stage_names(payload.get("required_stages", []))
     if not required_stages:
@@ -467,7 +468,8 @@ def _parse_route_packet(stage_result: StageResultEnvelope) -> tuple[list[str], d
         for name, item in dict(payload.get("stage_decisions", {})).items()
     }
     verification_mode = str(payload.get("verification_mode", ""))
-    return required_stages, stage_decisions, verification_mode
+    verification_profile = str(payload.get("verification_profile", payload.get("service_profile", "")))
+    return required_stages, stage_decisions, verification_mode, verification_profile
 
 
 def _requires_approval_wait(required_stages: list[str], stage: str) -> bool:

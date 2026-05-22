@@ -252,6 +252,7 @@ class StateStore:
             route_required_stages=route_required_stages,
             route_stage_decisions=route_stage_decisions,
             verification_mode=str(payload.get("verification_mode", "")),
+            verification_profile=str(payload.get("verification_profile", payload.get("service_profile", ""))),
             product_definition_outcome=str(payload.get("product_definition_outcome", "")),
             model_output_format_stats=model_output_format_stats,
             provider_model_metadata=(
