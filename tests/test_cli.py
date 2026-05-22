@@ -1343,9 +1343,9 @@ class CliTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("AGT Continue", result.stdout)
-            self.assertIn("当前:", result.stdout)
-            self.assertIn("进度:", result.stdout)
-            self.assertIn("建议:", result.stdout)
+            self.assertIn("当前：", result.stdout)
+            self.assertIn("进度：", result.stdout)
+            self.assertIn("建议：", result.stdout)
             self.assertIn("可执行:", result.stdout)
             self.assertNotIn("stage_run_id", result.stdout)
 
@@ -1397,7 +1397,7 @@ class CliTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("AGT Continue", result.stdout)
-            self.assertIn("建议:", result.stdout)
+            self.assertIn("建议：", result.stdout)
 
     def test_status_prints_user_friendly_project_role_and_status(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
