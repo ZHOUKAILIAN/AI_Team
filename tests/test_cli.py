@@ -1,3 +1,4 @@
+import argparse
 import io
 import json
 import subprocess
@@ -1398,6 +1399,76 @@ class CliTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("AGT Continue", result.stdout)
             self.assertIn("建议：", result.stdout)
+
+
+    def test_continue_tty_prints_numbered_menu_and_exits(self) -> None:
+        from agent_team.models import WorkflowSummary
+        from agent_team.state import StateStore
+        from agent_team.cli import _handle_continue
+
+        repo_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            state_root = Path(temp_dir) / ".agent-team"
+            store = StateStore(state_root)
+            session = store.create_session("执行这个需求：菜单式 continue", initiator="human")
+            store.save_workflow_summary(
+                session,
+                WorkflowSummary(
+                    session_id=session.session_id,
+                    runtime_mode="harness",
+                    current_state="WaitForTechnicalDesignApproval",
+                    current_stage="TechnicalDesign",
+                    stage_statuses={"Route": "completed", "TechnicalDesign": "drafted"},
+                    route_required_stages=["TechnicalDesign", "Verification", "GovernanceReview", "Acceptance", "SessionHandoff"],
+                ),
+            )
+            args = argparse.Namespace(repo_root=repo_root, state_root=state_root, session_id=session.session_id, details=False)
+
+            with patch("sys.stdin", TtyStringIO("4\n")), patch("sys.stdout", TtyStringIO()) as stdout:
+                code = _handle_continue(args)
+
+            self.assertEqual(code, 0)
+            output = stdout.getvalue()
+            self.assertIn("请选择下一步", output)
+            self.assertIn("1. 审批 Technical Design（推荐）", output)
+            self.assertIn("2. 提修改意见 / 返工", output)
+            self.assertIn("4. 退出", output)
+            self.assertIn("未修改流程状态", output)
+
+    def test_continue_tty_feedback_uses_template_menu(self) -> None:
+        from agent_team.models import WorkflowSummary
+        from agent_team.state import StateStore
+        from agent_team.cli import _handle_continue
+
+        repo_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            state_root = Path(temp_dir) / ".agent-team"
+            store = StateStore(state_root)
+            session = store.create_session("执行这个需求：模板化反馈", initiator="human")
+            store.save_workflow_summary(
+                session,
+                WorkflowSummary(
+                    session_id=session.session_id,
+                    runtime_mode="harness",
+                    current_state="WaitForTechnicalDesignApproval",
+                    current_stage="TechnicalDesign",
+                    stage_statuses={"Route": "completed", "TechnicalDesign": "drafted"},
+                    route_required_stages=["TechnicalDesign", "Verification", "GovernanceReview", "Acceptance", "SessionHandoff"],
+                ),
+            )
+            args = argparse.Namespace(repo_root=repo_root, state_root=state_root, session_id=session.session_id, details=False)
+
+            with patch("sys.stdin", TtyStringIO("2\n1\n5\n\n")), patch("sys.stdout", TtyStringIO()) as stdout:
+                code = _handle_continue(args)
+
+            self.assertEqual(code, 0)
+            output = stdout.getvalue()
+            self.assertIn("返工到哪个阶段", output)
+            self.assertIn("你想提哪类修改意见", output)
+            self.assertIn("验证口径不对", output)
+            updated = store.load_workflow_summary(session.session_id)
+            self.assertEqual(updated.current_state, "TechnicalDesign")
+            self.assertEqual(updated.stage_statuses["TechnicalDesign"], "rework_requested")
 
     def test_status_prints_user_friendly_project_role_and_status(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]

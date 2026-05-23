@@ -2556,41 +2556,120 @@ def _handle_continue(args: argparse.Namespace) -> int:
 
 def _prompt_continue_action(*, args: argparse.Namespace, store: StateStore, summary: WorkflowSummary) -> int:
     action, _reason, _commands = _next_human_action(summary)
-    prompt = "Enter 执行建议"
-    if summary.current_state in WAIT_STATES:
-        prompt += "，r 返工，d 详情，q 退出"
-    elif summary.blocked_reason:
-        prompt += "，r 自定义返工，d 详情，q 退出"
-    elif summary.current_state == "Done":
-        prompt = "按 Enter 退出，d 详情"
-    else:
-        prompt += "，d 详情，q 退出"
-    choice = input(f"\n{prompt}: ").strip().lower()
-    if choice in {"q", "quit", "退出"}:
-        print("已退出。")
+    options = _continue_menu_options(summary=summary, recommended_action=action)
+    _print_continue_menu(options)
+    choice = _prompt_menu_choice(options, default_key="1")
+    if choice == "exit":
+        _print_continue_exit_hint(summary)
         return 0
-    if choice in {"d", "detail", "详情"}:
+    if choice == "detail":
         _print_next_human_summary(store=store, summary=summary, repo_root=args.repo_root, details=True)
         return 0
-    if choice in {"r", "fix", "返工"}:
-        target = _prompt_rework_stage(summary)
-        issue = input("请输入返工意见: ").strip()
-        if not issue:
-            print("未输入返工意见，已取消。")
+    if choice == "feedback":
+        return _prompt_continue_feedback(args=args, summary=summary, default_target=None)
+    if choice == "recommended":
+        if summary.current_state == "Done":
+            _print_continue_exit_hint(summary)
             return 0
-        fix_args = argparse.Namespace(
-            repo_root=args.repo_root,
-            state_root=args.state_root,
-            session_id=summary.session_id,
-            stage=target,
-            issue=issue,
-            severity="high",
-            no_rework=False,
-        )
-        return _handle_fix(fix_args)
+        return _run_recommended_continue_action(args=args, summary=summary, action_label=action)
+    return 0
+
+
+@dataclass(frozen=True)
+class _ContinueMenuOption:
+    key: str
+    action: str
+    label: str
+    aliases: tuple[str, ...] = ()
+
+
+def _continue_menu_options(*, summary: WorkflowSummary, recommended_action: str) -> list[_ContinueMenuOption]:
     if summary.current_state == "Done":
+        return [
+            _ContinueMenuOption("1", "detail", "查看详情"),
+            _ContinueMenuOption("2", "exit", "退出（推荐）", aliases=("q", "quit", "退出", "enter", "")),
+        ]
+    return [
+        _ContinueMenuOption("1", "recommended", f"{recommended_action}（推荐）", aliases=("enter", "")),
+        _ContinueMenuOption("2", "feedback", "提修改意见 / 返工", aliases=("r", "fix", "返工")),
+        _ContinueMenuOption("3", "detail", "查看详情", aliases=("d", "detail", "详情")),
+        _ContinueMenuOption("4", "exit", "退出", aliases=("q", "quit", "退出")),
+    ]
+
+
+def _print_continue_menu(options: list[_ContinueMenuOption]) -> None:
+    print("\n请选择下一步：\n")
+    for option in options:
+        print(f"  {option.key}. {option.label}")
+
+
+def _prompt_menu_choice(options: list[_ContinueMenuOption], *, default_key: str) -> str:
+    by_input: dict[str, str] = {}
+    for option in options:
+        by_input[option.key] = option.action
+        for alias in option.aliases:
+            by_input[alias] = option.action
+    raw = input(f"\n选择 [{default_key}]: ").strip().lower()
+    if raw == "":
+        raw = default_key
+    action = by_input.get(raw)
+    if action:
+        return action
+    print("未识别选择，已退出；未修改流程状态。")
+    return "exit"
+
+
+def _print_continue_exit_hint(summary: WorkflowSummary) -> None:
+    if summary.current_state == "Done":
+        print("已退出。流程已经结束；如需回看可运行：agt detail")
+    else:
+        print("已退出，未修改流程状态。稍后可继续运行：agt continue")
+
+
+def _prompt_continue_feedback(*, args: argparse.Namespace, summary: WorkflowSummary, default_target: str | None) -> int:
+    target = default_target or _prompt_rework_stage(summary)
+    issue = _prompt_feedback_issue()
+    if not issue:
+        print("未选择修改意见，已取消；未修改流程状态。")
         return 0
-    return _run_recommended_continue_action(args=args, summary=summary, action_label=action)
+    fix_args = argparse.Namespace(
+        repo_root=args.repo_root,
+        state_root=args.state_root,
+        session_id=summary.session_id,
+        stage=target,
+        issue=issue,
+        severity="high",
+        no_rework=False,
+    )
+    return _handle_fix(fix_args)
+
+
+def _prompt_feedback_issue() -> str:
+    templates = [
+        ("1", "范围不对", "当前实现/设计范围不符合需求边界，请重新收敛范围并明确非目标。"),
+        ("2", "缺少正式文档或证据", "缺少正式文档或可审计证据，请补齐后再继续。"),
+        ("3", "命名或状态定义不满意", "命名或状态定义不符合预期，请重新梳理语义并说明每个状态/字段的边界。"),
+        ("4", "实现越界", "实现超出了本轮批准范围，请移除越界内容并保持最小交付。"),
+        ("5", "验证口径不对", "验证口径不够真实或不可审计，请补充可复现证据并明确 coverage gap。"),
+        ("6", "其他，自定义", ""),
+        ("7", "取消", ""),
+    ]
+    print("\n你想提哪类修改意见？\n")
+    for key, label, _template in templates:
+        print(f"  {key}. {label}")
+    raw = input("\n选择 [6]: ").strip() or "6"
+    selected = next((item for item in templates if item[0] == raw), None)
+    if selected is None or selected[0] == "7":
+        return ""
+    template = selected[2]
+    if selected[0] == "6":
+        return input("请输入修改意见: ").strip()
+    print("\n默认意见：")
+    print(template)
+    custom = input("补充说明，直接回车使用默认意见: ").strip()
+    if custom:
+        return f"{template} 补充：{custom}"
+    return template
 
 
 def _run_recommended_continue_action(*, args: argparse.Namespace, summary: WorkflowSummary, action_label: str) -> int:
@@ -2600,12 +2679,7 @@ def _run_recommended_continue_action(*, args: argparse.Namespace, summary: Workf
     if summary.blocked_reason:
         target = _run_requirement_stage_for_summary(summary)
         print(f"\n→ 需要返工：{_run_requirement_stage_label(target)}")
-        issue = input("请输入返工意见: ").strip()
-        if not issue:
-            print("未输入返工意见，已取消。")
-            return 0
-        fix_args = argparse.Namespace(repo_root=args.repo_root, state_root=args.state_root, session_id=summary.session_id, stage=target, issue=issue, severity="high", no_rework=False)
-        return _handle_fix(fix_args)
+        return _prompt_continue_feedback(args=args, summary=summary, default_target=target)
     print(f"\n→ {action_label}")
     run_args = argparse.Namespace(**vars(args))
     run_args.session_id = summary.session_id
@@ -2620,11 +2694,11 @@ def _prompt_rework_stage(summary: WorkflowSummary) -> str:
     current = _run_requirement_stage_for_summary(summary)
     if current not in stages:
         stages.insert(0, current)
-    print("返工阶段:")
+    print("\n返工到哪个阶段？\n")
     for index, stage in enumerate(stages, start=1):
-        default = "（默认）" if stage == current else ""
-        print(f"{index}. {_run_requirement_stage_label(stage)} {default}")
-    raw = input(f"选择 [1]: ").strip()
+        default = "（推荐）" if stage == current else ""
+        print(f"  {index}. {_run_requirement_stage_label(stage)} {default}")
+    raw = input("\n选择 [1]: ").strip()
     if not raw:
         return stages[0]
     try:
