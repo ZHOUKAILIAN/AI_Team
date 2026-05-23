@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .models import AcceptanceContract, EvidenceItem, GateResult, SessionRecord, StageContract, StageOutput, StageResultEnvelope
+from .models import AcceptanceContract, EvidenceItem, Finding, GateResult, SessionRecord, StageContract, StageOutput, StageResultEnvelope
 from .review_gates import apply_stage_gates
 
 
@@ -47,6 +47,9 @@ def evaluate_candidate(
         evidence=evidence_items,
         missing_evidence=missing_evidence,
     )
+    audit_findings = _stage_audit_findings(contract=contract, result=normalized, evidence=evidence_items)
+    if audit_findings:
+        normalized.findings.extend(audit_findings)
 
     if contract.session_id != normalized.session_id:
         structural_issues.append("stage result session_id does not match contract")
@@ -147,6 +150,111 @@ def normalize_stage_result(
         blocked_reason=gated.blocked_reason,
         supplemental_artifacts=dict(gated.supplemental_artifacts),
     )
+
+
+def _stage_audit_findings(
+    *,
+    contract: StageContract,
+    result: StageResultEnvelope,
+    evidence: list[EvidenceItem],
+) -> list[Finding]:
+    if contract.stage != "GovernanceReview":
+        return []
+    if not _contract_requires_service_health_audit(contract):
+        return []
+    return _service_health_governance_findings(result=result, evidence=evidence)
+
+
+def _contract_requires_service_health_audit(contract: StageContract) -> bool:
+    evidence_names = set(contract.evidence_requirements) | {spec.name for spec in contract.evidence_specs}
+    return "service_health_evidence_audit" in evidence_names
+
+
+def _service_health_governance_findings(*, result: StageResultEnvelope, evidence: list[EvidenceItem]) -> list[Finding]:
+    text = _combined_result_text(result, evidence).lower()
+    findings: list[Finding] = []
+
+    required_tokens = {
+        "service_health_contract": "service health contract evidence",
+        "service_health_in_process": "service health in-process evidence",
+        "service_health_capability": "service health runtime capability evidence",
+    }
+    missing = [label for token, label in required_tokens.items() if token not in text]
+    if missing:
+        findings.append(
+            Finding(
+                source_stage="GovernanceReview",
+                target_stage="Verification",
+                issue="GovernanceReview did not audit required service_health evidence keys: " + ", ".join(missing),
+                severity="high",
+                evidence_kind="service_health_evidence_audit",
+                required_evidence=list(required_tokens),
+                completion_signal="Audit service_health_contract, service_health_in_process, and service_health_capability evidence before governance can pass.",
+            )
+        )
+
+    has_real_http_gap = "real_http_evidence_pending" in text or "loopback" in text and "pending" in text
+    has_capability_reason = any(
+        phrase in text
+        for phrase in (
+            "eperm",
+            "operation not permitted",
+            "capability",
+            "environment does not allow",
+            "环境不允许",
+            "禁止监听",
+        )
+    )
+    if has_real_http_gap and not has_capability_reason:
+        findings.append(
+            Finding(
+                source_stage="GovernanceReview",
+                target_stage="Verification",
+                issue="real_http_evidence_pending is recorded without an auditable runtime capability reason.",
+                severity="high",
+                evidence_kind="service_health_evidence_audit",
+                required_evidence=["service_health_capability"],
+                completion_signal="Record why real loopback HTTP evidence is unavailable, including the observed capability failure.",
+            )
+        )
+
+    if "real_http_evidence_pending" in text and "passed" in text and "gap" not in text and "caution" not in text and "condition" not in text:
+        findings.append(
+            Finding(
+                source_stage="GovernanceReview",
+                target_stage="Verification",
+                issue="real_http_evidence_pending must be treated as a coverage gap or condition, not silently accepted as complete.",
+                severity="high",
+                evidence_kind="service_health_evidence_audit",
+                required_evidence=["service_health_capability"],
+                completion_signal="Mark missing real HTTP evidence as a gap/condition or provide real loopback HTTP evidence.",
+            )
+        )
+
+    return findings
+
+
+def _combined_result_text(result: StageResultEnvelope, evidence: list[EvidenceItem]) -> str:
+    parts = [
+        result.artifact_name,
+        result.artifact_content,
+        result.journal,
+        result.summary,
+        result.blocked_reason,
+    ]
+    parts.extend(str(value) for value in result.supplemental_artifacts.values())
+    for item in evidence:
+        parts.extend(
+            [
+                item.name,
+                item.kind,
+                item.summary,
+                item.artifact_path,
+                item.command,
+                str(item.metadata),
+            ]
+        )
+    return "\n".join(part for part in parts if part)
 
 
 def _missing_outputs(*, contract: StageContract, result: StageResultEnvelope) -> list[str]:

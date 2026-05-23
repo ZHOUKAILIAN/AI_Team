@@ -162,6 +162,37 @@ class StageContractTests(unittest.TestCase):
         self.assertIn("service_health_in_process", contract.evidence_requirements)
         self.assertIn("service_health_capability", contract.evidence_requirements)
 
+
+    def test_service_health_governance_requires_audit_evidence(self) -> None:
+        from dataclasses import replace
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
+
+        repo_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("Add minimal API health service", runtime_mode="harness")
+            summary = store.load_workflow_summary(session.session_id)
+            store.save_workflow_summary(
+                session,
+                replace(
+                    summary,
+                    current_state="GovernanceReview",
+                    current_stage="GovernanceReview",
+                    verification_profile="service_health",
+                ),
+            )
+
+            contract = build_stage_contract(
+                repo_root=repo_root,
+                state_store=store,
+                session_id=session.session_id,
+                stage="GovernanceReview",
+            )
+
+        self.assertIn("layer_governance_review", contract.evidence_requirements)
+        self.assertIn("service_health_evidence_audit", contract.evidence_requirements)
+
     def test_session_handoff_contract_does_not_include_retrieved_memory(self) -> None:
         from agent_team.models import Finding
         from agent_team.stage_contracts import build_stage_contract
