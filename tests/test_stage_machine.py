@@ -505,6 +505,38 @@ class StageMachineTests(unittest.TestCase):
             "SessionHandoff",
         ])
 
+
+    def test_route_document_delivery_adds_implementation(self) -> None:
+        from agent_team.models import StageResultEnvelope, WorkflowSummary
+        from agent_team.stage_machine import StageMachine
+
+        route_packet = (
+            '{"required_stages":["ProductDefinition","TechnicalDesign"],'
+            '"delivery_type":"document_delivery",'
+            '"required_artifacts":["docs/technical-design/agent-cli-session-memory-discovery.md","README.md"],'
+            '"acceptance_criteria":["Implementation must create the repository document"]}'
+        )
+        summary = StageMachine().advance(
+            summary=WorkflowSummary(session_id="session-1", runtime_mode="harness", current_state="Route", current_stage="Route"),
+            stage_result=StageResultEnvelope(
+                session_id="session-1",
+                stage="Route",
+                status="completed",
+                artifact_name="route-packet.json",
+                artifact_content=route_packet,
+            ),
+        )
+
+        self.assertEqual(summary.route_required_stages, [
+            "ProductDefinition",
+            "TechnicalDesign",
+            "Implementation",
+            "Verification",
+            "GovernanceReview",
+            "Acceptance",
+            "SessionHandoff",
+        ])
+
     def test_empty_route_still_preserves_mandatory_closure_chain(self) -> None:
         from agent_team.models import StageResultEnvelope, WorkflowSummary
         from agent_team.stage_machine import StageMachine
