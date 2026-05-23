@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.2.0b11] - 2026-05-23
+
+- Added human-friendly `agt continue` numbered menus, feedback templates, short action commands, and lightweight TTY loading.
+- Defaulted Codex CLI runs to ephemeral sessions while keeping persistent resume as an explicit compatibility option.
+- Improved Codex output recovery, timeout cleanup, stale blocked-reason handling, and mandatory workflow closure stages.
+- Added service-health verification profile support with required health-contract, in-process, and runtime-capability evidence.
+- Added GovernanceReview auditing for service-health evidence and real HTTP coverage gaps.
+- Reduced SessionHandoff cross-session context contamination by isolating handoff context to current-session facts.
+
 ## [0.2.0b10] - 2026-05-11
 
 - Added `agent-team update` for safe project-level Agent Team configuration upgrades.
