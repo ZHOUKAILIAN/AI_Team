@@ -377,6 +377,42 @@ class StateTests(unittest.TestCase):
             self.assertEqual(store.active_stage_run(first_session.session_id, stage="ProductDefinition").state, "RUNNING")
             self.assertEqual(store.active_stage_run(second_session.session_id, stage="ProductDefinition").state, "SUBMITTED")
 
+
+    def test_create_stage_run_blocks_stale_active_run_without_stage_result(self) -> None:
+        from agent_team.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("stale active run")
+            first = store.create_stage_run(
+                session_id=session.session_id,
+                stage="Verification",
+                contract_id="contract-1",
+                required_outputs=["verification.md"],
+                required_evidence=["independent_verification"],
+            )
+
+            stale = store.load_stage_run(first.run_id)
+            stale_path = store.stage_result_path(session, "Verification", first.attempt)
+            payload = stale.to_dict()
+            payload["updated_at"] = "2000-01-01T00:00:00+00:00"
+            import json
+            stale_path.write_text(json.dumps(payload))
+
+            second = store.create_stage_run(
+                session_id=session.session_id,
+                stage="Verification",
+                contract_id="contract-2",
+                required_outputs=["verification.md"],
+                required_evidence=["independent_verification"],
+            )
+            first_reloaded = store.load_stage_run(first.run_id)
+
+        self.assertEqual(first_reloaded.state, "BLOCKED")
+        self.assertIn("Stale active stage run", first_reloaded.blocked_reason)
+        self.assertEqual(second.state, "RUNNING")
+        self.assertEqual(second.attempt, 2)
+
     def test_create_stage_run_rejects_existing_active_run(self) -> None:
         from agent_team.state import StageRunStateError, StateStore
 

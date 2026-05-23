@@ -358,6 +358,9 @@ class StateStore:
     ) -> StageRunRecord:
         session = self.load_session(session_id)
         active = self.active_stage_run(session_id, stage=stage)
+        if active is not None and self._active_run_is_stale_without_stage_result(session, active):
+            self._mark_stale_stage_run_blocked(session, active)
+            active = self.active_stage_run(session_id, stage=stage)
         if active is not None:
             raise StageRunStateError(
                 f"Active stage run already exists for {stage}: {active.run_id} ({active.state})."
@@ -381,6 +384,64 @@ class StateStore:
         )
         self._save_stage_run(session, run)
         return run
+
+    def _active_run_is_stale_without_stage_result(self, session: SessionRecord, run: StageRunRecord) -> bool:
+        if not self._active_run_has_no_worker_result(session, run):
+            return False
+        return self._stage_run_age_seconds(run) >= 300
+
+    def _active_run_has_no_worker_result(self, session: SessionRecord, run: StageRunRecord) -> bool:
+        stage_results = self._stage_attempt_dir(session, run.stage, run.attempt, "stage-results")
+        if not stage_results.exists():
+            return True
+        stage_slug = _stage_slug(run.stage)
+        result_paths = [
+            path
+            for path in stage_results.glob("*")
+            if path.name != f"{stage_slug}-stage-result.json"
+            and not path.name.endswith("-run-state.json")
+            and not path.name.endswith("-runtime-trace.json")
+        ]
+        return not result_paths
+
+    def _stage_run_age_seconds(self, run: StageRunRecord) -> float:
+        timestamp = run.updated_at or run.created_at
+        if not timestamp:
+            return 0.0
+        try:
+            parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except ValueError:
+            return 0.0
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - parsed).total_seconds()
+
+    def _mark_stale_stage_run_blocked(self, session: SessionRecord, run: StageRunRecord) -> StageRunRecord:
+        now = self._timestamp()
+        gate = GateResult(
+            status="BLOCKED",
+            reason=(
+                f"Stale active stage run {run.run_id} ({run.state}) had no stage-result artifacts; "
+                "marked blocked so a new attempt can start."
+            ),
+            findings=[
+                Finding(
+                    source_stage=run.stage,
+                    target_stage=run.stage,
+                    issue="Previous active stage run was interrupted before writing a stage result.",
+                    severity="high",
+                    evidence_kind="runtime_state",
+                    completion_signal="Rerun the stage to produce a complete stage result.",
+                )
+            ],
+            checked_at=now,
+        )
+        return self.update_stage_run(
+            run,
+            state="BLOCKED",
+            gate_result=gate,
+            blocked_reason=gate.reason,
+        )
 
     def submit_stage_run_result(self, run_id: str, result: StageResultEnvelope) -> StageRunRecord:
         run = self._load_stage_run_for_session(result.session_id, run_id)
