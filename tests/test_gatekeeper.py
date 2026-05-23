@@ -84,6 +84,88 @@ class GatekeeperTests(unittest.TestCase):
 
             self.assertEqual(gate.status, "PASSED")
 
+
+    def test_service_health_governance_audit_blocks_missing_key_review(self) -> None:
+        from agent_team.gatekeeper import Gatekeeper
+        from agent_team.models import EvidenceRequirement, StageContract, StageResultEnvelope
+        from agent_team.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("add health api")
+            contract = StageContract(
+                session_id=session.session_id,
+                stage="GovernanceReview",
+                contract_id="contract-governance",
+                goal="Review",
+                required_outputs=["governance-review.md"],
+                evidence_requirements=["layer_governance_review", "service_health_evidence_audit"],
+                evidence_specs=[
+                    EvidenceRequirement(name="layer_governance_review", allowed_kinds=["report"], required_fields=["summary"]),
+                    EvidenceRequirement(name="service_health_evidence_audit", allowed_kinds=["report"], required_fields=["summary"]),
+                ],
+            )
+            result = StageResultEnvelope(
+                session_id=session.session_id,
+                stage="GovernanceReview",
+                status="completed",
+                artifact_name="governance-review.md",
+                artifact_content="# Governance\nLooks fine but does not name the required service health evidence keys.\n",
+                contract_id="contract-governance",
+                evidence=[
+                    evidence("layer_governance_review", kind="report", summary="reviewed"),
+                    evidence("service_health_evidence_audit", kind="report", summary="audited"),
+                ],
+            )
+
+            gate = Gatekeeper().evaluate(session=session, contract=contract, result=result, acceptance_contract=None)
+
+        self.assertEqual(gate.status, "PASSED")
+        self.assertTrue(any(finding.severity == "high" for finding in gate.findings))
+        self.assertIn("service_health evidence keys", gate.findings[0].issue)
+
+    def test_service_health_governance_audit_passes_gap_with_capability_reason(self) -> None:
+        from agent_team.gatekeeper import Gatekeeper
+        from agent_team.models import EvidenceRequirement, StageContract, StageResultEnvelope
+        from agent_team.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("add health api")
+            contract = StageContract(
+                session_id=session.session_id,
+                stage="GovernanceReview",
+                contract_id="contract-governance",
+                goal="Review",
+                required_outputs=["governance-review.md"],
+                evidence_requirements=["layer_governance_review", "service_health_evidence_audit"],
+                evidence_specs=[
+                    EvidenceRequirement(name="layer_governance_review", allowed_kinds=["report"], required_fields=["summary"]),
+                    EvidenceRequirement(name="service_health_evidence_audit", allowed_kinds=["report"], required_fields=["summary"]),
+                ],
+            )
+            result = StageResultEnvelope(
+                session_id=session.session_id,
+                stage="GovernanceReview",
+                status="completed",
+                artifact_name="governance-review.md",
+                artifact_content=(
+                    "# Governance\n"
+                    "Audited service_health_contract, service_health_in_process, and service_health_capability.\n"
+                    "real_http_evidence_pending is accepted as a condition/gap because loopback bind failed with EPERM operation not permitted.\n"
+                ),
+                contract_id="contract-governance",
+                evidence=[
+                    evidence("layer_governance_review", kind="report", summary="reviewed"),
+                    evidence("service_health_evidence_audit", kind="report", summary="audited service_health_contract service_health_in_process service_health_capability real_http_evidence_pending EPERM gap"),
+                ],
+            )
+
+            gate = Gatekeeper().evaluate(session=session, contract=contract, result=result, acceptance_contract=None)
+
+        self.assertEqual(gate.status, "PASSED")
+        self.assertEqual(gate.findings, [])
+
     def test_worker_blocked_status_blocks_gate_without_advancing(self) -> None:
         from agent_team.gatekeeper import Gatekeeper
         from agent_team.models import StageContract, StageResultEnvelope

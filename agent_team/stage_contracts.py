@@ -90,29 +90,41 @@ def build_stage_contract(
 
 def _evidence_specs_for_summary(*, stage: str, summary, base_specs: list[EvidenceRequirement]) -> list[EvidenceRequirement]:
     specs = list(base_specs)
-    if stage != "Verification":
-        return specs
     profile = str(getattr(summary, "verification_profile", "") or "").strip()
     if profile != "service_health":
         return specs
     names = {spec.name for spec in specs}
-    additions = [
-        EvidenceRequirement(
-            name="service_health_contract",
-            allowed_kinds=["command", "artifact", "report"],
-            required_fields=["summary"],
-        ),
-        EvidenceRequirement(
-            name="service_health_in_process",
-            allowed_kinds=["command", "artifact", "report"],
-            required_fields=["summary"],
-        ),
-        EvidenceRequirement(
-            name="service_health_capability",
-            allowed_kinds=["command", "artifact", "report"],
-            required_fields=["summary"],
-        ),
-    ]
+    additions: list[EvidenceRequirement] = []
+    if stage == "Verification":
+        additions.extend(
+            [
+                EvidenceRequirement(
+                    name="service_health_contract",
+                    allowed_kinds=["command", "artifact", "report"],
+                    required_fields=["summary"],
+                ),
+                EvidenceRequirement(
+                    name="service_health_in_process",
+                    allowed_kinds=["command", "artifact", "report"],
+                    required_fields=["summary"],
+                ),
+                EvidenceRequirement(
+                    name="service_health_capability",
+                    allowed_kinds=["command", "artifact", "report"],
+                    required_fields=["summary"],
+                ),
+            ]
+        )
+    elif stage == "GovernanceReview":
+        additions.append(
+            EvidenceRequirement(
+                name="service_health_evidence_audit",
+                allowed_kinds=["artifact", "report"],
+                required_fields=["summary"],
+            )
+        )
+    else:
+        return specs
     for spec in additions:
         if spec.name not in names:
             specs.append(spec)
