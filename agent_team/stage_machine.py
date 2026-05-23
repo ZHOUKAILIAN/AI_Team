@@ -467,6 +467,7 @@ def _parse_route_packet(stage_result: StageResultEnvelope) -> tuple[list[str], d
     required_stages = _route_required_stage_names(payload.get("required_stages", []))
     if not required_stages:
         required_stages = _route_required_stages_from_affected_layers(payload.get("affected_layers", []))
+    required_stages = _add_document_delivery_implementation_stage(required_stages, payload)
     required_stages = _normalize_required_stages(required_stages)
     stage_decisions = {
         str(name): {str(key): str(value) for key, value in dict(item).items()}
@@ -475,6 +476,87 @@ def _parse_route_packet(stage_result: StageResultEnvelope) -> tuple[list[str], d
     verification_mode = str(payload.get("verification_mode", ""))
     verification_profile = str(payload.get("verification_profile", payload.get("service_profile", "")))
     return required_stages, stage_decisions, verification_mode, verification_profile
+
+
+def _add_document_delivery_implementation_stage(required_stages: list[str], payload: dict[str, object]) -> list[str]:
+    if "Implementation" in required_stages:
+        return required_stages
+    if not _route_requires_repository_document_delivery(payload):
+        return required_stages
+    stages = list(required_stages)
+    if "TechnicalDesign" in stages:
+        stages.insert(stages.index("TechnicalDesign") + 1, "Implementation")
+    elif "ProjectRuntime" in stages:
+        stages.insert(stages.index("ProjectRuntime") + 1, "Implementation")
+    else:
+        stages.append("Implementation")
+    return stages
+
+
+def _route_requires_repository_document_delivery(payload: dict[str, object]) -> bool:
+    text_parts: list[str] = []
+    for key in (
+        "delivery_type",
+        "deliverable_type",
+        "artifact_type",
+        "implementation_type",
+        "summary",
+        "reason",
+        "notes",
+        "scope",
+        "implementation_required",
+    ):
+        value = payload.get(key)
+        if value is not None:
+            text_parts.append(str(value))
+    for key in ("required_artifacts", "deliverables", "output_artifacts", "target_files", "red_lines", "acceptance_criteria"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            text_parts.extend(str(item) for item in value)
+        elif value is not None:
+            text_parts.append(str(value))
+    stage_decisions = payload.get("stage_decisions")
+    if isinstance(stage_decisions, dict):
+        text_parts.append(str(stage_decisions))
+    text = "\n".join(text_parts).lower()
+    if not text:
+        return False
+    has_repo_doc_target = any(
+        token in text
+        for token in (
+            "docs/",
+            "readme",
+            "repository document",
+            "formal document",
+            "formal artifact",
+            "repo document",
+            "document delivery",
+            "doc delivery",
+            "正式文档",
+            "仓库文档",
+            "落为仓库",
+            "落库",
+        )
+    )
+    has_delivery_signal = any(
+        token in text
+        for token in (
+            "deliver",
+            "delivery",
+            "write",
+            "create",
+            "update",
+            "add",
+            "implementation must",
+            "必须",
+            "交付",
+            "写入",
+            "新增",
+            "更新",
+            "创建",
+        )
+    )
+    return has_repo_doc_target and has_delivery_signal
 
 
 def _requires_approval_wait(required_stages: list[str], stage: str) -> bool:
