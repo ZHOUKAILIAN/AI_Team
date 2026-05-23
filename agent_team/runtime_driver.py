@@ -21,7 +21,7 @@ from .intake import parse_intake_message
 from .models import EvidenceItem, Finding, GateResult, StageContract, StageResultEnvelope, WorkflowSummary
 from .openai_sandbox_judge import OpenAISandboxJudge, OpenAISandboxJudgeUnavailable
 from .stage_contracts import build_stage_contract
-from .stage_machine import StageMachine
+from .stage_machine import StageMachine, StageTransitionError
 from .stage_payload import ALLOWED_STAGE_PAYLOAD_FIELDS, FORBIDDEN_STAGE_PAYLOAD_FIELDS, envelope_from_stage_payload
 from .stage_policies import default_policy_registry
 from .state import StageRunStateError, StateStore, artifact_name_for_stage
@@ -1438,7 +1438,51 @@ def _execute_stage(
     if gate_result.status == "PASSED":
         stage_record = store.record_stage_result(session_id, normalized_result)
         latest_summary = store.load_workflow_summary(session_id)
-        updated_summary = StageMachine().advance(summary=latest_summary, stage_result=normalized_result)
+        try:
+            updated_summary = StageMachine().advance(summary=latest_summary, stage_result=normalized_result)
+        except StageTransitionError as exc:
+            transition_gate = GateResult(
+                status="BLOCKED",
+                reason=f"State transition failed after passed gate: {exc}",
+                findings=[
+                    Finding(
+                        source_stage=stage,
+                        target_stage=stage,
+                        issue=str(exc),
+                        severity="high",
+                        evidence_kind="state_transition",
+                        completion_signal="Fix the stage output so the workflow state machine can advance without crashing.",
+                    )
+                ],
+                checked_at=datetime.now(timezone.utc).isoformat(),
+            )
+            _record_stage_status_metadata(request, state_transition_status="blocked")
+            _add_runtime_trace_step(
+                trace_steps,
+                step="state_advanced",
+                status="blocked",
+                details={
+                    "from_state": latest_summary.current_state,
+                    "stage": stage,
+                    "reason": transition_gate.reason,
+                },
+            )
+            _write_runtime_trace(
+                store=store,
+                session_id=session_id,
+                run_id=run.run_id,
+                stage=stage,
+                trace_steps=trace_steps,
+            )
+            store.save_workflow_summary(session, replace(latest_summary, blocked_reason=transition_gate.reason))
+            store.update_stage_run(
+                verifying_run,
+                state="BLOCKED",
+                gate_result=transition_gate,
+                blocked_reason=transition_gate.reason,
+                artifact_paths=common_artifact_paths,
+            )
+            return transition_gate
         _record_stage_status_metadata(request, state_transition_status="advanced")
         _add_runtime_trace_step(
             trace_steps,

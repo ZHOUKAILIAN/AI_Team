@@ -458,7 +458,12 @@ def _finding_severity(finding: object) -> str:
     return str(getattr(finding, "severity", "") or "").strip().lower()
 
 def _parse_route_packet(stage_result: StageResultEnvelope) -> tuple[list[str], dict[str, dict[str, str]], str, str]:
-    payload = json.loads(stage_result.artifact_content)
+    try:
+        payload = json.loads(stage_result.artifact_content)
+    except json.JSONDecodeError as exc:
+        raise StageTransitionError(f"Route artifact is not valid JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise StageTransitionError("Route artifact must be a JSON object.")
     required_stages = _route_required_stage_names(payload.get("required_stages", []))
     if not required_stages:
         required_stages = _route_required_stages_from_affected_layers(payload.get("affected_layers", []))

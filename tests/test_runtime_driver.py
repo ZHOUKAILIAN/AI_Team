@@ -1273,6 +1273,55 @@ class RuntimeDriverTraceTests(unittest.TestCase):
         self.assertIn("executor_result_conflict", run.gate_result.reason if run and run.gate_result else "")
         self.assertEqual(result.status.lower(), "blocked")
 
+
+    def test_route_transition_error_blocks_without_crashing(self) -> None:
+        from agent_team.runtime_driver import RuntimeDriverOptions, run_requirement
+        from agent_team.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            root = Path(temp_dir)
+            repo_root = root / "repo"
+            state_root = root / "state"
+            repo_root.mkdir()
+            worker_path = root / "bad_route_worker.py"
+            worker_path.write_text(
+                "import json, os\n"
+                "from pathlib import Path\n"
+                "payload = {\n"
+                "  'status': 'completed',\n"
+                "  'artifact_content': '{\"affected_layers\":[\"L1\"], BAD',\n"
+                "  'journal': '',\n"
+                "  'findings': [],\n"
+                "  'evidence': [{'name': 'route_classification', 'kind': 'artifact', 'summary': 'routed'}],\n"
+                "  'suggested_next_owner': '',\n"
+                "  'summary': 'route completed',\n"
+                "  'acceptance_status': '',\n"
+                "  'blocked_reason': '',\n"
+                "}\n"
+                "Path(os.environ['AGENT_TEAM_RESULT_BUNDLE']).write_text(json.dumps(payload))\n"
+            )
+
+            result = run_requirement(
+                repo_root=repo_root,
+                state_root=state_root,
+                message="执行这个需求：坏 route json",
+                options=RuntimeDriverOptions(
+                    executor="command",
+                    executor_command=f"{sys.executable} {worker_path}",
+                    max_stage_runs=1,
+                ),
+            )
+            store = StateStore(state_root)
+            run = store.latest_stage_run(result.session_id, stage="Route")
+            summary = store.load_workflow_summary(result.session_id)
+
+        self.assertEqual(result.status.lower(), "blocked")
+        self.assertIsNotNone(run)
+        self.assertEqual(run.state if run is not None else "", "BLOCKED")
+        self.assertIn("State transition failed", run.blocked_reason if run is not None else "")
+        self.assertIn("Expecting", run.blocked_reason if run is not None else "")
+        self.assertIn("State transition failed", summary.blocked_reason)
+
     def test_rework_feedback_is_injected_into_next_attempt_prompt_and_trace(self) -> None:
         from dataclasses import replace
 
