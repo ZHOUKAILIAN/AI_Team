@@ -87,6 +87,7 @@ def run_five_layer_classification(
             command_preview=[],
             skill_path=skill_path,
             skill_source=skill_source,
+            repo_root=repo_root,
         )
 
     should_run = mode == "run" or (mode == "auto" and interactive)
@@ -106,6 +107,7 @@ def run_five_layer_classification(
             command_preview=[],
             skill_path=skill_path,
             skill_source=skill_source,
+            repo_root=repo_root,
         )
 
     codex_path = _resolve_executable(codex_bin)
@@ -126,6 +128,7 @@ def run_five_layer_classification(
             command_preview=[],
             skill_path=skill_path,
             skill_source=skill_source,
+            repo_root=repo_root,
         )
 
     if skill_path is None and not skill_source.strip():
@@ -145,6 +148,7 @@ def run_five_layer_classification(
             command_preview=[],
             skill_path=skill_path,
             skill_source=skill_source,
+            repo_root=repo_root,
         )
 
     command = _build_codex_command(
@@ -183,6 +187,7 @@ def run_five_layer_classification(
             command_preview=command_preview,
             skill_path=skill_path,
             skill_source=skill_source,
+            repo_root=repo_root,
         )
     except subprocess.TimeoutExpired as exc:
         stdout = _coerce_stream_text(exc.stdout)
@@ -205,6 +210,7 @@ def run_five_layer_classification(
             command_preview=command_preview,
             skill_path=skill_path,
             skill_source=skill_source,
+            repo_root=repo_root,
         )
 
     stdout_path.write_text(completed.stdout)
@@ -236,6 +242,7 @@ def run_five_layer_classification(
         command_preview=command_preview,
         skill_path=skill_path,
         skill_source=skill_source,
+        repo_root=repo_root,
     )
 
 
@@ -259,14 +266,21 @@ def _build_classification_prompt(
     skill_path: Path | None,
     skill_source: str,
 ) -> str:
-    local_skill_location = str(skill_path) if skill_path is not None else "not installed"
+    local_skill_location = (
+        "local cache present; path intentionally omitted because local caches are machine-specific"
+        if skill_path is not None
+        else "not installed"
+    )
     source_url = skill_source.strip() or "not configured"
+    target_scope = _portable_repo_path(repo_root, repo_root)
+    report_location = _portable_repo_path(report_path, repo_root)
+    five_layer_location = _portable_repo_path(five_layer_root, repo_root)
     return f"""Use the {FIVE_LAYER_SKILL_NAME} skill to classify this repository during Agent Team project init.
 
-Target scope: {repo_root}
+Target scope: {target_scope}
 Purpose: project init five-layer split audit, formal-entry discovery, and agent orientation.
-Output destination: {report_path}
-Allowed write area: {five_layer_root}
+Output destination: {report_location}
+Allowed write area: {five_layer_location}
 Skill source URL: {source_url}
 Local skill path, if available: {local_skill_location}
 
@@ -279,8 +293,8 @@ Required behavior:
 6. Identify stable formal entries for L1, L3, and L4 when they exist, and identify task/session-local L5 material that must stay local.
 7. Apply the conflict rule: lower layers depend on upper layers; lower layers may report drift or delta but must not silently rewrite upper-layer truth.
 8. Include high-risk misclassification warnings, recommended migration/split/downgrade/local-retention actions, and a proof package.
-9. Write the complete Markdown report to exactly: {report_path}
-10. Keep any auxiliary notes, if needed, under: {five_layer_root}
+9. Write the complete Markdown report to exactly: {report_location}
+10. Keep any auxiliary notes, if needed, under: {five_layer_location}
 
 Return a concise final message that names the report path and whether the classification is complete, blocked, or needs human decisions.
 """
@@ -326,15 +340,56 @@ def _record_result(
     command_preview: list[str],
     skill_path: Path | None,
     skill_source: str,
+    repo_root: Path,
 ) -> FiveLayerClassificationResult:
-    metadata = result.to_metadata()
+    metadata = _portable_result_metadata(result, repo_root=repo_root)
     metadata["generated_at"] = datetime.now(timezone.utc).isoformat()
     metadata["skill_name"] = FIVE_LAYER_SKILL_NAME
-    metadata["skill_path"] = str(skill_path) if skill_path is not None else ""
+    metadata["skill_path"] = "local-cache-present" if skill_path is not None else ""
     metadata["skill_source"] = skill_source
-    metadata["command"] = command_preview
+    metadata["command"] = _portable_command_preview(command_preview, repo_root=repo_root)
     result.metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
     return result
+
+
+def _portable_result_metadata(
+    result: FiveLayerClassificationResult,
+    *,
+    repo_root: Path,
+) -> dict[str, object]:
+    payload = asdict(result)
+    for key, value in list(payload.items()):
+        if isinstance(value, Path):
+            payload[key] = _portable_repo_path(value, repo_root)
+    return payload
+
+
+def _portable_command_preview(command_preview: list[str], *, repo_root: Path) -> list[str]:
+    portable: list[str] = []
+    for token in command_preview:
+        if token == "<classification-prompt>":
+            portable.append(token)
+            continue
+        path = Path(token)
+        if path.is_absolute():
+            if path.name == "codex":
+                portable.append("codex")
+            else:
+                portable.append(_portable_repo_path(path, repo_root))
+            continue
+        portable.append(token)
+    return portable
+
+
+def _portable_repo_path(path: Path, repo_root: Path) -> str:
+    path = path.resolve()
+    repo_root = repo_root.resolve()
+    if path == repo_root:
+        return "."
+    try:
+        return path.relative_to(repo_root).as_posix()
+    except ValueError:
+        return path.name
 
 
 def _ensure_placeholder_report(report_path: Path) -> None:
