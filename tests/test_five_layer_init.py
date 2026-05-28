@@ -39,6 +39,43 @@ class FiveLayerInitTests(unittest.TestCase):
             self.assertEqual(metadata["command"], [])
             self.assertIn("github.com/ZHOUKAILIAN/skills", metadata["skill_source"])
 
+    def test_init_trace_files_use_portable_paths(self) -> None:
+        from agent_team.five_layer_init import run_five_layer_classification
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            root = Path(temp_dir)
+            repo_root = root / "repo"
+            project_root = repo_root / "agt-control" / "project"
+            codex_home = root / "codex-home"
+            skill_dir = codex_home / "skills" / "five-layer-classifier"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text("# Five Layer Classifier\n")
+            repo_root.mkdir()
+
+            with patch.dict(os.environ, {"CODEX_HOME": str(codex_home)}):
+                result = run_five_layer_classification(
+                    repo_root=repo_root,
+                    project_root=project_root,
+                    mode="skip",
+                    interactive=False,
+                )
+
+            prompt = result.prompt_path.read_text()
+            metadata = json.loads(result.metadata_path.read_text())
+            serialized_metadata = json.dumps(metadata, sort_keys=True)
+
+            self.assertNotIn(str(root), prompt)
+            self.assertNotIn(str(root), serialized_metadata)
+            self.assertIn("Target scope: .", prompt)
+            self.assertIn(
+                "Output destination: agt-control/project/five-layer/classification.md",
+                prompt,
+            )
+            self.assertEqual(metadata["five_layer_root"], "agt-control/project/five-layer")
+            self.assertEqual(metadata["report_path"], "agt-control/project/five-layer/classification.md")
+            self.assertEqual(metadata["prompt_path"], "agt-control/project/five-layer/classification-prompt.md")
+            self.assertEqual(metadata["skill_path"], "local-cache-present")
+
     def test_forced_run_invokes_codex_and_records_completed_report(self) -> None:
         from agent_team.five_layer_init import run_five_layer_classification
 
