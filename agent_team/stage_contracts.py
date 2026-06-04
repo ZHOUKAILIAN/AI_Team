@@ -90,10 +90,22 @@ def build_stage_contract(
 
 def _evidence_specs_for_summary(*, stage: str, summary, base_specs: list[EvidenceRequirement]) -> list[EvidenceRequirement]:
     specs = list(base_specs)
+    names = {spec.name for spec in specs}
+    if stage == "Verification":
+        for evidence_name in getattr(summary, "route_required_evidence", []) or []:
+            evidence_name = str(evidence_name).strip()
+            if evidence_name and evidence_name not in names:
+                specs.append(
+                    EvidenceRequirement(
+                        name=evidence_name,
+                        allowed_kinds=["command", "artifact", "report"],
+                        required_fields=["summary"],
+                    )
+                )
+                names.add(evidence_name)
     profile = str(getattr(summary, "verification_profile", "") or "").strip()
     if profile != "service_health":
         return specs
-    names = {spec.name for spec in specs}
     additions: list[EvidenceRequirement] = []
     if stage == "Verification":
         additions.extend(

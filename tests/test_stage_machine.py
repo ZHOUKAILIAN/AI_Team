@@ -61,6 +61,38 @@ class StageMachineTests(unittest.TestCase):
         self.assertEqual(updated.verification_mode, "runtime_required")
         self.assertEqual(updated.verification_profile, "service_health")
 
+    def test_route_result_persists_verification_evidence_contract_fields(self) -> None:
+        from agent_team.models import StageResultEnvelope, WorkflowSummary
+        from agent_team.stage_machine import StageMachine
+
+        summary = WorkflowSummary(
+            session_id="session-1",
+            runtime_mode="harness",
+            current_state="Intake",
+            current_stage="Intake",
+        )
+        result = StageResultEnvelope(
+            session_id="session-1",
+            stage="Route",
+            status="completed",
+            artifact_name="route-packet.json",
+            artifact_content=(
+                '{"affected_layers":["L2"],'
+                '"required_stages":["Verification","GovernanceReview","Acceptance","SessionHandoff"],'
+                '"required_evidence":["service_health_contract","database_readonly_snapshot"],'
+                '"private_config_required":true,'
+                '"fixture_preconditions":["seed member 42",{"name":"task fixture","summary":"running task exists"}],'
+                '"verification_reason":"server evidence is required before acceptance"}'
+            ),
+        )
+
+        updated = StageMachine().advance(summary=summary, stage_result=result)
+
+        self.assertEqual(updated.route_required_evidence, ["service_health_contract", "database_readonly_snapshot"])
+        self.assertTrue(updated.route_private_config_required)
+        self.assertEqual(updated.route_fixture_preconditions, ["seed member 42", "task fixture: running task exists"])
+        self.assertEqual(updated.verification_reason, "server evidence is required before acceptance")
+
     def test_product_definition_result_waits_for_human_approval(self) -> None:
         from agent_team.models import StageResultEnvelope, WorkflowSummary
         from agent_team.stage_machine import StageMachine

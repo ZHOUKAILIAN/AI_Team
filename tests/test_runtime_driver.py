@@ -118,6 +118,16 @@ class RuntimeDriverSchemaTests(unittest.TestCase):
         self.assertFalse(evidence_by_name["additionalProperties"])
         self.assertNotIn("self_verification_check", evidence_by_name["properties"])
 
+    def test_route_artifact_instructions_name_verification_contract_fields(self) -> None:
+        from agent_team.runtime_driver import _stage_artifact_format_instructions
+
+        instructions = _stage_artifact_format_instructions("Route")
+
+        self.assertIn("required_evidence", instructions)
+        self.assertIn("private_config_required", instructions)
+        self.assertIn("fixture_preconditions", instructions)
+        self.assertIn("verification_reason", instructions)
+
     def test_stage_output_schema_file_is_contract_specific(self) -> None:
         from agent_team.models import StageContract
         from agent_team.runtime_driver import _stage_result_schema

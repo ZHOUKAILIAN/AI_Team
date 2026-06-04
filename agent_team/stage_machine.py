@@ -43,7 +43,16 @@ class StageMachine:
             )
 
         if stage_result.stage == "Route":
-            required_stages, stage_decisions, verification_mode, verification_profile = _parse_route_packet(stage_result)
+            (
+                required_stages,
+                stage_decisions,
+                verification_mode,
+                verification_profile,
+                route_required_evidence,
+                route_private_config_required,
+                route_fixture_preconditions,
+                verification_reason,
+            ) = _parse_route_packet(stage_result)
             next_state, next_stage = _transition_to_next_stage(required_stages=required_stages, after_stage="Route")
             updated = _set_stage_status(
                 summary,
@@ -55,6 +64,10 @@ class StageMachine:
                 route_stage_decisions=stage_decisions,
                 verification_mode=verification_mode,
                 verification_profile=verification_profile,
+                route_required_evidence=route_required_evidence,
+                route_private_config_required=route_private_config_required,
+                route_fixture_preconditions=route_fixture_preconditions,
+                verification_reason=verification_reason,
             )
             for stage_name, item in stage_decisions.items():
                 if item.get("decision") == "skipped":
@@ -483,7 +496,9 @@ def _finding_severity(finding: object) -> str:
         return str(finding.get("severity", "") or "").strip().lower()
     return str(getattr(finding, "severity", "") or "").strip().lower()
 
-def _parse_route_packet(stage_result: StageResultEnvelope) -> tuple[list[str], dict[str, dict[str, str]], str, str]:
+def _parse_route_packet(
+    stage_result: StageResultEnvelope,
+) -> tuple[list[str], dict[str, dict[str, str]], str, str, list[str], bool, list[str], str]:
     try:
         payload = json.loads(stage_result.artifact_content)
     except json.JSONDecodeError as exc:
@@ -501,7 +516,42 @@ def _parse_route_packet(stage_result: StageResultEnvelope) -> tuple[list[str], d
     }
     verification_mode = str(payload.get("verification_mode", ""))
     verification_profile = str(payload.get("verification_profile", payload.get("service_profile", "")))
-    return required_stages, stage_decisions, verification_mode, verification_profile
+    route_required_evidence = _string_list(payload.get("required_evidence", []))
+    route_private_config_required = bool(payload.get("private_config_required", False))
+    route_fixture_preconditions = _route_fixture_preconditions(payload.get("fixture_preconditions", []))
+    verification_reason = str(payload.get("verification_reason", ""))
+    return (
+        required_stages,
+        stage_decisions,
+        verification_mode,
+        verification_profile,
+        route_required_evidence,
+        route_private_config_required,
+        route_fixture_preconditions,
+        verification_reason,
+    )
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item).strip()]
+
+
+def _route_fixture_preconditions(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    items: list[str] = []
+    for item in value:
+        if isinstance(item, dict):
+            name = str(item.get("name", "")).strip()
+            summary = str(item.get("summary", item.get("description", ""))).strip()
+            text = ": ".join(part for part in (name, summary) if part)
+        else:
+            text = str(item).strip()
+        if text:
+            items.append(text)
+    return items
 
 
 def _add_document_delivery_implementation_stage(required_stages: list[str], payload: dict[str, object]) -> list[str]:

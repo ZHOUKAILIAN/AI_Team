@@ -170,6 +170,44 @@ class StageContractTests(unittest.TestCase):
         self.assertIn("service_health_in_process", contract.evidence_requirements)
         self.assertIn("service_health_capability", contract.evidence_requirements)
 
+    def test_route_required_evidence_is_added_to_verification_contract(self) -> None:
+        from dataclasses import replace
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
+
+        repo_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("Verify routed server evidence", runtime_mode="harness")
+            summary = store.load_workflow_summary(session.session_id)
+            store.save_workflow_summary(
+                session,
+                replace(
+                    summary,
+                    current_state="Verification",
+                    current_stage="Verification",
+                    route_required_evidence=["service_health_contract", "database_readonly_snapshot"],
+                    route_private_config_required=True,
+                    route_fixture_preconditions=["seed member 42"],
+                    verification_reason="server evidence is required before acceptance",
+                ),
+            )
+
+            contract = build_stage_contract(
+                repo_root=repo_root,
+                state_store=store,
+                session_id=session.session_id,
+                stage="Verification",
+            )
+
+        self.assertIn("independent_verification", contract.evidence_requirements)
+        self.assertIn("service_health_contract", contract.evidence_requirements)
+        self.assertIn("database_readonly_snapshot", contract.evidence_requirements)
+        self.assertEqual(
+            [spec.name for spec in contract.evidence_specs if spec.name == "database_readonly_snapshot"][0],
+            "database_readonly_snapshot",
+        )
+
 
     def test_service_health_governance_requires_audit_evidence(self) -> None:
         from dataclasses import replace

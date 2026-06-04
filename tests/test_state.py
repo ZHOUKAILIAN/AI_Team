@@ -89,6 +89,10 @@ class StateTests(unittest.TestCase):
                 route_stage_decisions={"ProductDefinition": {"decision": "skipped", "reason": "no_l1_delta"}},
                 verification_mode="static_only",
                 verification_profile="service_health",
+                route_required_evidence=["service_health_contract", "database_readonly_snapshot"],
+                route_private_config_required=True,
+                route_fixture_preconditions=["seed member 42", "task fixture: running task exists"],
+                verification_reason="server evidence is required before acceptance",
                 product_definition_outcome="no_l1_delta",
             )
 
@@ -102,6 +106,10 @@ class StateTests(unittest.TestCase):
             )
             self.assertEqual(loaded.verification_mode, "static_only")
             self.assertEqual(loaded.verification_profile, "service_health")
+            self.assertEqual(loaded.route_required_evidence, ["service_health_contract", "database_readonly_snapshot"])
+            self.assertTrue(loaded.route_private_config_required)
+            self.assertEqual(loaded.route_fixture_preconditions, ["seed member 42", "task fixture: running task exists"])
+            self.assertEqual(loaded.verification_reason, "server evidence is required before acceptance")
             self.assertEqual(loaded.product_definition_outcome, "no_l1_delta")
 
     def test_state_store_persists_codex_exec_resume_state(self) -> None:
