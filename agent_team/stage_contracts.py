@@ -84,6 +84,7 @@ def build_stage_contract(
         forbidden_actions=list(COMMON_FORBIDDEN_ACTIONS),
         evidence_requirements=evidence_requirements,
         evidence_specs=evidence_specs,
+        route_required_evidence=list(getattr(summary, "route_required_evidence", []) or []),
         role_context=_compose_role_context(role, retrieved_memory),
     )
 
@@ -103,6 +104,15 @@ def _evidence_specs_for_summary(*, stage: str, summary, base_specs: list[Evidenc
                     )
                 )
                 names.add(evidence_name)
+    elif stage == "GovernanceReview" and getattr(summary, "route_required_evidence", None):
+        specs.append(
+            EvidenceRequirement(
+                name="verification_evidence_depth_audit",
+                allowed_kinds=["artifact", "report"],
+                required_fields=["summary"],
+            )
+        )
+        names.add("verification_evidence_depth_audit")
     profile = str(getattr(summary, "verification_profile", "") or "").strip()
     if profile != "service_health":
         return specs

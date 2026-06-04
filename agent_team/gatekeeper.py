@@ -85,6 +85,24 @@ def evaluate_candidate(
         )
 
     if structural_issues or missing_outputs or missing_evidence:
+        if _verification_can_continue_with_missing_evidence(
+            contract=contract,
+            normalized=normalized,
+            structural_issues=structural_issues,
+            missing_outputs=missing_outputs,
+            missing_evidence=missing_evidence,
+        ):
+            _mark_verification_needs_evidence(normalized, missing_evidence=missing_evidence)
+            return (
+                GateResult(
+                    status="PASSED",
+                    reason="Verification is partial and needs additional required evidence: " + ", ".join(missing_evidence),
+                    missing_evidence=missing_evidence,
+                    findings=list(normalized.findings),
+                    checked_at=checked_at,
+                ),
+                normalized,
+            )
         issue_parts = structural_issues[:]
         if missing_outputs:
             issue_parts.append("missing outputs: " + ", ".join(missing_outputs))
@@ -111,6 +129,44 @@ def evaluate_candidate(
             checked_at=checked_at,
         ),
         normalized,
+    )
+
+
+def _verification_can_continue_with_missing_evidence(
+    *,
+    contract: StageContract,
+    normalized: StageResultEnvelope,
+    structural_issues: list[str],
+    missing_outputs: list[str],
+    missing_evidence: list[str],
+) -> bool:
+    if contract.stage != "Verification" or normalized.stage != "Verification":
+        return False
+    if structural_issues or missing_outputs or not missing_evidence:
+        return False
+    if normalized.status.strip().lower() in {"failed", "blocked"}:
+        return False
+    return True
+
+
+def _mark_verification_needs_evidence(normalized: StageResultEnvelope, *, missing_evidence: list[str]) -> None:
+    missing = sorted(set(missing_evidence))
+    normalized.status = "needs_verification"
+    normalized.verification_conclusion = "needs_verification"
+    normalized.release_recommendation = "needs_verification"
+    normalized.gate_decision = "proceed"
+    if not normalized.summary:
+        normalized.summary = "Verification needs additional required evidence: " + ", ".join(missing)
+    normalized.findings.append(
+        Finding(
+            source_stage="Verification",
+            target_stage="Verification",
+            issue="Missing required verification evidence: " + ", ".join(missing) + ".",
+            severity="high",
+            evidence_kind="required_verification_evidence",
+            required_evidence=missing,
+            completion_signal="Provide required verification evidence before Acceptance can recommend Go.",
+        )
     )
 
 
@@ -163,14 +219,46 @@ def _stage_audit_findings(
 ) -> list[Finding]:
     if contract.stage != "GovernanceReview":
         return []
-    if not _contract_requires_service_health_audit(contract):
-        return []
-    return _service_health_governance_findings(result=result, evidence=evidence)
+    findings: list[Finding] = []
+    if _contract_requires_service_health_audit(contract):
+        findings.extend(_service_health_governance_findings(result=result, evidence=evidence))
+    if _contract_requires_verification_depth_audit(contract):
+        findings.extend(_verification_depth_governance_findings(contract=contract, result=result, evidence=evidence))
+    return findings
 
 
 def _contract_requires_service_health_audit(contract: StageContract) -> bool:
     evidence_names = set(contract.evidence_requirements) | {spec.name for spec in contract.evidence_specs}
     return "service_health_evidence_audit" in evidence_names
+
+
+def _contract_requires_verification_depth_audit(contract: StageContract) -> bool:
+    evidence_names = set(contract.evidence_requirements) | {spec.name for spec in contract.evidence_specs}
+    return "verification_evidence_depth_audit" in evidence_names
+
+
+def _verification_depth_governance_findings(
+    *,
+    contract: StageContract,
+    result: StageResultEnvelope,
+    evidence: list[EvidenceItem],
+) -> list[Finding]:
+    text = _combined_result_text(result, evidence).lower()
+    required = [str(item).strip() for item in getattr(contract, "route_required_evidence", []) if str(item).strip()]
+    missing_mentions = [item for item in required if item.lower() not in text]
+    if not missing_mentions:
+        return []
+    return [
+        Finding(
+            source_stage="GovernanceReview",
+            target_stage="Verification",
+            issue="GovernanceReview did not audit routed verification evidence depth for: " + ", ".join(missing_mentions),
+            severity="high",
+            evidence_kind="verification_evidence_depth_audit",
+            required_evidence=missing_mentions,
+            completion_signal="Audit each routed required evidence item and state whether it is complete, partial, or still needs verification.",
+        )
+    ]
 
 
 def _service_health_governance_findings(*, result: StageResultEnvelope, evidence: list[EvidenceItem]) -> list[Finding]:
