@@ -238,6 +238,127 @@ class StageContractTests(unittest.TestCase):
 
         self.assertIn("verification_evidence_depth_audit", contract.evidence_requirements)
 
+    def test_verification_private_config_contract_reports_missing_file(self) -> None:
+        from dataclasses import replace
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
+
+        repo_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("Verify with private config", runtime_mode="harness")
+            summary = store.load_workflow_summary(session.session_id)
+            store.save_workflow_summary(
+                session,
+                replace(
+                    summary,
+                    current_state="Verification",
+                    current_stage="Verification",
+                    route_private_config_required=True,
+                    route_required_evidence=["private_config_contract"],
+                ),
+            )
+
+            contract = build_stage_contract(
+                repo_root=repo_root,
+                state_store=store,
+                session_id=session.session_id,
+                stage="Verification",
+            )
+
+        self.assertTrue(contract.private_config_contract["required"])
+        self.assertFalse(contract.private_config_contract["exists"])
+        self.assertIn("profiles", contract.private_config_contract["missing_keys"])
+        self.assertIn("private_config_contract", contract.evidence_requirements)
+
+    def test_verification_private_config_contract_redacts_values_and_marks_readonly(self) -> None:
+        from dataclasses import replace
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            repo_root = Path(temp_dir) / "repo"
+            repo_root.mkdir()
+            config_path = repo_root / ".agt" / "local" / "verification-private.json"
+            config_path.parent.mkdir(parents=True)
+            config_path.write_text(
+                '{"profiles":{"integration-test":{'
+                '"TEST_BASE_URL":"https://test-api.example.internal",'
+                '"TEST_AUTH_TOKEN":"secret-token",'
+                '"TEST_DB_READONLY_DSN":"mysql://readonly@host/db"}}}\n'
+            )
+            store = StateStore(Path(temp_dir) / "state")
+            session = store.create_session("Verify with private config", runtime_mode="harness")
+            summary = store.load_workflow_summary(session.session_id)
+            store.save_workflow_summary(
+                session,
+                replace(
+                    summary,
+                    current_state="Verification",
+                    current_stage="Verification",
+                    route_private_config_required=True,
+                    route_required_evidence=["private_config_contract"],
+                ),
+            )
+
+            contract = build_stage_contract(
+                repo_root=repo_root,
+                state_store=store,
+                session_id=session.session_id,
+                stage="Verification",
+            )
+
+        private_contract = contract.private_config_contract
+        self.assertTrue(private_contract["exists"])
+        self.assertTrue(private_contract["readonly"])
+        self.assertEqual(private_contract["missing_keys"], [])
+        self.assertIn("integration-test", private_contract["profiles"])
+        profile = private_contract["profiles"]["integration-test"]
+        self.assertEqual(profile["TEST_AUTH_TOKEN"], "<redacted>")
+        self.assertEqual(profile["TEST_DB_READONLY_DSN"], "<redacted>")
+        self.assertNotIn("secret-token", str(private_contract))
+        self.assertNotIn("mysql://readonly@host/db", str(private_contract))
+
+        contract_payload = contract.to_dict()
+        self.assertIn("private_config_contract", contract_payload)
+        self.assertNotIn("secret-token", str(contract_payload))
+        self.assertNotIn("mysql://readonly@host/db", str(contract_payload))
+
+    def test_verification_private_config_contract_reports_missing_profile_keys(self) -> None:
+        from dataclasses import replace
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            repo_root = Path(temp_dir) / "repo"
+            repo_root.mkdir()
+            config_path = repo_root / ".agt" / "local" / "verification-private.json"
+            config_path.parent.mkdir(parents=True)
+            config_path.write_text('{"profiles":{"integration-test":{"TEST_BASE_URL":"https://test"}}}\n')
+            store = StateStore(Path(temp_dir) / "state")
+            session = store.create_session("Verify with private config", runtime_mode="harness")
+            summary = store.load_workflow_summary(session.session_id)
+            store.save_workflow_summary(
+                session,
+                replace(
+                    summary,
+                    current_state="Verification",
+                    current_stage="Verification",
+                    route_private_config_required=True,
+                    route_required_evidence=["private_config_contract"],
+                ),
+            )
+
+            contract = build_stage_contract(
+                repo_root=repo_root,
+                state_store=store,
+                session_id=session.session_id,
+                stage="Verification",
+            )
+
+        self.assertIn("profiles.integration-test.TEST_AUTH_TOKEN", contract.private_config_contract["missing_keys"])
+        self.assertIn("profiles.integration-test.TEST_DB_READONLY_DSN", contract.private_config_contract["missing_keys"])
+
 
     def test_service_health_governance_requires_audit_evidence(self) -> None:
         from dataclasses import replace

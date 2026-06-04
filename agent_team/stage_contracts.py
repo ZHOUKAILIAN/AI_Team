@@ -65,6 +65,7 @@ def build_stage_contract(
     required_outputs = list(policy.required_outputs)
     evidence_specs = _evidence_specs_for_summary(stage=stage, summary=summary, base_specs=policy.evidence_specs)
     evidence_requirements = [spec.name for spec in evidence_specs if spec.required]
+    private_config_contract = _private_config_contract(repo_root=repo_root, stage=stage, summary=summary)
 
     contract_id = _build_contract_id(
         session_id=session_id,
@@ -85,6 +86,7 @@ def build_stage_contract(
         evidence_requirements=evidence_requirements,
         evidence_specs=evidence_specs,
         route_required_evidence=list(getattr(summary, "route_required_evidence", []) or []),
+        private_config_contract=private_config_contract,
         role_context=_compose_role_context(role, retrieved_memory),
     )
 
@@ -104,6 +106,15 @@ def _evidence_specs_for_summary(*, stage: str, summary, base_specs: list[Evidenc
                     )
                 )
                 names.add(evidence_name)
+        if getattr(summary, "route_private_config_required", False) and "private_config_contract" not in names:
+            specs.append(
+                EvidenceRequirement(
+                    name="private_config_contract",
+                    allowed_kinds=["artifact", "report"],
+                    required_fields=["summary"],
+                )
+            )
+            names.add("private_config_contract")
     elif stage == "GovernanceReview" and getattr(summary, "route_required_evidence", None):
         specs.append(
             EvidenceRequirement(
@@ -151,6 +162,68 @@ def _evidence_specs_for_summary(*, stage: str, summary, base_specs: list[Evidenc
         if spec.name not in names:
             specs.append(spec)
     return specs
+
+
+_PRIVATE_CONFIG_RECOMMENDED_PROFILE_KEYS = ("TEST_BASE_URL", "TEST_AUTH_TOKEN", "TEST_DB_READONLY_DSN")
+
+
+def _private_config_contract(*, repo_root: Path, stage: str, summary) -> dict[str, object]:
+    required = bool(getattr(summary, "route_private_config_required", False)) and stage == "Verification"
+    path = repo_root / ".agt" / "local" / "verification-private.json"
+    contract: dict[str, object] = {
+        "required": required,
+        "path": str(path),
+        "exists": path.exists(),
+        "readonly": True,
+        "missing_keys": [],
+        "profiles": {},
+    }
+    if not required and not path.exists():
+        return contract
+    if not path.exists():
+        contract["missing_keys"] = ["profiles"]
+        return contract
+
+    try:
+        payload = json.loads(path.read_text())
+    except json.JSONDecodeError:
+        contract["missing_keys"] = ["valid_json", "profiles"]
+        return contract
+    if not isinstance(payload, dict):
+        contract["missing_keys"] = ["profiles"]
+        return contract
+
+    profiles = payload.get("profiles")
+    if not isinstance(profiles, dict) or not profiles:
+        contract["missing_keys"] = ["profiles"]
+        return contract
+
+    missing_keys: list[str] = []
+    redacted_profiles: dict[str, object] = {}
+    for profile_name, raw_profile in profiles.items():
+        profile_key = str(profile_name)
+        if isinstance(raw_profile, dict):
+            raw_keys = {str(key) for key in raw_profile}
+            for required_key in _PRIVATE_CONFIG_RECOMMENDED_PROFILE_KEYS:
+                if required_key not in raw_keys:
+                    missing_keys.append(f"profiles.{profile_key}.{required_key}")
+            redacted_profiles[profile_key] = {
+                str(key): _redacted_private_config_value(value) for key, value in raw_profile.items()
+            }
+        else:
+            missing_keys.append(f"profiles.{profile_key}")
+            redacted_profiles[profile_key] = "<redacted>"
+    contract["missing_keys"] = missing_keys
+    contract["profiles"] = redacted_profiles
+    return contract
+
+
+def _redacted_private_config_value(value: object) -> object:
+    if isinstance(value, dict):
+        return {str(key): _redacted_private_config_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return ["<redacted>" for _item in value]
+    return "<redacted>"
 
 
 def _build_contract_id(
