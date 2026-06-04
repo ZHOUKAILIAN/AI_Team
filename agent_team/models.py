@@ -369,6 +369,9 @@ class StageResultEnvelope:
     verification_profile: str = ""
     flow_ids: list[str] = field(default_factory=list)
     evidence_paths: list[str] = field(default_factory=list)
+    verification_conclusion: str = ""
+    release_recommendation: str = ""
+    gate_decision: str = ""
     executor_status: str = ""
     executor_exit_code: int | None = None
     result_parse_status: str = ""
@@ -419,6 +422,9 @@ class StageResultEnvelope:
             verification_profile=payload.get("verification_profile", ""),
             flow_ids=list(payload.get("flow_ids", [])),
             evidence_paths=list(payload.get("evidence_paths", [])),
+            verification_conclusion=payload.get("verification_conclusion", ""),
+            release_recommendation=payload.get("release_recommendation", ""),
+            gate_decision=payload.get("gate_decision", ""),
             executor_status=payload.get("executor_status", ""),
             executor_exit_code=payload.get("executor_exit_code"),
             result_parse_status=payload.get("result_parse_status", ""),
@@ -468,6 +474,12 @@ class StageResultEnvelope:
             payload["flow_ids"] = list(self.flow_ids)
         if self.evidence_paths:
             payload["evidence_paths"] = list(self.evidence_paths)
+        if self.verification_conclusion:
+            payload["verification_conclusion"] = self.verification_conclusion
+        if self.release_recommendation:
+            payload["release_recommendation"] = self.release_recommendation
+        if self.gate_decision:
+            payload["gate_decision"] = self.gate_decision
         if self.executor_status:
             payload["executor_status"] = self.executor_status
         if self.executor_exit_code is not None:

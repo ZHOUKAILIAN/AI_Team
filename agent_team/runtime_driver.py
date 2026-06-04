@@ -2413,9 +2413,12 @@ def _stage_result_schema(contract: StageContract | None = None) -> dict[str, Any
             "summary",
             "acceptance_status",
             "blocked_reason",
+            "verification_conclusion",
+            "release_recommendation",
+            "gate_decision",
         ],
         "properties": {
-            "status": {"enum": ["completed", "failed", "blocked"]},
+            "status": {"enum": ["completed", "failed", "blocked", "partial", "needs_verification"]},
             "artifact_content": {"type": "string"},
             "journal": {"type": "string"},
             "findings": {
@@ -2486,6 +2489,9 @@ def _stage_result_schema(contract: StageContract | None = None) -> dict[str, Any
             "summary": {"type": "string"},
             "acceptance_status": {"type": "string"},
             "blocked_reason": {"type": "string"},
+            "verification_conclusion": {"enum": ["", "pass", "partial", "needs_verification", "fail"]},
+            "release_recommendation": {"enum": ["", "go", "no_go", "needs_verification"]},
+            "gate_decision": {"enum": ["", "proceed", "rework", "block", "fail"]},
         },
         "additionalProperties": False,
     }

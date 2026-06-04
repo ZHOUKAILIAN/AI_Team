@@ -148,6 +148,9 @@ def normalize_stage_result(
         summary=result.summary,
         acceptance_status=gated.acceptance_status or "",
         blocked_reason=gated.blocked_reason,
+        verification_conclusion=result.verification_conclusion,
+        release_recommendation=result.release_recommendation,
+        gate_decision=result.gate_decision,
         supplemental_artifacts=dict(gated.supplemental_artifacts),
     )
 

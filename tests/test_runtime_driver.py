@@ -146,6 +146,27 @@ class RuntimeDriverSchemaTests(unittest.TestCase):
             self.assertNotIn(field, properties)
         self.assertNotIn("supplemental_artifacts", properties)
 
+    def test_verification_stage_result_schema_allows_partial_needs_verification_semantics(self) -> None:
+        from agent_team.runtime_driver import _stage_result_schema
+        from agent_team.stage_policies import default_policy_registry
+
+        contract = default_policy_registry().build_contract(
+            session_id="session",
+            stage="Verification",
+            contract_id="contract-verification",
+            input_artifacts={},
+        )
+        schema = _stage_result_schema(contract)
+
+        self.assertIn("partial", schema["properties"]["status"]["enum"])
+        self.assertIn("needs_verification", schema["properties"]["status"]["enum"])
+        self.assertIn("verification_conclusion", schema["properties"])
+        self.assertIn("release_recommendation", schema["properties"])
+        self.assertIn("gate_decision", schema["properties"])
+        self.assertIn("needs_verification", schema["properties"]["verification_conclusion"]["enum"])
+        self.assertIn("needs_verification", schema["properties"]["release_recommendation"]["enum"])
+        self.assertIn("proceed", schema["properties"]["gate_decision"]["enum"])
+
     def test_codex_prompt_instructs_product_definition_l1_boundaries(self) -> None:
         from agent_team.execution_context import StageExecutionContext
         from agent_team.models import Finding, StageContract
