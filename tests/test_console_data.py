@@ -60,7 +60,7 @@ class ConsoleDataTests(unittest.TestCase):
             detail = build_project_detail(project_id, codex_home=codex_home)
 
             self.assertEqual(detail["project"]["project_id"], project_id)
-            self.assertEqual(detail["project"]["project_name"], repo_root.name)
+            self.assertEqual(detail["project"]["project_name"], "agent-team-runtime")
 
     def test_session_detail_reuses_panel_snapshot(self) -> None:
         from agent_team.console_data import build_session_detail

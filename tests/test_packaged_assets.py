@@ -21,6 +21,22 @@ class PackagedAssetTests(unittest.TestCase):
         self.assertFalse((repo_root / "Ops").exists())
         self.assertFalse((repo_root / "agent_team" / "assets" / "roles" / "Ops").exists())
 
+    def test_role_contracts_document_backend_verification_and_partial_statuses(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        roles_dir = repo_root / "agent_team" / "assets" / "roles"
+
+        route_contract = (roles_dir / "Route" / "contract.md").read_text()
+        verification_contract = (roles_dir / "Verification" / "contract.md").read_text()
+        governance_contract = (roles_dir / "GovernanceReview" / "contract.md").read_text()
+        acceptance_contract = (roles_dir / "Acceptance" / "contract.md").read_text()
+
+        self.assertIn("verification_profile", route_contract)
+        self.assertIn("backend_api_db", route_contract)
+        self.assertIn("verification_conclusion: needs_verification", verification_contract)
+        self.assertIn("backend_api_db", verification_contract)
+        self.assertIn("still needs verification", governance_contract)
+        self.assertIn("needs_verification", acceptance_contract)
+
 
 if __name__ == "__main__":
     unittest.main()

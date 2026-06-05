@@ -5,6 +5,7 @@ import subprocess
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
+import tomllib
 
 from .models import model_dataclass
 
@@ -37,10 +38,11 @@ def refresh_workspace_metadata(*, state_root: Path, repo_root: Path) -> Workspac
     state_root = state_root.resolve()
     repo_root = repo_root.resolve()
     state_root.mkdir(parents=True, exist_ok=True)
+    project_root = _project_root(repo_root)
 
     metadata = WorkspaceMetadata(
-        project_name=repo_root.name,
-        project_root=str(repo_root),
+        project_name=_project_name(project_root=project_root),
+        project_root=str(project_root),
         worktree_path=str(repo_root),
         branch=_current_branch(repo_root),
         state_root=str(state_root),
@@ -88,3 +90,45 @@ def _current_branch(repo_root: Path) -> str:
     if result.returncode != 0:
         return ""
     return result.stdout.strip()
+
+
+def _project_root(repo_root: Path) -> Path:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return repo_root
+
+    if result.returncode != 0:
+        return repo_root
+    raw_common_dir = result.stdout.strip()
+    if not raw_common_dir:
+        return repo_root
+    common_dir = Path(raw_common_dir)
+    if not common_dir.is_absolute():
+        common_dir = repo_root / common_dir
+    common_dir = common_dir.resolve()
+    if common_dir.name == ".git":
+        return common_dir.parent
+    return repo_root
+
+
+def _project_name(*, project_root: Path) -> str:
+    pyproject_path = project_root / "pyproject.toml"
+    if pyproject_path.exists():
+        try:
+            payload = tomllib.loads(pyproject_path.read_text())
+        except (OSError, tomllib.TOMLDecodeError):
+            payload = {}
+        if isinstance(payload, dict):
+            project_payload = payload.get("project", {})
+            if isinstance(project_payload, dict):
+                name = str(project_payload.get("name") or "").strip()
+                if name:
+                    return name
+    return project_root.name
