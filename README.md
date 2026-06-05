@@ -178,7 +178,7 @@ agt run --message "<你的需求>" --with-skills Implementation:plan --skip-skil
 agt run --message "<你的需求>" --skills-empty
 ```
 
-每次注入的 skill 会记录在 stage result 的 `steps[].details.skill_injection` 中，包含 skill 名称、source type、source ref、scope、delivery、installed path，以及是否进入 prompt。
+每次注入的 skill 会记录在 stage result 的 `steps[].details.skill_injection` 中，包含 skill 名称、source type、source ref、scope、delivery、installed path，以及是否进入 prompt。`codex-exec` 会记录 prompt 注入；command executor 会记录 command-only execution path；超时后恢复已写出的 result bundle 时会标记 artifact recovery 和 `result_parse_status=recovered_after_timeout`。
 
 ## 安装
 

@@ -170,6 +170,270 @@ class StageContractTests(unittest.TestCase):
         self.assertIn("service_health_in_process", contract.evidence_requirements)
         self.assertIn("service_health_capability", contract.evidence_requirements)
 
+    def test_backend_api_db_verification_profile_adds_required_evidence(self) -> None:
+        from dataclasses import replace
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
+
+        repo_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("Fix backend API duplicate response", runtime_mode="harness")
+            summary = store.load_workflow_summary(session.session_id)
+            store.save_workflow_summary(
+                session,
+                replace(
+                    summary,
+                    current_state="Verification",
+                    current_stage="Verification",
+                    verification_mode="runtime_required",
+                    verification_profile="backend_api_db",
+                    route_required_evidence=[
+                        "api_response",
+                        "db_precondition",
+                        "logs",
+                        "idempotency",
+                        "consistency",
+                    ],
+                    route_private_config_required=True,
+                ),
+            )
+
+            contract = build_stage_contract(
+                repo_root=repo_root,
+                state_store=store,
+                session_id=session.session_id,
+                stage="Verification",
+            )
+
+        self.assertIn("independent_verification", contract.evidence_requirements)
+        self.assertIn("backend_api_response", contract.evidence_requirements)
+        self.assertIn("backend_db_precondition", contract.evidence_requirements)
+        self.assertIn("backend_fixture_precondition", contract.evidence_requirements)
+        self.assertIn("backend_private_config_summary", contract.evidence_requirements)
+        self.assertIn("backend_logs", contract.evidence_requirements)
+        self.assertIn("backend_idempotency", contract.evidence_requirements)
+        self.assertIn("backend_consistency", contract.evidence_requirements)
+
+    def test_backend_api_db_governance_profile_requires_evidence_audit(self) -> None:
+        from dataclasses import replace
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
+
+        repo_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("Govern backend API verification evidence", runtime_mode="harness")
+            summary = store.load_workflow_summary(session.session_id)
+            store.save_workflow_summary(
+                session,
+                replace(
+                    summary,
+                    current_state="GovernanceReview",
+                    current_stage="GovernanceReview",
+                    verification_profile="backend_api_db",
+                ),
+            )
+
+            contract = build_stage_contract(
+                repo_root=repo_root,
+                state_store=store,
+                session_id=session.session_id,
+                stage="GovernanceReview",
+            )
+
+        self.assertIn("layer_governance_review", contract.evidence_requirements)
+        self.assertIn("backend_api_db_evidence_audit", contract.evidence_requirements)
+
+    def test_route_required_evidence_is_added_to_verification_contract(self) -> None:
+        from dataclasses import replace
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
+
+        repo_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("Verify routed server evidence", runtime_mode="harness")
+            summary = store.load_workflow_summary(session.session_id)
+            store.save_workflow_summary(
+                session,
+                replace(
+                    summary,
+                    current_state="Verification",
+                    current_stage="Verification",
+                    route_required_evidence=["service_health_contract", "database_readonly_snapshot"],
+                    route_private_config_required=True,
+                    route_fixture_preconditions=["seed member 42"],
+                    verification_reason="server evidence is required before acceptance",
+                ),
+            )
+
+            contract = build_stage_contract(
+                repo_root=repo_root,
+                state_store=store,
+                session_id=session.session_id,
+                stage="Verification",
+            )
+
+        self.assertIn("independent_verification", contract.evidence_requirements)
+        self.assertIn("service_health_contract", contract.evidence_requirements)
+        self.assertIn("database_readonly_snapshot", contract.evidence_requirements)
+        self.assertEqual(
+            [spec.name for spec in contract.evidence_specs if spec.name == "database_readonly_snapshot"][0],
+            "database_readonly_snapshot",
+        )
+
+    def test_route_required_evidence_adds_governance_depth_audit_contract(self) -> None:
+        from dataclasses import replace
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
+
+        repo_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("Govern routed verification depth", runtime_mode="harness")
+            summary = store.load_workflow_summary(session.session_id)
+            store.save_workflow_summary(
+                session,
+                replace(
+                    summary,
+                    current_state="GovernanceReview",
+                    current_stage="GovernanceReview",
+                    route_required_evidence=["database_readonly_snapshot"],
+                    verification_reason="database evidence is needed before acceptance",
+                ),
+            )
+
+            contract = build_stage_contract(
+                repo_root=repo_root,
+                state_store=store,
+                session_id=session.session_id,
+                stage="GovernanceReview",
+            )
+
+        self.assertIn("verification_evidence_depth_audit", contract.evidence_requirements)
+
+    def test_verification_private_config_contract_reports_missing_file(self) -> None:
+        from dataclasses import replace
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
+
+        repo_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("Verify with private config", runtime_mode="harness")
+            summary = store.load_workflow_summary(session.session_id)
+            store.save_workflow_summary(
+                session,
+                replace(
+                    summary,
+                    current_state="Verification",
+                    current_stage="Verification",
+                    route_private_config_required=True,
+                    route_required_evidence=["private_config_contract"],
+                ),
+            )
+
+            contract = build_stage_contract(
+                repo_root=repo_root,
+                state_store=store,
+                session_id=session.session_id,
+                stage="Verification",
+            )
+
+        self.assertTrue(contract.private_config_contract["required"])
+        self.assertFalse(contract.private_config_contract["exists"])
+        self.assertIn("profiles", contract.private_config_contract["missing_keys"])
+        self.assertIn("private_config_contract", contract.evidence_requirements)
+
+    def test_verification_private_config_contract_redacts_values_and_marks_readonly(self) -> None:
+        from dataclasses import replace
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            repo_root = Path(temp_dir) / "repo"
+            repo_root.mkdir()
+            config_path = repo_root / ".agt" / "local" / "verification-private.json"
+            config_path.parent.mkdir(parents=True)
+            config_path.write_text(
+                '{"profiles":{"integration-test":{'
+                '"TEST_BASE_URL":"https://test-api.example.internal",'
+                '"TEST_AUTH_TOKEN":"secret-token",'
+                '"TEST_DB_READONLY_DSN":"mysql://readonly@host/db"}}}\n'
+            )
+            store = StateStore(Path(temp_dir) / "state")
+            session = store.create_session("Verify with private config", runtime_mode="harness")
+            summary = store.load_workflow_summary(session.session_id)
+            store.save_workflow_summary(
+                session,
+                replace(
+                    summary,
+                    current_state="Verification",
+                    current_stage="Verification",
+                    route_private_config_required=True,
+                    route_required_evidence=["private_config_contract"],
+                ),
+            )
+
+            contract = build_stage_contract(
+                repo_root=repo_root,
+                state_store=store,
+                session_id=session.session_id,
+                stage="Verification",
+            )
+
+        private_contract = contract.private_config_contract
+        self.assertTrue(private_contract["exists"])
+        self.assertTrue(private_contract["readonly"])
+        self.assertEqual(private_contract["missing_keys"], [])
+        self.assertIn("integration-test", private_contract["profiles"])
+        profile = private_contract["profiles"]["integration-test"]
+        self.assertEqual(profile["TEST_AUTH_TOKEN"], "<redacted>")
+        self.assertEqual(profile["TEST_DB_READONLY_DSN"], "<redacted>")
+        self.assertNotIn("secret-token", str(private_contract))
+        self.assertNotIn("mysql://readonly@host/db", str(private_contract))
+
+        contract_payload = contract.to_dict()
+        self.assertIn("private_config_contract", contract_payload)
+        self.assertNotIn("secret-token", str(contract_payload))
+        self.assertNotIn("mysql://readonly@host/db", str(contract_payload))
+
+    def test_verification_private_config_contract_reports_missing_profile_keys(self) -> None:
+        from dataclasses import replace
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            repo_root = Path(temp_dir) / "repo"
+            repo_root.mkdir()
+            config_path = repo_root / ".agt" / "local" / "verification-private.json"
+            config_path.parent.mkdir(parents=True)
+            config_path.write_text('{"profiles":{"integration-test":{"TEST_BASE_URL":"https://test"}}}\n')
+            store = StateStore(Path(temp_dir) / "state")
+            session = store.create_session("Verify with private config", runtime_mode="harness")
+            summary = store.load_workflow_summary(session.session_id)
+            store.save_workflow_summary(
+                session,
+                replace(
+                    summary,
+                    current_state="Verification",
+                    current_stage="Verification",
+                    route_private_config_required=True,
+                    route_required_evidence=["private_config_contract"],
+                ),
+            )
+
+            contract = build_stage_contract(
+                repo_root=repo_root,
+                state_store=store,
+                session_id=session.session_id,
+                stage="Verification",
+            )
+
+        self.assertIn("profiles.integration-test.TEST_AUTH_TOKEN", contract.private_config_contract["missing_keys"])
+        self.assertIn("profiles.integration-test.TEST_DB_READONLY_DSN", contract.private_config_contract["missing_keys"])
+
 
     def test_service_health_governance_requires_audit_evidence(self) -> None:
         from dataclasses import replace

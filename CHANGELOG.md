@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.2.0b12] - 2026-06-05
+
+- Added stable partial and `needs_verification` semantics across Verification, GovernanceReview, and Acceptance.
+- Persisted routed verification contracts, backend API/DB evidence requirements, fixture preconditions, and private config readiness.
+- Recovered Verification result bundles written before executor timeouts as partial evidence instead of discarding them as blocked runs.
+- Stabilized runtime console project identity across linked git worktrees.
+
 ## [0.2.0b11] - 2026-05-23
 
 - Added human-friendly `agt continue` numbered menus, feedback templates, short action commands, and lightweight TTY loading.

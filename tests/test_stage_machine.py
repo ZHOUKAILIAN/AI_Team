@@ -61,6 +61,38 @@ class StageMachineTests(unittest.TestCase):
         self.assertEqual(updated.verification_mode, "runtime_required")
         self.assertEqual(updated.verification_profile, "service_health")
 
+    def test_route_result_persists_verification_evidence_contract_fields(self) -> None:
+        from agent_team.models import StageResultEnvelope, WorkflowSummary
+        from agent_team.stage_machine import StageMachine
+
+        summary = WorkflowSummary(
+            session_id="session-1",
+            runtime_mode="harness",
+            current_state="Intake",
+            current_stage="Intake",
+        )
+        result = StageResultEnvelope(
+            session_id="session-1",
+            stage="Route",
+            status="completed",
+            artifact_name="route-packet.json",
+            artifact_content=(
+                '{"affected_layers":["L2"],'
+                '"required_stages":["Verification","GovernanceReview","Acceptance","SessionHandoff"],'
+                '"required_evidence":["service_health_contract","database_readonly_snapshot"],'
+                '"private_config_required":true,'
+                '"fixture_preconditions":["seed member 42",{"name":"task fixture","summary":"running task exists"}],'
+                '"verification_reason":"server evidence is required before acceptance"}'
+            ),
+        )
+
+        updated = StageMachine().advance(summary=summary, stage_result=result)
+
+        self.assertEqual(updated.route_required_evidence, ["service_health_contract", "database_readonly_snapshot"])
+        self.assertTrue(updated.route_private_config_required)
+        self.assertEqual(updated.route_fixture_preconditions, ["seed member 42", "task fixture: running task exists"])
+        self.assertEqual(updated.verification_reason, "server evidence is required before acceptance")
+
     def test_product_definition_result_waits_for_human_approval(self) -> None:
         from agent_team.models import StageResultEnvelope, WorkflowSummary
         from agent_team.stage_machine import StageMachine
@@ -922,6 +954,44 @@ class StageMachineTests(unittest.TestCase):
         self.assertEqual(updated.stage_statuses["Verification"], "needs_verification")
         self.assertEqual(updated.acceptance_status, "needs_verification")
         self.assertEqual(updated.blocked_reason, "")
+
+    def test_verification_missing_route_evidence_result_marks_acceptance_needs_verification(self) -> None:
+        from agent_team.models import Finding, StageResultEnvelope, WorkflowSummary
+        from agent_team.stage_machine import StageMachine
+
+        summary = WorkflowSummary(
+            session_id="session-1",
+            runtime_mode="harness",
+            current_state="Verification",
+            current_stage="Verification",
+            route_required_stages=["Verification", "GovernanceReview", "Acceptance", "SessionHandoff"],
+            route_required_evidence=["database_readonly_snapshot"],
+        )
+        result = StageResultEnvelope(
+            session_id="session-1",
+            stage="Verification",
+            status="needs_verification",
+            artifact_name="verification-report.md",
+            artifact_content="# Verification Report\nMissing database_readonly_snapshot.\n",
+            verification_conclusion="needs_verification",
+            release_recommendation="needs_verification",
+            gate_decision="proceed",
+            findings=[
+                Finding(
+                    source_stage="Verification",
+                    target_stage="Verification",
+                    issue="Missing required verification evidence: database_readonly_snapshot.",
+                    severity="high",
+                    required_evidence=["database_readonly_snapshot"],
+                )
+            ],
+        )
+
+        updated = StageMachine().advance(summary=summary, stage_result=result)
+
+        self.assertEqual(updated.current_state, "GovernanceReview")
+        self.assertEqual(updated.stage_statuses["Verification"], "needs_verification")
+        self.assertEqual(updated.acceptance_status, "needs_verification")
 
     def test_verification_partial_can_proceed_to_governance(self) -> None:
         from agent_team.models import Finding, StageResultEnvelope, WorkflowSummary

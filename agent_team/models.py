@@ -183,6 +183,10 @@ class WorkflowSummary:
     route_stage_decisions: dict[str, dict[str, str]] = field(default_factory=dict)
     verification_mode: str = ""
     verification_profile: str = ""
+    route_required_evidence: list[str] = field(default_factory=list)
+    route_private_config_required: bool = False
+    route_fixture_preconditions: list[str] = field(default_factory=list)
+    verification_reason: str = ""
     product_definition_outcome: str = ""
     model_output_format_stats: dict[str, int] = field(default_factory=dict)
     provider_model_metadata: dict[str, Any] = field(default_factory=dict)
@@ -206,6 +210,10 @@ class WorkflowSummary:
             },
             "verification_mode": self.verification_mode,
             "verification_profile": self.verification_profile,
+            "route_required_evidence": list(self.route_required_evidence),
+            "route_private_config_required": self.route_private_config_required,
+            "route_fixture_preconditions": list(self.route_fixture_preconditions),
+            "verification_reason": self.verification_reason,
             "product_definition_outcome": self.product_definition_outcome,
             "model_output_format_stats": dict(self.model_output_format_stats),
             "provider_model_metadata": dict(self.provider_model_metadata),
@@ -307,6 +315,8 @@ class StageContract:
     forbidden_actions: list[str] = field(default_factory=list)
     evidence_requirements: list[str] = field(default_factory=list)
     evidence_specs: list[EvidenceRequirement] = field(default_factory=list)
+    route_required_evidence: list[str] = field(default_factory=list)
+    private_config_contract: dict[str, Any] = field(default_factory=dict)
     role_context: str = ""
 
     def __post_init__(self) -> None:
@@ -326,6 +336,8 @@ class StageContract:
             "forbidden_actions": list(self.forbidden_actions),
             "evidence_requirements": list(self.evidence_requirements),
             "evidence_specs": [item.to_dict() for item in self.evidence_specs],
+            "route_required_evidence": list(self.route_required_evidence),
+            "private_config_contract": dict(self.private_config_contract),
             "role_context": self.role_context,
         }
 

@@ -29,7 +29,7 @@ class BoardSnapshotTests(unittest.TestCase):
             self.assertEqual(snapshot["stats"]["worktrees"], 1)
             self.assertEqual(snapshot["stats"]["sessions"], 1)
             project = snapshot["projects"][0]
-            self.assertEqual(project["project_name"], repo_root.name)
+            self.assertEqual(project["project_name"], "agent-team-runtime")
             worktree = project["worktrees"][0]
             self.assertEqual(worktree["worktree_path"], str(repo_root.resolve()))
             self.assertEqual(worktree["sessions"][0]["session_id"], session.session_id)

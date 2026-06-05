@@ -23,11 +23,11 @@ class WorkspaceMetadataTests(unittest.TestCase):
             metadata_path = state_root / "workspace.json"
             self.assertTrue(metadata_path.exists())
             payload = json.loads(metadata_path.read_text())
-            self.assertEqual(payload["project_name"], repo_root.name)
-            self.assertEqual(payload["project_root"], str(repo_root.resolve()))
+            self.assertEqual(payload["project_name"], "agent-team-runtime")
+            self.assertEqual(Path(payload["project_root"]).name, "agent-team-runtime")
             self.assertEqual(payload["worktree_path"], str(repo_root.resolve()))
             self.assertEqual(payload["state_root"], str(state_root.resolve()))
-            self.assertEqual(metadata.project_name, repo_root.name)
+            self.assertEqual(metadata.project_name, "agent-team-runtime")
             self.assertIn("updated_at", payload)
 
     def test_load_workspace_metadata_falls_back_to_state_root_name(self) -> None:

@@ -576,12 +576,20 @@ class CommandStageExecutor:
         except subprocess.TimeoutExpired as exc:
             stdout = _coerce_stream_text(exc.stdout)
             stderr = _coerce_stream_text(exc.stderr) or f"Executor timed out after {self.timeout_seconds} seconds."
-            _record_stage_status_metadata(request, executor_status="timeout", executor_exit_code=124, result_parse_status="not_produced")
             _write_stage_run_streams(
                 request,
                 stdout=stdout,
                 stderr=stderr,
             )
+            recovered = _recover_stage_result_after_executor_timeout(
+                request=request,
+                command=self.command,
+                stdout=stdout,
+                stderr=stderr,
+            )
+            if recovered is not None:
+                return recovered
+            _record_stage_status_metadata(request, executor_status="timeout", executor_exit_code=124, result_parse_status="not_produced")
             return _blocked_result_from_process(
                 request=request,
                 command=self.command,
@@ -628,6 +636,15 @@ class CodexExecStageExecutor:
         completed = self._run_codex(request, prompt=prompt, output_path=request.result_path)
         _write_codex_stdout_result_if_needed(request, completed)
         _write_stage_run_streams(request, stdout=completed.stdout, stderr=completed.stderr)
+        if completed.returncode == 124:
+            recovered = _recover_stage_result_after_executor_timeout(
+                request=request,
+                command="codex exec",
+                stdout=completed.stdout,
+                stderr=completed.stderr,
+            )
+            if recovered is not None:
+                return recovered
         _record_stage_status_metadata(request, executor_status="completed" if completed.returncode == 0 else "failed", executor_exit_code=completed.returncode)
         if completed.returncode != 0 and not request.result_path.exists():
             _record_stage_status_metadata(request, result_parse_status="not_produced")
@@ -1973,6 +1990,80 @@ def _apply_executor_metadata_to_result(*, request: StageExecutionRequest, result
         result.result_parse_status = str(status.get("result_parse_status"))
 
 
+def _recover_stage_result_after_executor_timeout(
+    *,
+    request: StageExecutionRequest,
+    command: str,
+    stdout: str,
+    stderr: str,
+) -> StageResultEnvelope | None:
+    if not request.result_path.exists():
+        return None
+    try:
+        result = _parse_stage_result_json_text(
+            request=request,
+            value=request.result_path.read_text(),
+            source=str(request.result_path),
+        )
+    except StagePayloadProtocolError:
+        return None
+
+    result.executor_status = "timeout"
+    result.executor_exit_code = 124
+    result.result_parse_status = "recovered_after_timeout"
+    _mark_timeout_recovered_result_needs_verification(result)
+    result.evidence.append(
+        EvidenceItem(
+            name="executor_artifact_recovery",
+            kind="artifact",
+            summary=(
+                "Runtime recovered a stage result bundle that was written before "
+                "the executor timed out."
+            ),
+            artifact_path=str(request.result_path),
+            command=command,
+            exit_code=124,
+            producer="runtime-driver",
+            metadata={
+                "recovery_type": "result_bundle_after_timeout",
+                "stdout_present": bool(_coerce_stream_text(stdout).strip()),
+                "stderr_present": bool(_coerce_stream_text(stderr).strip()),
+            },
+        )
+    )
+    _record_stage_status_metadata(
+        request,
+        executor_status="timeout",
+        executor_exit_code=124,
+        result_parse_status="recovered_after_timeout",
+    )
+    return result
+
+
+def _mark_timeout_recovered_result_needs_verification(result: StageResultEnvelope) -> None:
+    if result.stage != "Verification":
+        return
+    result.status = "needs_verification"
+    result.verification_conclusion = "needs_verification"
+    result.release_recommendation = "needs_verification"
+    result.gate_decision = "proceed"
+    result.summary = result.summary or "Verification evidence was recovered after executor timeout."
+    result.findings.append(
+        Finding(
+            source_stage="Verification",
+            target_stage="Verification",
+            issue=(
+                "Verification executor timed out after writing a result bundle; "
+                "recovered evidence is partial and needs follow-up verification."
+            ),
+            severity="high",
+            evidence_kind="artifact_recovery",
+            required_evidence=["executor_artifact_recovery"],
+            completion_signal="Review recovered evidence and rerun missing verification before recommending Go.",
+        )
+    )
+
+
 def _increment_model_output_format_stats(request: StageExecutionRequest, **increments: int) -> None:
     store = getattr(request, "state_store", None)
     if store is None:
@@ -2200,7 +2291,9 @@ def _stage_artifact_format_instructions(stage: str, *, required_outputs: list[st
     if stage == "Route":
         return (
             "- Write artifact_content as valid JSON for route-packet.json; JSON keys stay as required, but all human-readable string values must be Simplified Chinese.\n"
-            "- Include affected_layers, required_stages, baseline_sources, red_lines, and unresolved_questions.\n"
+            "- Include affected_layers, required_stages, baseline_sources, red_lines, unresolved_questions, verification_mode, verification_profile, required_evidence, private_config_required, fixture_preconditions, and verification_reason.\n"
+            "- Use verification_profile `backend_api_db` for backend API changes that need API response, DB precondition, fixture, private config, logs, idempotency, consistency, permission, concurrency, or side-effect evidence.\n"
+            "- Use required_evidence for evidence names Verification must later provide; use private_config_required only when local private config is required; use fixture_preconditions for data/env setup assumptions.\n"
             "- Do not implement code or rewrite product definition in Route."
         )
     if stage == "ProductDefinition":
