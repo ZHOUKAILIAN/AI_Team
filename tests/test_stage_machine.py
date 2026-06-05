@@ -884,6 +884,81 @@ class StageMachineTests(unittest.TestCase):
         self.assertEqual(updated.current_stage, "GovernanceReview")
         self.assertEqual(updated.stage_statuses["Verification"], "passed_with_cautions")
 
+    def test_verification_needs_verification_can_proceed_to_governance(self) -> None:
+        from agent_team.models import Finding, StageResultEnvelope, WorkflowSummary
+        from agent_team.stage_machine import StageMachine
+
+        summary = WorkflowSummary(
+            session_id="session-1",
+            runtime_mode="harness",
+            current_state="Verification",
+            current_stage="Verification",
+            route_required_stages=["Verification", "GovernanceReview", "Acceptance", "SessionHandoff"],
+        )
+        result = StageResultEnvelope(
+            session_id="session-1",
+            stage="Verification",
+            status="completed",
+            artifact_name="verification-report.md",
+            artifact_content="# Verification Report\nFixture precondition is not deep enough yet.\n",
+            verification_conclusion="needs_verification",
+            release_recommendation="needs_verification",
+            gate_decision="proceed",
+            findings=[
+                Finding(
+                    source_stage="Verification",
+                    target_stage="Implementation",
+                    issue="Fixture precondition evidence is incomplete; runtime verification is partial.",
+                    severity="high",
+                    required_evidence=["backend_fixture_precondition"],
+                )
+            ],
+        )
+
+        updated = StageMachine().advance(summary=summary, stage_result=result)
+
+        self.assertEqual(updated.current_state, "GovernanceReview")
+        self.assertEqual(updated.current_stage, "GovernanceReview")
+        self.assertEqual(updated.stage_statuses["Verification"], "needs_verification")
+        self.assertEqual(updated.acceptance_status, "needs_verification")
+        self.assertEqual(updated.blocked_reason, "")
+
+    def test_verification_partial_can_proceed_to_governance(self) -> None:
+        from agent_team.models import Finding, StageResultEnvelope, WorkflowSummary
+        from agent_team.stage_machine import StageMachine
+
+        summary = WorkflowSummary(
+            session_id="session-1",
+            runtime_mode="harness",
+            current_state="Verification",
+            current_stage="Verification",
+            route_required_stages=["Verification", "GovernanceReview", "Acceptance", "SessionHandoff"],
+        )
+        result = StageResultEnvelope(
+            session_id="session-1",
+            stage="Verification",
+            status="completed",
+            artifact_name="verification-report.md",
+            artifact_content="# Verification Report\nRuntime evidence recovered but remains partial.\n",
+            verification_conclusion="partial",
+            gate_decision="proceed",
+            findings=[
+                Finding(
+                    source_stage="Verification",
+                    target_stage="Implementation",
+                    issue="Recovered evidence is incomplete but auditable.",
+                    severity="high",
+                )
+            ],
+        )
+
+        updated = StageMachine().advance(summary=summary, stage_result=result)
+
+        self.assertEqual(updated.current_state, "GovernanceReview")
+        self.assertEqual(updated.current_stage, "GovernanceReview")
+        self.assertEqual(updated.stage_statuses["Verification"], "partial")
+        self.assertEqual(updated.blocked_reason, "")
+
     def test_verification_findings_route_back_to_implementation(self) -> None:
         from agent_team.models import Finding, StageResultEnvelope, WorkflowSummary
         from agent_team.stage_machine import StageMachine
@@ -908,6 +983,35 @@ class StageMachineTests(unittest.TestCase):
         self.assertEqual(updated.current_state, "Implementation")
         self.assertEqual(updated.current_stage, "Implementation")
         self.assertEqual(updated.stage_statuses["Verification"], "failed")
+
+    def test_acceptance_needs_verification_is_non_blocking_recommendation(self) -> None:
+        from agent_team.models import StageResultEnvelope, WorkflowSummary
+        from agent_team.stage_machine import StageMachine
+
+        summary = WorkflowSummary(
+            session_id="session-1",
+            runtime_mode="harness",
+            current_state="Acceptance",
+            current_stage="Acceptance",
+            route_required_stages=["Acceptance", "SessionHandoff"],
+            acceptance_status="pending",
+        )
+        result = StageResultEnvelope(
+            session_id="session-1",
+            stage="Acceptance",
+            status="completed",
+            artifact_name="acceptance-report.md",
+            artifact_content="# Acceptance Report\nEvidence is not deep enough for final Go.\n",
+            release_recommendation="needs_verification",
+        )
+
+        updated = StageMachine().advance(summary=summary, stage_result=result)
+
+        self.assertEqual(updated.current_state, "SessionHandoff")
+        self.assertEqual(updated.current_stage, "SessionHandoff")
+        self.assertEqual(updated.stage_statuses["Acceptance"], "needs_verification")
+        self.assertEqual(updated.acceptance_status, "needs_verification")
+        self.assertEqual(updated.blocked_reason, "")
 
     def test_human_rework_decision_routes_to_five_layer_target_stage(self) -> None:
         from agent_team.models import WorkflowSummary

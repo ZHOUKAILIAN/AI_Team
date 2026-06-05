@@ -84,6 +84,46 @@ class GatekeeperTests(unittest.TestCase):
 
             self.assertEqual(gate.status, "PASSED")
 
+    def test_verification_partial_status_passes_hard_gate_when_contract_evidence_exists(self) -> None:
+        from agent_team.gatekeeper import Gatekeeper
+        from agent_team.models import Finding, StageContract, StageResultEnvelope
+        from agent_team.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("build an enforced workflow")
+            result = StageResultEnvelope(
+                session_id=session.session_id,
+                stage="Verification",
+                status="partial",
+                artifact_name="verification-report.md",
+                artifact_content="# Verification\nRuntime evidence is partial but auditable.\n",
+                contract_id="contract-verification",
+                evidence=[evidence("independent_verification", kind="command", summary="Recovered partial evidence.")],
+                verification_conclusion="partial",
+                gate_decision="proceed",
+                findings=[
+                    Finding(
+                        source_stage="Verification",
+                        target_stage="Implementation",
+                        issue="Runtime fixture depth is incomplete.",
+                        severity="high",
+                    )
+                ],
+            )
+            contract = StageContract(
+                session_id=session.session_id,
+                stage="Verification",
+                contract_id="contract-verification",
+                goal="Verify",
+                required_outputs=["verification-report.md"],
+                evidence_requirements=["independent_verification"],
+            )
+
+            gate = Gatekeeper().evaluate(session=session, contract=contract, result=result, acceptance_contract=None)
+
+            self.assertEqual(gate.status, "PASSED")
+            self.assertEqual(gate.findings[0].issue, "Runtime fixture depth is incomplete.")
 
     def test_service_health_governance_audit_blocks_missing_key_review(self) -> None:
         from agent_team.gatekeeper import Gatekeeper

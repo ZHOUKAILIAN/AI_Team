@@ -99,6 +99,14 @@ class StageContractTests(unittest.TestCase):
         self.assertIn("summary", contract.evidence_specs[0].required_fields)
         self.assertIn("command", contract.evidence_specs[0].allowed_kinds)
 
+    def test_verification_policy_allows_partial_needs_verification_statuses(self) -> None:
+        from agent_team.stage_policies import default_policy_registry
+
+        policy = default_policy_registry().get("Verification")
+
+        self.assertIn("partial", policy.allowed_agent_statuses)
+        self.assertIn("needs_verification", policy.allowed_agent_statuses)
+
     def test_contract_role_context_includes_learned_context_memory_and_skill(self) -> None:
         from agent_team.models import Finding
         from agent_team.stage_contracts import build_stage_contract

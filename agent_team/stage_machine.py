@@ -149,7 +149,8 @@ class StageMachine:
 
         if stage_result.stage == "Verification":
             next_verification_round = summary.verification_round + 1
-            if stage_result.status == "failed" or _has_blocking_findings(stage_result.findings):
+            verification_status = _verification_stage_status(stage_result)
+            if verification_status == "failed":
                 target_stage = _verification_rework_target(summary.route_required_stages, stage_result.findings)
                 return _set_stage_status(
                     summary,
@@ -163,13 +164,19 @@ class StageMachine:
                 required_stages=summary.route_required_stages,
                 after_stage="Verification",
             )
+            acceptance_status = (
+                "needs_verification"
+                if verification_status == "needs_verification"
+                else summary.acceptance_status
+            )
             return _set_stage_status(
                 summary,
                 "Verification",
-                "passed_with_cautions" if stage_result.findings else "passed",
+                verification_status,
                 current_state=next_state,
                 current_stage=next_stage,
                 verification_round=next_verification_round,
+                acceptance_status=acceptance_status,
             )
 
         if stage_result.stage == "GovernanceReview":
@@ -195,7 +202,7 @@ class StageMachine:
             )
 
         if stage_result.stage == "Acceptance":
-            acceptance_status = stage_result.acceptance_status or (
+            acceptance_status = stage_result.acceptance_status or stage_result.release_recommendation or (
                 "blocked" if stage_result.findings else "recommended_go"
             )
             if acceptance_status == "blocked":
@@ -440,6 +447,25 @@ def _verification_rework_target(required_stages: list[str], findings: list[objec
         if stage in {"ProductDefinition", "ProjectRuntime", "TechnicalDesign"}:
             return stage
     return "Verification"
+
+
+def _verification_stage_status(stage_result: StageResultEnvelope) -> str:
+    status = stage_result.status.strip().lower()
+    conclusion = stage_result.verification_conclusion.strip().lower()
+    release_recommendation = stage_result.release_recommendation.strip().lower()
+    gate_decision = stage_result.gate_decision.strip().lower()
+
+    if status == "failed" or conclusion == "fail" or gate_decision in {"rework", "fail"}:
+        return "failed"
+    if gate_decision in {"block", "blocked"}:
+        return "failed"
+    if status == "needs_verification" or conclusion == "needs_verification" or release_recommendation == "needs_verification":
+        return "needs_verification"
+    if status == "partial" or conclusion == "partial":
+        return "partial"
+    if _has_blocking_findings(stage_result.findings) and gate_decision != "proceed":
+        return "failed"
+    return "passed_with_cautions" if stage_result.findings else "passed"
 
 
 def _finding_target_stage(finding: object) -> str:

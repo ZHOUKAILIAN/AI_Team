@@ -36,6 +36,9 @@ ALLOWED_STAGE_PAYLOAD_FIELDS = frozenset(
         "verification_profile",
         "flow_ids",
         "evidence_paths",
+        "verification_conclusion",
+        "release_recommendation",
+        "gate_decision",
     }
 )
 
@@ -85,6 +88,9 @@ def envelope_from_stage_payload(
         "verification_profile": payload.get("verification_profile", ""),
         "flow_ids": payload.get("flow_ids", []),
         "evidence_paths": payload.get("evidence_paths", []),
+        "verification_conclusion": payload.get("verification_conclusion", ""),
+        "release_recommendation": payload.get("release_recommendation", ""),
+        "gate_decision": payload.get("gate_decision", ""),
         "supplemental_artifacts": {},
     }
     return StageResultEnvelope.from_dict(envelope_payload)
@@ -93,6 +99,12 @@ def envelope_from_stage_payload(
 def default_stage_payload_status(stage: str, payload: dict[str, Any]) -> str:
     if payload.get("blocked_reason"):
         return "blocked"
-    if stage == "Verification" and payload.get("findings"):
+    if stage == "Verification":
+        verification_conclusion = str(payload.get("verification_conclusion", "") or "").strip().lower()
+        if verification_conclusion in {"partial", "needs_verification"}:
+            return verification_conclusion
+        if verification_conclusion == "fail":
+            return "failed"
+    if stage == "Verification" and payload.get("findings") and str(payload.get("gate_decision", "") or "").strip().lower() != "proceed":
         return "failed"
     return "completed"

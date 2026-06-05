@@ -180,6 +180,7 @@ def default_policy_registry() -> PolicyRegistry:
                         required_fields=["summary"],
                     )
                 ],
+                allowed_agent_statuses=["completed", "failed", "blocked", "partial", "needs_verification"],
                 failback_targets=["Implementation"],
             ),
             StagePolicy(
