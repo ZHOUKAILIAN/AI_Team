@@ -316,6 +316,7 @@ class StageContract:
     evidence_requirements: list[str] = field(default_factory=list)
     evidence_specs: list[EvidenceRequirement] = field(default_factory=list)
     route_required_evidence: list[str] = field(default_factory=list)
+    private_config_contract: dict[str, Any] = field(default_factory=dict)
     role_context: str = ""
 
     def __post_init__(self) -> None:
@@ -336,6 +337,7 @@ class StageContract:
             "evidence_requirements": list(self.evidence_requirements),
             "evidence_specs": [item.to_dict() for item in self.evidence_specs],
             "route_required_evidence": list(self.route_required_evidence),
+            "private_config_contract": dict(self.private_config_contract),
             "role_context": self.role_context,
         }
 
