@@ -125,6 +125,59 @@ class GatekeeperTests(unittest.TestCase):
             self.assertEqual(gate.status, "PASSED")
             self.assertEqual(gate.findings[0].issue, "Runtime fixture depth is incomplete.")
 
+    def test_verification_missing_routed_evidence_becomes_needs_verification(self) -> None:
+        from agent_team.gatekeeper import evaluate_candidate
+        from agent_team.models import EvidenceRequirement, StageContract, StageResultEnvelope
+        from agent_team.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("build an enforced workflow")
+            result = StageResultEnvelope(
+                session_id=session.session_id,
+                stage="Verification",
+                status="completed",
+                artifact_name="verification-report.md",
+                artifact_content="# Verification\nIndependent checks ran; routed database snapshot is unavailable.\n",
+                contract_id="contract-verification",
+                evidence=[evidence("independent_verification", kind="command", summary="Base verification ran.")],
+            )
+            contract = StageContract(
+                session_id=session.session_id,
+                stage="Verification",
+                contract_id="contract-verification",
+                goal="Verify",
+                required_outputs=["verification-report.md"],
+                evidence_requirements=["independent_verification", "database_readonly_snapshot"],
+                evidence_specs=[
+                    EvidenceRequirement(
+                        name="independent_verification",
+                        allowed_kinds=["command", "artifact", "report"],
+                        required_fields=["summary"],
+                    ),
+                    EvidenceRequirement(
+                        name="database_readonly_snapshot",
+                        allowed_kinds=["command", "artifact", "report"],
+                        required_fields=["summary"],
+                    ),
+                ],
+            )
+
+            gate, normalized = evaluate_candidate(
+                session=session,
+                contract=contract,
+                result=result,
+                acceptance_contract=None,
+            )
+
+        self.assertEqual(gate.status, "PASSED")
+        self.assertEqual(normalized.status, "needs_verification")
+        self.assertEqual(normalized.verification_conclusion, "needs_verification")
+        self.assertEqual(normalized.release_recommendation, "needs_verification")
+        self.assertEqual(normalized.gate_decision, "proceed")
+        self.assertEqual(gate.missing_evidence, ["database_readonly_snapshot"])
+        self.assertTrue(any("database_readonly_snapshot" in finding.issue for finding in gate.findings))
+
     def test_service_health_governance_audit_blocks_missing_key_review(self) -> None:
         from agent_team.gatekeeper import Gatekeeper
         from agent_team.models import EvidenceRequirement, StageContract, StageResultEnvelope
@@ -198,6 +251,85 @@ class GatekeeperTests(unittest.TestCase):
                 evidence=[
                     evidence("layer_governance_review", kind="report", summary="reviewed"),
                     evidence("service_health_evidence_audit", kind="report", summary="audited service_health_contract service_health_in_process service_health_capability real_http_evidence_pending EPERM gap"),
+                ],
+            )
+
+            gate = Gatekeeper().evaluate(session=session, contract=contract, result=result, acceptance_contract=None)
+
+        self.assertEqual(gate.status, "PASSED")
+        self.assertEqual(gate.findings, [])
+
+    def test_governance_review_flags_missing_routed_verification_evidence_depth_audit(self) -> None:
+        from agent_team.gatekeeper import Gatekeeper
+        from agent_team.models import EvidenceRequirement, StageContract, StageResultEnvelope
+        from agent_team.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("audit routed evidence depth")
+            contract = StageContract(
+                session_id=session.session_id,
+                stage="GovernanceReview",
+                contract_id="contract-governance",
+                goal="Review",
+                required_outputs=["governance-review.md"],
+                evidence_requirements=["layer_governance_review", "verification_evidence_depth_audit"],
+                evidence_specs=[
+                    EvidenceRequirement(name="layer_governance_review", allowed_kinds=["report"], required_fields=["summary"]),
+                    EvidenceRequirement(name="verification_evidence_depth_audit", allowed_kinds=["report"], required_fields=["summary"]),
+                ],
+                route_required_evidence=["database_readonly_snapshot"],
+            )
+            result = StageResultEnvelope(
+                session_id=session.session_id,
+                stage="GovernanceReview",
+                status="completed",
+                artifact_name="governance-review.md",
+                artifact_content="# Governance\nAudited verification generally, without naming the routed database evidence.\n",
+                contract_id="contract-governance",
+                evidence=[
+                    evidence("layer_governance_review", kind="report", summary="reviewed"),
+                    evidence("verification_evidence_depth_audit", kind="report", summary="audited verification depth"),
+                ],
+            )
+
+            gate = Gatekeeper().evaluate(session=session, contract=contract, result=result, acceptance_contract=None)
+
+        self.assertEqual(gate.status, "PASSED")
+        self.assertTrue(any("database_readonly_snapshot" in finding.issue for finding in gate.findings))
+        self.assertTrue(any(finding.evidence_kind == "verification_evidence_depth_audit" for finding in gate.findings))
+
+    def test_governance_review_passes_routed_verification_evidence_depth_audit(self) -> None:
+        from agent_team.gatekeeper import Gatekeeper
+        from agent_team.models import EvidenceRequirement, StageContract, StageResultEnvelope
+        from agent_team.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("audit routed evidence depth")
+            contract = StageContract(
+                session_id=session.session_id,
+                stage="GovernanceReview",
+                contract_id="contract-governance",
+                goal="Review",
+                required_outputs=["governance-review.md"],
+                evidence_requirements=["layer_governance_review", "verification_evidence_depth_audit"],
+                evidence_specs=[
+                    EvidenceRequirement(name="layer_governance_review", allowed_kinds=["report"], required_fields=["summary"]),
+                    EvidenceRequirement(name="verification_evidence_depth_audit", allowed_kinds=["report"], required_fields=["summary"]),
+                ],
+                route_required_evidence=["database_readonly_snapshot"],
+            )
+            result = StageResultEnvelope(
+                session_id=session.session_id,
+                stage="GovernanceReview",
+                status="completed",
+                artifact_name="governance-review.md",
+                artifact_content="# Governance\nAudited database_readonly_snapshot and accepted its state as needs_verification, not complete.\n",
+                contract_id="contract-governance",
+                evidence=[
+                    evidence("layer_governance_review", kind="report", summary="reviewed"),
+                    evidence("verification_evidence_depth_audit", kind="report", summary="database_readonly_snapshot remains needs_verification"),
                 ],
             )
 

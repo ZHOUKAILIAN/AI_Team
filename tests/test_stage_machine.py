@@ -955,6 +955,44 @@ class StageMachineTests(unittest.TestCase):
         self.assertEqual(updated.acceptance_status, "needs_verification")
         self.assertEqual(updated.blocked_reason, "")
 
+    def test_verification_missing_route_evidence_result_marks_acceptance_needs_verification(self) -> None:
+        from agent_team.models import Finding, StageResultEnvelope, WorkflowSummary
+        from agent_team.stage_machine import StageMachine
+
+        summary = WorkflowSummary(
+            session_id="session-1",
+            runtime_mode="harness",
+            current_state="Verification",
+            current_stage="Verification",
+            route_required_stages=["Verification", "GovernanceReview", "Acceptance", "SessionHandoff"],
+            route_required_evidence=["database_readonly_snapshot"],
+        )
+        result = StageResultEnvelope(
+            session_id="session-1",
+            stage="Verification",
+            status="needs_verification",
+            artifact_name="verification-report.md",
+            artifact_content="# Verification Report\nMissing database_readonly_snapshot.\n",
+            verification_conclusion="needs_verification",
+            release_recommendation="needs_verification",
+            gate_decision="proceed",
+            findings=[
+                Finding(
+                    source_stage="Verification",
+                    target_stage="Verification",
+                    issue="Missing required verification evidence: database_readonly_snapshot.",
+                    severity="high",
+                    required_evidence=["database_readonly_snapshot"],
+                )
+            ],
+        )
+
+        updated = StageMachine().advance(summary=summary, stage_result=result)
+
+        self.assertEqual(updated.current_state, "GovernanceReview")
+        self.assertEqual(updated.stage_statuses["Verification"], "needs_verification")
+        self.assertEqual(updated.acceptance_status, "needs_verification")
+
     def test_verification_partial_can_proceed_to_governance(self) -> None:
         from agent_team.models import Finding, StageResultEnvelope, WorkflowSummary
         from agent_team.stage_machine import StageMachine

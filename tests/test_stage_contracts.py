@@ -208,6 +208,36 @@ class StageContractTests(unittest.TestCase):
             "database_readonly_snapshot",
         )
 
+    def test_route_required_evidence_adds_governance_depth_audit_contract(self) -> None:
+        from dataclasses import replace
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
+
+        repo_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("Govern routed verification depth", runtime_mode="harness")
+            summary = store.load_workflow_summary(session.session_id)
+            store.save_workflow_summary(
+                session,
+                replace(
+                    summary,
+                    current_state="GovernanceReview",
+                    current_stage="GovernanceReview",
+                    route_required_evidence=["database_readonly_snapshot"],
+                    verification_reason="database evidence is needed before acceptance",
+                ),
+            )
+
+            contract = build_stage_contract(
+                repo_root=repo_root,
+                state_store=store,
+                session_id=session.session_id,
+                stage="GovernanceReview",
+            )
+
+        self.assertIn("verification_evidence_depth_audit", contract.evidence_requirements)
+
 
     def test_service_health_governance_requires_audit_evidence(self) -> None:
         from dataclasses import replace
