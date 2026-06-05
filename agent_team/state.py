@@ -204,6 +204,8 @@ class StateStore:
         raw_stage_statuses = payload.get("stage_statuses", {})
         raw_route_required_stages = payload.get("route_required_stages", [])
         raw_route_stage_decisions = payload.get("route_stage_decisions", {})
+        raw_route_required_evidence = payload.get("route_required_evidence", payload.get("required_evidence", []))
+        raw_route_fixture_preconditions = payload.get("route_fixture_preconditions", payload.get("fixture_preconditions", []))
         raw_model_output_format_stats = payload.get("model_output_format_stats", {})
         raw_provider_model_metadata = payload.get("provider_model_metadata", {})
         stage_statuses = (
@@ -224,6 +226,16 @@ class StateStore:
             }
             if isinstance(raw_route_stage_decisions, dict)
             else {}
+        )
+        route_required_evidence = (
+            [str(item) for item in raw_route_required_evidence]
+            if isinstance(raw_route_required_evidence, list)
+            else []
+        )
+        route_fixture_preconditions = (
+            [str(item) for item in raw_route_fixture_preconditions]
+            if isinstance(raw_route_fixture_preconditions, list)
+            else []
         )
         model_output_format_stats = (
             {str(key): int(value or 0) for key, value in raw_model_output_format_stats.items()}
@@ -253,6 +265,12 @@ class StateStore:
             route_stage_decisions=route_stage_decisions,
             verification_mode=str(payload.get("verification_mode", "")),
             verification_profile=str(payload.get("verification_profile", payload.get("service_profile", ""))),
+            route_required_evidence=route_required_evidence,
+            route_private_config_required=bool(
+                payload.get("route_private_config_required", payload.get("private_config_required", False))
+            ),
+            route_fixture_preconditions=route_fixture_preconditions,
+            verification_reason=str(payload.get("verification_reason", "")),
             product_definition_outcome=str(payload.get("product_definition_outcome", "")),
             model_output_format_stats=model_output_format_stats,
             provider_model_metadata=(

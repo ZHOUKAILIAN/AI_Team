@@ -2200,7 +2200,8 @@ def _stage_artifact_format_instructions(stage: str, *, required_outputs: list[st
     if stage == "Route":
         return (
             "- Write artifact_content as valid JSON for route-packet.json; JSON keys stay as required, but all human-readable string values must be Simplified Chinese.\n"
-            "- Include affected_layers, required_stages, baseline_sources, red_lines, and unresolved_questions.\n"
+            "- Include affected_layers, required_stages, baseline_sources, red_lines, unresolved_questions, required_evidence, private_config_required, fixture_preconditions, and verification_reason.\n"
+            "- Use required_evidence for evidence names Verification must later provide; use private_config_required only when local private config is required; use fixture_preconditions for data/env setup assumptions.\n"
             "- Do not implement code or rewrite product definition in Route."
         )
     if stage == "ProductDefinition":
