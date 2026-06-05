@@ -127,6 +127,8 @@ class RuntimeDriverSchemaTests(unittest.TestCase):
         self.assertIn("private_config_required", instructions)
         self.assertIn("fixture_preconditions", instructions)
         self.assertIn("verification_reason", instructions)
+        self.assertIn("verification_profile", instructions)
+        self.assertIn("backend_api_db", instructions)
 
     def test_stage_output_schema_file_is_contract_specific(self) -> None:
         from agent_team.models import StageContract
@@ -1257,6 +1259,82 @@ class RuntimeDriverTraceTests(unittest.TestCase):
             active_runs = [item for item in store.stage_runs(session_id) if item.state == "RUNNING"]
             self.assertEqual(active_runs, [])
             self.assertIn("exit code 124", run.blocked_reason if run else "")
+
+    def test_command_executor_timeout_recovers_verification_result_bundle_as_needs_verification(self) -> None:
+        from dataclasses import replace
+
+        from agent_team.runtime_driver import RuntimeDriverOptions, run_requirement
+        from agent_team.state import StateStore
+
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            root = Path(temp_dir)
+            repo_root = root / "repo"
+            state_root = root / "state"
+            repo_root.mkdir()
+            store = StateStore(state_root)
+            session = store.create_session("验证 timeout 后恢复 Verification 证据", runtime_mode="runtime_driver")
+            summary = store.load_workflow_summary(session.session_id)
+            store.save_workflow_summary(
+                session,
+                replace(
+                    summary,
+                    current_state="Verification",
+                    current_stage="Verification",
+                    route_required_stages=["Verification", "GovernanceReview", "Acceptance", "SessionHandoff"],
+                    route_required_evidence=["database_readonly_snapshot"],
+                ),
+            )
+            worker_path = root / "verification_worker.py"
+            worker_path.write_text(
+                "import json, os, time\n"
+                "from pathlib import Path\n"
+                "payload = {\n"
+                "  'status': 'completed',\n"
+                "  'artifact_content': '# Verification Report\\nBase verification evidence was written before timeout.\\n',\n"
+                "  'journal': '',\n"
+                "  'findings': [],\n"
+                "  'evidence': [{'name': 'independent_verification', 'kind': 'command', 'summary': 'Base verification command produced evidence before timeout.'}],\n"
+                "  'suggested_next_owner': '',\n"
+                "  'summary': 'base verification recovered before timeout',\n"
+                "  'acceptance_status': '',\n"
+                "  'blocked_reason': '',\n"
+                "}\n"
+                "Path(os.environ['AGENT_TEAM_RESULT_BUNDLE']).write_text(json.dumps(payload))\n"
+                "time.sleep(30)\n"
+            )
+
+            result = run_requirement(
+                repo_root=repo_root,
+                state_root=state_root,
+                session_id=session.session_id,
+                message="继续验证",
+                options=RuntimeDriverOptions(
+                    executor="command",
+                    executor_command=f"exec {sys.executable} {worker_path}",
+                    command_timeout_seconds=1,
+                    max_stage_runs=1,
+                ),
+            )
+            run = store.latest_stage_run(session.session_id, stage="Verification")
+            updated = store.load_workflow_summary(session.session_id)
+            active_runs = [item for item in store.stage_runs(session.session_id) if item.state == "RUNNING"]
+
+        self.assertEqual(result.status, "blocked")
+        self.assertEqual(result.gate_status, "BLOCKED")
+        self.assertIn("max_stage_runs=1", result.gate_reason)
+        self.assertIsNotNone(run)
+        self.assertEqual(run.state if run else "", "PASSED")
+        self.assertEqual(run.stage_result.get("status") if run else "", "needs_verification")
+        self.assertEqual(run.stage_result.get("verification_conclusion") if run else "", "needs_verification")
+        self.assertEqual(run.stage_result.get("release_recommendation") if run else "", "needs_verification")
+        self.assertEqual(run.stage_result.get("executor_status") if run else "", "timeout")
+        self.assertEqual(run.stage_result.get("executor_exit_code") if run else None, 124)
+        self.assertEqual(run.stage_result.get("result_parse_status") if run else "", "recovered_after_timeout")
+        self.assertEqual(updated.current_state, "GovernanceReview")
+        self.assertEqual(updated.current_stage, "GovernanceReview")
+        self.assertEqual(updated.stage_statuses["Verification"], "needs_verification")
+        self.assertEqual(updated.acceptance_status, "needs_verification")
+        self.assertEqual(active_runs, [])
 
     def test_executor_nonzero_completed_result_blocks_as_conflict(self) -> None:
         from agent_team.runtime_driver import RuntimeDriverOptions, run_requirement

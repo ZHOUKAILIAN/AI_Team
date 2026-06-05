@@ -94,9 +94,12 @@ def build_stage_contract(
 def _evidence_specs_for_summary(*, stage: str, summary, base_specs: list[EvidenceRequirement]) -> list[EvidenceRequirement]:
     specs = list(base_specs)
     names = {spec.name for spec in specs}
+    profile = str(getattr(summary, "verification_profile", "") or "").strip()
     if stage == "Verification":
         for evidence_name in getattr(summary, "route_required_evidence", []) or []:
             evidence_name = str(evidence_name).strip()
+            if _route_evidence_is_profile_alias(evidence_name=evidence_name, profile=profile):
+                continue
             if evidence_name and evidence_name not in names:
                 specs.append(
                     EvidenceRequirement(
@@ -124,44 +127,123 @@ def _evidence_specs_for_summary(*, stage: str, summary, base_specs: list[Evidenc
             )
         )
         names.add("verification_evidence_depth_audit")
-    profile = str(getattr(summary, "verification_profile", "") or "").strip()
-    if profile != "service_health":
-        return specs
-    additions: list[EvidenceRequirement] = []
+    additions = _profile_evidence_specs(stage=stage, profile=profile, summary=summary)
+    for spec in additions:
+        if spec.name not in names:
+            specs.append(spec)
+    return specs
+
+
+def _profile_evidence_specs(*, stage: str, profile: str, summary) -> list[EvidenceRequirement]:
+    if profile == "service_health":
+        return _service_health_evidence_specs(stage=stage)
+    if profile == "backend_api_db":
+        return _backend_api_db_evidence_specs(stage=stage, summary=summary)
+    return []
+
+
+def _service_health_evidence_specs(*, stage: str) -> list[EvidenceRequirement]:
     if stage == "Verification":
-        additions.extend(
-            [
-                EvidenceRequirement(
-                    name="service_health_contract",
-                    allowed_kinds=["command", "artifact", "report"],
-                    required_fields=["summary"],
-                ),
-                EvidenceRequirement(
-                    name="service_health_in_process",
-                    allowed_kinds=["command", "artifact", "report"],
-                    required_fields=["summary"],
-                ),
-                EvidenceRequirement(
-                    name="service_health_capability",
-                    allowed_kinds=["command", "artifact", "report"],
-                    required_fields=["summary"],
-                ),
-            ]
-        )
-    elif stage == "GovernanceReview":
-        additions.append(
+        return [
+            EvidenceRequirement(
+                name="service_health_contract",
+                allowed_kinds=["command", "artifact", "report"],
+                required_fields=["summary"],
+            ),
+            EvidenceRequirement(
+                name="service_health_in_process",
+                allowed_kinds=["command", "artifact", "report"],
+                required_fields=["summary"],
+            ),
+            EvidenceRequirement(
+                name="service_health_capability",
+                allowed_kinds=["command", "artifact", "report"],
+                required_fields=["summary"],
+            ),
+        ]
+    if stage == "GovernanceReview":
+        return [
             EvidenceRequirement(
                 name="service_health_evidence_audit",
                 allowed_kinds=["artifact", "report"],
                 required_fields=["summary"],
             )
+        ]
+    return []
+
+
+_BACKEND_ROUTE_EVIDENCE_ALIASES = {
+    "api_response": "backend_api_response",
+    "db_precondition": "backend_db_precondition",
+    "database_precondition": "backend_db_precondition",
+    "fixture_precondition": "backend_fixture_precondition",
+    "private_config": "backend_private_config_summary",
+    "private_config_summary": "backend_private_config_summary",
+    "logs": "backend_logs",
+    "log": "backend_logs",
+    "idempotency": "backend_idempotency",
+    "consistency": "backend_consistency",
+    "permission": "backend_permission",
+    "permissions": "backend_permission",
+    "concurrency": "backend_concurrency",
+    "side_effect": "backend_side_effect",
+    "side_effects": "backend_side_effect",
+}
+
+
+def _route_evidence_is_profile_alias(*, evidence_name: str, profile: str) -> bool:
+    if profile != "backend_api_db":
+        return False
+    return evidence_name.strip().lower() in _BACKEND_ROUTE_EVIDENCE_ALIASES
+
+
+def _backend_api_db_evidence_specs(*, stage: str, summary) -> list[EvidenceRequirement]:
+    if stage == "GovernanceReview":
+        return [
+            EvidenceRequirement(
+                name="backend_api_db_evidence_audit",
+                allowed_kinds=["artifact", "report"],
+                required_fields=["summary"],
+            )
+        ]
+    if stage != "Verification":
+        return []
+
+    required_names = {
+        "backend_api_response",
+        "backend_db_precondition",
+        "backend_fixture_precondition",
+        "backend_private_config_summary",
+    }
+    for evidence_name in getattr(summary, "route_required_evidence", []) or []:
+        normalized = str(evidence_name).strip().lower()
+        mapped = _BACKEND_ROUTE_EVIDENCE_ALIASES.get(normalized)
+        if mapped:
+            required_names.add(mapped)
+    if getattr(summary, "route_private_config_required", False):
+        required_names.add("backend_private_config_summary")
+
+    ordered_names = [
+        "backend_api_response",
+        "backend_db_precondition",
+        "backend_fixture_precondition",
+        "backend_private_config_summary",
+        "backend_logs",
+        "backend_idempotency",
+        "backend_consistency",
+        "backend_permission",
+        "backend_concurrency",
+        "backend_side_effect",
+    ]
+    return [
+        EvidenceRequirement(
+            name=name,
+            allowed_kinds=["command", "artifact", "report"],
+            required_fields=["summary"],
         )
-    else:
-        return specs
-    for spec in additions:
-        if spec.name not in names:
-            specs.append(spec)
-    return specs
+        for name in ordered_names
+        if name in required_names
+    ]
 
 
 _PRIVATE_CONFIG_RECOMMENDED_PROFILE_KEYS = ("TEST_BASE_URL", "TEST_AUTH_TOKEN", "TEST_DB_READONLY_DSN")

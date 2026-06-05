@@ -15,10 +15,11 @@ description: Produce final AI acceptance recommendation from product, verificati
 
 - `acceptance-report.md`
 
-The report must include recommendation, evidence summary, unmet criteria, residual risk, and whether a final human decision is ready.
+The report must include recommendation, evidence summary, unmet criteria, residual risk, and whether a final human decision is ready. The recommendation must be one of `recommended_go`, `recommended_no_go`, `needs_verification`, or `blocked`.
 
 ## Boundaries
 
 - Do not claim final human approval.
+- Do not recommend Go when required runtime/server evidence is partial, recovered after timeout, or missing.
 - Do not skip SessionHandoff.
 - Do not ignore governance blockers.

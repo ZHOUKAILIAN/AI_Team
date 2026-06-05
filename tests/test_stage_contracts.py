@@ -170,6 +170,81 @@ class StageContractTests(unittest.TestCase):
         self.assertIn("service_health_in_process", contract.evidence_requirements)
         self.assertIn("service_health_capability", contract.evidence_requirements)
 
+    def test_backend_api_db_verification_profile_adds_required_evidence(self) -> None:
+        from dataclasses import replace
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
+
+        repo_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("Fix backend API duplicate response", runtime_mode="harness")
+            summary = store.load_workflow_summary(session.session_id)
+            store.save_workflow_summary(
+                session,
+                replace(
+                    summary,
+                    current_state="Verification",
+                    current_stage="Verification",
+                    verification_mode="runtime_required",
+                    verification_profile="backend_api_db",
+                    route_required_evidence=[
+                        "api_response",
+                        "db_precondition",
+                        "logs",
+                        "idempotency",
+                        "consistency",
+                    ],
+                    route_private_config_required=True,
+                ),
+            )
+
+            contract = build_stage_contract(
+                repo_root=repo_root,
+                state_store=store,
+                session_id=session.session_id,
+                stage="Verification",
+            )
+
+        self.assertIn("independent_verification", contract.evidence_requirements)
+        self.assertIn("backend_api_response", contract.evidence_requirements)
+        self.assertIn("backend_db_precondition", contract.evidence_requirements)
+        self.assertIn("backend_fixture_precondition", contract.evidence_requirements)
+        self.assertIn("backend_private_config_summary", contract.evidence_requirements)
+        self.assertIn("backend_logs", contract.evidence_requirements)
+        self.assertIn("backend_idempotency", contract.evidence_requirements)
+        self.assertIn("backend_consistency", contract.evidence_requirements)
+
+    def test_backend_api_db_governance_profile_requires_evidence_audit(self) -> None:
+        from dataclasses import replace
+        from agent_team.stage_contracts import build_stage_contract
+        from agent_team.state import StateStore
+
+        repo_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory(dir=local_temp_dir()) as temp_dir:
+            store = StateStore(Path(temp_dir))
+            session = store.create_session("Govern backend API verification evidence", runtime_mode="harness")
+            summary = store.load_workflow_summary(session.session_id)
+            store.save_workflow_summary(
+                session,
+                replace(
+                    summary,
+                    current_state="GovernanceReview",
+                    current_stage="GovernanceReview",
+                    verification_profile="backend_api_db",
+                ),
+            )
+
+            contract = build_stage_contract(
+                repo_root=repo_root,
+                state_store=store,
+                session_id=session.session_id,
+                stage="GovernanceReview",
+            )
+
+        self.assertIn("layer_governance_review", contract.evidence_requirements)
+        self.assertIn("backend_api_db_evidence_audit", contract.evidence_requirements)
+
     def test_route_required_evidence_is_added_to_verification_contract(self) -> None:
         from dataclasses import replace
         from agent_team.stage_contracts import build_stage_contract
