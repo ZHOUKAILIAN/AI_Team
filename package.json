@@ -1,14 +1,40 @@
 {
-  "name": "agent-team-runtime-monorepo",
-  "private": true,
+  "name": "agent-team-runtime",
+  "version": "0.3.0-alpha.0",
+  "private": false,
+  "type": "module",
+  "description": "Traceable JS agent workflow runtime for software tasks.",
+  "bin": {
+    "agt": "packages/cli/dist/index.js"
+  },
   "workspaces": [
-    "apps/web"
+    "apps/web",
+    "packages/*"
   ],
   "scripts": {
-    "dev:web": "npm --workspace apps/web run dev",
-    "build:web": "npm --workspace apps/web run build",
-    "copy:web": "python3 -m agent_team.web_assets copy",
-    "build": "npm run build:web && npm run copy:web",
-    "typecheck:web": "npm --workspace apps/web run typecheck"
+    "build": "npm run build:packages && npm run build:web",
+    "build:packages": "tsc -b packages/runtime packages/migrator packages/server packages/cli",
+    "build:web": "npm --workspace @agent-team-runtime/web run build",
+    "dev:web": "npm --workspace @agent-team-runtime/web run dev",
+    "typecheck": "tsc -b packages/runtime packages/migrator packages/server packages/cli && npm --workspace @agent-team-runtime/web run typecheck",
+    "test": "npm --workspaces --if-present run test --include-workspace-root=false"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@openai/agents": "^0.11.6",
+    "@fastify/static": "^9.1.3",
+    "@fastify/websocket": "^11.2.0",
+    "commander": "^14.0.2",
+    "execa": "^9.6.0",
+    "fastify": "^5.6.2",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.14"
   }
 }

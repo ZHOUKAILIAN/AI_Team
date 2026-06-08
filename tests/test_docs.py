@@ -7,70 +7,73 @@ class DocsTests(unittest.TestCase):
         repo_root = Path(__file__).resolve().parents[1]
         readme = (repo_root / "README.md").read_text()
 
-        self.assertIn("# Agent Team CLI Runtime", readme)
-        self.assertIn("CLI-first", readme)
-        self.assertIn("orchestration runtime", readme)
-        self.assertIn("可自我进化", readme)
-        self.assertIn("五层九阶段流程", readme)
+        self.assertIn("# Agent Team Runtime", readme)
+        self.assertIn("JS/TypeScript", readme)
+        self.assertIn("agent workflow runtime", readme)
+        self.assertIn("OpenAI Agents SDK", readme)
+        self.assertIn("deterministic local fallback", readme)
+        self.assertIn("保留五层九阶段", readme)
         self.assertNotIn("Ops", readme)
 
     def test_readme_documents_agent_team_cli_usage(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
         readme = (repo_root / "README.md").read_text()
 
-        self.assertIn("releases/latest/download/install.sh", readme)
-        self.assertIn("releases/download/v0.1.0/install.sh", readme)
-        self.assertIn("Python 3.13+", readme)
-        self.assertIn("CHANGELOG.md", readme)
+        self.assertIn("Node.js 22+", readme)
+        self.assertIn("npm install", readme)
+        self.assertIn("npm run build", readme)
+        self.assertIn("npm link", readme)
         self.assertIn("agt run", readme)
-        self.assertIn("--executor dry-run", readme)
-        self.assertNotIn("--executor deterministic", readme)
-        self.assertIn("agt skill list", readme)
-        self.assertIn("agt skill default Implementation plan", readme)
-        self.assertIn("agt record-human-decision", readme)
-        self.assertIn("agt verify-stage-result", readme)
-        self.assertIn("完整命令仍兼容 `agent-team`", readme)
+        self.assertIn("agt status", readme)
+        self.assertIn("agt inspect", readme)
+        self.assertIn("agt decision", readme)
+        self.assertIn("agt migrate", readme)
+        self.assertIn("agt server", readme)
+        self.assertNotIn("--executor dry-run", readme)
+        self.assertNotIn("完整命令仍兼容 `agent-team`", readme)
         self.assertNotIn("install-codex-skill", readme)
         self.assertNotIn("codex-skill/agent-team-workflow", readme)
 
-    def test_readme_documents_skill_default_workflow(self) -> None:
+    def test_readme_documents_traceable_js_runtime_state(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
         readme = (repo_root / "README.md").read_text()
 
-        self.assertIn("Skill defaults and runtime workflow", readme)
-        self.assertIn(".agt/skill-preferences.yaml", readme)
-        self.assertIn(
-            "_runtime/sessions/<session-id>/roles/<role>/attempt-001/stage-results/<role>-stage-result.json",
-            readme,
-        )
+        self.assertIn(".agt/", readme)
+        self.assertIn("sessions/", readme)
+        self.assertIn("session.json", readme)
+        self.assertIn("workflow.json", readme)
+        self.assertIn("events.jsonl", readme)
+        self.assertIn("tool-calls.jsonl", readme)
+        self.assertIn("agents/", readme)
+        self.assertIn("prompt_traces/", readme)
+        self.assertIn("prompt_trace_id", readme)
+        self.assertIn("agent_run_id", readme)
+        self.assertIn("artifact_path", readme)
         self.assertNotIn("<role>-run-state.json", readme)
-        self.assertIn("details.skill_injection", readme)
 
     def test_readme_documents_task_worktree_policy(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
         readme = (repo_root / "README.md").read_text()
 
-        self.assertIn("Task worktrees", readme)
+        self.assertIn("task worktree", readme)
         self.assertIn(".agt/local/worktree-policy.json", readme)
-        self.assertIn("feature/<date>-<slug>", readme)
-        self.assertIn('["origin/test", "origin/main", "test", "main"]', readme)
-        self.assertIn(".agt/executor-env.json", readme)
-        self.assertIn(".agt/skill-preferences.yaml", readme)
-        self.assertIn(".agt/memory/", readme)
-        self.assertIn(".agt/session-index.json", readme)
-        self.assertIn(".agt/_runtime/", readme)
+        self.assertIn("session-index.json", readme)
+        self.assertIn("agt run --continue", readme)
+        self.assertIn("agt decision", readme)
+        self.assertIn("state_root", readme)
+        self.assertNotIn(".agt/executor-env.json", readme)
+        self.assertNotIn(".agt/skill-preferences.yaml", readme)
+        self.assertNotIn(".agt/memory/", readme)
+        self.assertIn("<source>/.agt/_runtime/sessions", readme)
 
     def test_readme_keeps_authoritative_team_workflow_contract(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
         readme = (repo_root / "README.md").read_text()
 
-        self.assertIn(
-            "Route -> ProductDefinition approval -> ProjectRuntime -> TechnicalDesign approval -> Implementation -> Verification -> GovernanceReview -> Acceptance -> SessionHandoff -> human Go/No-Go",
-            readme,
-        )
-        self.assertIn("Verification", readme)
-        self.assertIn("Acceptance", readme)
-        self.assertIn("human Go/No-Go", readme)
+        self.assertIn("route -> product_definition -> project_runtime -> technical_design -> implementation -> verification -> governance_review -> acceptance -> session_handoff", readme)
+        self.assertIn("verification", readme)
+        self.assertIn("acceptance", readme)
+        self.assertIn("full", readme)
         self.assertNotIn("Ops", readme)
 
     def test_runtime_docs_use_cli_runtime_naming(self) -> None:
@@ -102,6 +105,11 @@ class DocsTests(unittest.TestCase):
         self.assertIn("python-version: \"3.13\"", ci_workflow)
         self.assertIn("python -m unittest discover -s tests", ci_workflow)
         self.assertIn("python -m build", ci_workflow)
+        self.assertIn("node-version: \"22\"", ci_workflow)
+        self.assertIn("npm ci", ci_workflow)
+        self.assertIn("npm run typecheck", ci_workflow)
+        self.assertIn("npm run build", ci_workflow)
+        self.assertIn("npm test", ci_workflow)
         self.assertIn("tags:", release_workflow)
         self.assertIn("\"v*\"", release_workflow)
         self.assertIn("contents: write", release_workflow)
@@ -138,9 +146,9 @@ class DocsTests(unittest.TestCase):
         self.assertIn("M0", codex_harness)
         self.assertIn("M1", codex_harness)
         self.assertIn("M2", codex_harness)
-        self.assertIn("Codex 运行 Help", readme)
-        self.assertIn("Stage 资产说明", readme)
-        self.assertIn("Codex Harness 方案", readme)
+        self.assertIn("OpenAI SDK 执行", readme)
+        self.assertIn("状态目录", readme)
+        self.assertIn("技术方案", readme)
 
     def test_runtime_docs_do_not_list_ops_as_default_role(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
