@@ -20,8 +20,10 @@ program
   .description("Agent Team Runtime JS CLI")
   .version("0.3.0-alpha.0");
 
+// 初始化当前仓库的 runtime 状态目录和配置。
 program
   .command("init")
+  .description("初始化 .agt 状态目录和配置")
   .option("--repo-root <path>", "repository root", process.cwd())
   .option("--state-root <path>", "state root; defaults to <repo>/.agt")
   .option("--default-profile <profile>", "quick | investigate | full", "quick")
@@ -50,8 +52,10 @@ program
     console.log(`config_path: ${result.configPath}`);
   });
 
+// 启动新的 workflow session，或继续已有的未完成 session。
 program
   .command("run")
+  .description("运行或继续一个 agent workflow")
   .argument("[message...]", "task request")
   .option("--profile <profile>", "quick | investigate | full")
   .option("--repo-root <path>", "repository root", process.cwd())
@@ -85,6 +89,7 @@ program
       throw new Error("agt run requires a request message.");
     }
 
+    // 当命令行显式要求，或配置默认开启时，为本次任务创建隔离 worktree。
     const useTaskWorktree = options.taskWorktree || (config.task_worktree.enabled && options.taskWorktree !== false);
     let repoRoot = sourceRepoRoot;
     let stateRoot = sourceStateRoot;
@@ -118,8 +123,10 @@ program
     printResult(result);
   });
 
+// 记录人工关卡决策，并在 rework 时重置目标阶段之后的状态。
 program
   .command("decision")
+  .description("记录 session 的 go、no-go 或 rework 决策")
   .argument("<session-id>", "session id")
   .requiredOption("--decision <decision>", "go | no-go | rework")
   .option("--target-role <role>", "role to reset to when --decision rework")
@@ -137,8 +144,10 @@ program
     printResult(result);
   });
 
+// 打印最新 session 或指定 session 的 workflow 概览状态。
 program
   .command("status")
+  .description("查看 workflow 状态")
   .argument("[session-id]", "session id")
   .option("--state-root <path>", "state root", path.join(process.cwd(), ".agt"))
   .action(async (sessionId: string | undefined, options: { stateRoot: string }) => {
@@ -164,8 +173,10 @@ program
     }
   });
 
+// 以 JSON 输出一个 session 的 trace ledger，方便调试或复盘。
 program
   .command("inspect")
+  .description("查看 session 的 workflow、prompt、artifact、agent run 和 tool call")
   .argument("<session-id>", "session id")
   .option("--state-root <path>", "state root", path.join(process.cwd(), ".agt"))
   .action(async (sessionId: string, options: { stateRoot: string }) => {
@@ -181,8 +192,10 @@ program
     console.log(JSON.stringify({ session, workflow, prompts, artifacts, agent_runs: agentRuns, tool_calls: toolCalls }, null, 2));
   });
 
+// 将旧 Python/Codex runtime 的 session 迁移到新的 .agt session schema。
 program
   .command("migrate")
+  .description("迁移旧 runtime session")
   .requiredOption("--from <path>", "legacy .agt or .agent-team root")
   .option("--state-root <path>", "target state root", path.join(process.cwd(), ".agt"))
   .option("--dry-run", "scan without writing")
@@ -199,8 +212,10 @@ program
     console.log(JSON.stringify(report, null, 2));
   });
 
+// 启动本地 API 和 web 控制台，用于读取 session 状态和 trace 产物。
 program
   .command("server")
+  .description("启动 session API 和 web 控制台")
   .option("--state-root <path>", "state root", path.join(process.cwd(), ".agt"))
   .option("--host <host>", "host", "127.0.0.1")
   .option("--port <port>", "port", "8765")
