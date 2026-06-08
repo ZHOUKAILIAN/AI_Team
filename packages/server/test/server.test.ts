@@ -12,9 +12,13 @@ import {
 } from "@agent-team-runtime/runtime";
 import { createServer } from "../src/index.js";
 
+// FakeRunner：服务端测试用 runner，用固定输出构造可查询 session。
+// FakeRunner: server-test runner that creates queryable sessions with fixed output.
 class FakeRunner implements AgentRunner {
   readonly name = "local_fallback" as const;
 
+  // 模拟一个 stage 执行，并返回服务端 API 可读取的 trace 记录。
+  // Simulates one stage execution and returns trace records readable by server APIs.
   async runTask(task: AgentTask): Promise<AgentTaskResult> {
     const store = new RuntimeStore(path.join(task.repoRoot, ".agt-test"));
     const agentRun = await store.createAgentRun({
@@ -37,6 +41,8 @@ class FakeRunner implements AgentRunner {
 }
 
 describe("server", () => {
+  // 验证服务端会暴露 session detail、prompt、artifact 和 console snapshot。
+  // Verifies that the server exposes session detail, prompts, artifacts, and console snapshot.
   it("exposes traceable session data", async () => {
     const repoRoot = await mkdtemp(path.join(tmpdir(), "agt-server-"));
     const stateRoot = path.join(repoRoot, ".agt-test");

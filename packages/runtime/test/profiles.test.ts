@@ -13,9 +13,13 @@ import {
   stepsForProfile,
 } from "../src/index.js";
 
+// FakeRunner：测试用 runner，用确定性输出替代真实模型执行。
+// FakeRunner: test runner that replaces real model execution with deterministic output.
 class FakeRunner implements AgentRunner {
   readonly name = "local_fallback" as const;
 
+  // 模拟一个 stage 执行，并写入 agent run 记录。
+  // Simulates one stage execution and writes an agent-run record.
   async runTask(task: AgentTask): Promise<AgentTaskResult> {
     const store = new RuntimeStore(path.join(task.repoRoot, ".agt-test"));
     const agentRun = await store.createAgentRun({
@@ -38,6 +42,8 @@ class FakeRunner implements AgentRunner {
 }
 
 describe("profiles", () => {
+  // 验证 quick profile 默认包含轻量开发流程的五个阶段。
+  // Verifies that quick profile contains the five lightweight development stages by default.
   it("uses the lightweight quick profile by default", () => {
     expect(stepsForProfile("quick").map((step) => step.role)).toEqual([
       "planner",
@@ -48,6 +54,8 @@ describe("profiles", () => {
     ]);
   });
 
+  // 验证 quick workflow 会写入 prompt、artifact、agent run 和事件证据。
+  // Verifies that quick workflow writes prompts, artifacts, agent runs, and event evidence.
   it("runs a traceable quick workflow", async () => {
     const repoRoot = await mkdtemp(path.join(tmpdir(), "agt-runtime-"));
     const stateRoot = path.join(repoRoot, ".agt-test");
@@ -87,6 +95,8 @@ describe("profiles", () => {
     expect(events.some((event) => event.kind === "artifact_written")).toBe(true);
   });
 
+  // 验证 full profile 会在人工关卡停止，并在 go 决策后继续。
+  // Verifies that full profile stops at human gates and continues after a go decision.
   it("stops at full-profile human gates and continues after approval", async () => {
     const repoRoot = await mkdtemp(path.join(tmpdir(), "agt-runtime-"));
     const stateRoot = path.join(repoRoot, ".agt-test");
@@ -127,6 +137,8 @@ describe("profiles", () => {
     expect((await store.readPromptTraces(first.session_id)).length).toBeGreaterThanOrEqual(4);
   });
 
+  // 验证 rework 会清空目标阶段及下游阶段的旧 trace 指针。
+  // Verifies that rework clears stale trace pointers for the target and downstream stages.
   it("clears downstream trace pointers when a human requests rework", async () => {
     const repoRoot = await mkdtemp(path.join(tmpdir(), "agt-runtime-"));
     const stateRoot = path.join(repoRoot, ".agt-test");

@@ -51,6 +51,8 @@ const FULL_STEPS: WorkflowStepPlan[] = [
   { role: "session_handoff", writeAllowed: false, humanGateAfter: true },
 ];
 
+// 运行或继续一个 workflow，把每个 stage 的 prompt、agent run 和 artifact 串起来。
+// Runs or continues one workflow, connecting prompts, agent runs, and artifacts for each stage.
 export async function runWorkflow(options: RunWorkflowOptions): Promise<RunResult> {
   const repoRoot = path.resolve(options.repoRoot);
   const stateRoot = path.resolve(options.stateRoot ?? path.join(repoRoot, ".agt"));
@@ -197,6 +199,8 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<RunResul
   return runResult({ sessionId: session.session_id, workflow, profile, stateRoot, repoRoot, store });
 }
 
+// 记录人工决策，并根据 go/no-go/rework 更新 workflow 状态。
+// Records a human decision and updates workflow state for go, no-go, or rework.
 export async function recordHumanDecision(options: {
   stateRoot: string;
   sessionId: string;
@@ -270,6 +274,8 @@ export async function recordHumanDecision(options: {
   });
 }
 
+// 根据 profile 返回对应的 stage 执行计划。
+// Returns the stage execution plan for a runtime profile.
 export function stepsForProfile(profile: RuntimeProfile): WorkflowStepPlan[] {
   if (profile === "quick") {
     return QUICK_STEPS;
@@ -280,6 +286,8 @@ export function stepsForProfile(profile: RuntimeProfile): WorkflowStepPlan[] {
   return FULL_STEPS;
 }
 
+// 确保 workflow 里已有 step 列表；新 session 会在这里初始化 pending steps。
+// Ensures workflow steps exist; new sessions initialize pending steps here.
 async function ensureWorkflowSteps(
   store: RuntimeStore,
   sessionId: string,
@@ -305,6 +313,8 @@ async function ensureWorkflowSteps(
   }));
 }
 
+// 找出仍需执行的 steps，跳过 completed 和 skipped。
+// Finds steps that still need execution, skipping completed and skipped steps.
 function remainingSteps(workflow: WorkflowRecord, steps: WorkflowStepPlan[]): WorkflowStepPlan[] {
   const byRole = new Map(workflow.steps.map((step) => [step.role, step.status]));
   return steps.filter((step) => {
@@ -313,6 +323,8 @@ function remainingSteps(workflow: WorkflowRecord, steps: WorkflowStepPlan[]): Wo
   });
 }
 
+// 汇总已完成阶段和本轮刚产生的输出，作为后续 prompt 上下文。
+// Collects completed step summaries and fresh outputs as context for later prompts.
 function completedSummaries(workflow: WorkflowRecord, outputs: string[]): string[] {
   return [
     ...workflow.steps
@@ -322,6 +334,8 @@ function completedSummaries(workflow: WorkflowRecord, outputs: string[]): string
   ];
 }
 
+// 构造某个 stage 实际发送给 runner 的 prompt。
+// Builds the actual prompt sent to the runner for one stage.
 function promptForStep(profile: RuntimeProfile, role: AgentRole, request: string, previousOutputs: string[]): string {
   return [
     `Profile: ${profile}`,
@@ -334,6 +348,8 @@ function promptForStep(profile: RuntimeProfile, role: AgentRole, request: string
     .join("\n\n");
 }
 
+// 为不同 role 生成稳定、可读的 artifact 文件名。
+// Generates stable, readable artifact filenames for roles.
 function artifactNameForRole(role: AgentRole): string {
   const names: Partial<Record<AgentRole, string>> = {
     planner: "planner-report.md",
@@ -355,16 +371,22 @@ function artifactNameForRole(role: AgentRole): string {
   return names[role] ?? `${role}.md`;
 }
 
+// 返回下一个未完成也未跳过的 step，用于人工 go 后继续执行。
+// Returns the next step that is neither completed nor skipped after a human go decision.
 function nextPendingStep(workflow: WorkflowRecord) {
   return workflow.steps.find((step) => step.status !== "completed" && step.status !== "skipped");
 }
 
+// 判断 rework 时某个 role 是否位于目标阶段之后，需要清空旧 trace。
+// Checks whether a role is at or after the rework target and should have stale traces cleared.
 function shouldResetForRework(workflow: WorkflowRecord, role: AgentRole, target: string): boolean {
   const targetIndex = workflow.steps.findIndex((step) => step.role === target);
   const roleIndex = workflow.steps.findIndex((step) => step.role === role);
   return targetIndex >= 0 && roleIndex >= targetIndex;
 }
 
+// 把内部 workflow/session 状态压缩成 CLI/API 返回的标准结果。
+// Converts internal workflow and session state into the standard CLI/API result.
 function runResult(args: {
   sessionId: string;
   workflow: WorkflowRecord;
@@ -386,6 +408,8 @@ function runResult(args: {
   };
 }
 
+// 校验新建 session 必须提供非空用户需求。
+// Validates that a new session has a non-empty user request.
 function requiredRequest(value: string | undefined): string {
   const request = value?.trim();
   if (!request) {
@@ -394,10 +418,14 @@ function requiredRequest(value: string | undefined): string {
   return request;
 }
 
+// 抽取输出的第一行作为 workflow 摘要，并限制长度。
+// Extracts the first output line as the workflow summary and caps its length.
 function firstLine(value: string): string {
   return value.split("\n").find((line) => line.trim())?.trim().slice(0, 240) ?? "";
 }
 
+// 去掉空字符串并保持列表唯一。
+// Removes empty strings and keeps the list unique.
 function unique(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))];
 }

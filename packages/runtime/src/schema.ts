@@ -242,6 +242,8 @@ export const SessionIndexSchema = z.object({
 });
 export type SessionIndex = z.infer<typeof SessionIndexSchema>;
 
+// 返回当前时间的 ISO 字符串，用作所有 runtime 记录的统一时间格式。
+// Returns the current time as an ISO string for all runtime records.
 export function nowIso(): string {
   return new Date().toISOString();
 }

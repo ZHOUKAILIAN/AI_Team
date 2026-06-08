@@ -8,6 +8,8 @@ import { RuntimeStore } from "@agent-team-runtime/runtime";
 import { migrateLegacySessions } from "../src/index.js";
 
 describe("migrator", () => {
+  // 验证迁移器 dry-run 不写入，apply 会生成新 schema 的 session。
+  // Verifies that migrator dry-run is read-only and apply creates a new-schema session.
   it("dry-runs and applies legacy session migration", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "agt-migrate-"));
     const legacySession = path.join(root, ".agt", "_runtime", "sessions", "legacy-1");

@@ -26,6 +26,8 @@ const laneStages = [
 ];
 type SessionFilter = "all" | "waiting_human" | "blocked" | "in_progress";
 
+// ProjectWorkbenchPage：展示单个项目的看板、worktree 摘要和待处理动作。
+// ProjectWorkbenchPage: shows one project's board, worktree summaries, and current action.
 export function ProjectWorkbenchPage({ snapshot, projectId, language, searchQuery, onBack, onOpenSession }: Props) {
   const t = messages[language];
   const [filter, setFilter] = useState<SessionFilter>("all");
@@ -130,6 +132,8 @@ export function ProjectWorkbenchPage({ snapshot, projectId, language, searchQuer
   );
 }
 
+// StageLane：渲染某个 workflow 阶段的 session 列。
+// StageLane: renders the session column for one workflow stage.
 function StageLane({
   stage,
   project,
@@ -167,6 +171,8 @@ function StageLane({
   );
 }
 
+// 判断 session 是否匹配当前搜索词。
+// Checks whether a session matches the current search query.
 function matchesSession(session: SessionSummary, searchQuery: string) {
   const query = searchQuery.trim().toLowerCase();
   if (!query) return true;
@@ -183,11 +189,15 @@ function matchesSession(session: SessionSummary, searchQuery: string) {
     .includes(query);
 }
 
+// 判断 session 是否满足当前状态筛选器。
+// Checks whether a session satisfies the current status filter.
 function matchesSessionFilter(session: SessionSummary, filter: SessionFilter) {
   if (filter === "all") return true;
   return session.workflow_status === filter;
 }
 
+// SessionCard：渲染看板中的一个 session 卡片。
+// SessionCard: renders one session card inside the board.
 function SessionCard({ session, language, onOpen }: { session: SessionSummary; language: Language; onOpen: () => void }) {
   const t = messages[language];
   return (
@@ -204,6 +214,8 @@ function SessionCard({ session, language, onOpen }: { session: SessionSummary; l
   );
 }
 
+// 把旧 state/current_stage 归一化到看板列名。
+// Normalizes legacy state/current_stage values into board lane names.
 function normalizedStage(stage: string, state: string) {
   if (state === "Done") return "SessionHandoff";
   if (state === "WaitForHumanDecision") return "SessionHandoff";
@@ -214,6 +226,8 @@ function normalizedStage(stage: string, state: string) {
   return "Implementation";
 }
 
+// 把 workflow status 转成当前语言的展示标签。
+// Converts workflow status into a localized display label.
 function statusLabel(status: string, t: typeof messages.zh | typeof messages.en) {
   if (status === "blocked") return t.blocked;
   if (status === "waiting_human") return t.waitingHuman;
@@ -221,12 +235,16 @@ function statusLabel(status: string, t: typeof messages.zh | typeof messages.en)
   return t.inProgress;
 }
 
+// 根据当前阶段计算 session 卡片里的进度条宽度。
+// Calculates the progress bar width for a session card from its current stage.
 function progressFor(session: SessionSummary) {
   const stage = normalizedStage(session.current_stage, session.current_state);
   const index = laneStages.indexOf(stage);
   return `${Math.max(18, (index + 1) * 18)}%`;
 }
 
+// 根据阻塞、等待人工和活跃 session 推导项目下一步动作。
+// Derives the project's next action from blocked, waiting, and active sessions.
 function currentAction(project: ProjectSummary, language: Language) {
   const blocked = project.sessions.find((session) => session.workflow_status === "blocked");
   if (blocked) return language === "zh" ? `先处理阻塞：${blocked.blocked_reason || blocked.request}` : `Resolve blocker first: ${blocked.blocked_reason || blocked.request}`;
@@ -237,6 +255,8 @@ function currentAction(project: ProjectSummary, language: Language) {
   return language === "zh" ? "当前项目暂无待处理动作。" : "No current action for this project.";
 }
 
+// Metric：渲染项目工作台顶部的数字指标。
+// Metric: renders one numeric metric in the project workbench.
 function Metric({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-2xl border border-console-line bg-white p-3">
@@ -246,6 +266,8 @@ function Metric({ label, value }: { label: string; value: number }) {
   );
 }
 
+// EmptyState：项目不存在或没有 session 时的空状态。
+// EmptyState: renders the empty state when a project or sessions are missing.
 function EmptyState({ message, onBack, label }: { message: string; onBack: () => void; label: string }) {
   return (
     <div className="rounded-[22px] border border-console-line bg-console-surface p-8 shadow-console">

@@ -10,6 +10,8 @@ if (!root) {
   throw new Error("Root element #root was not found.");
 }
 
+// 挂载 React 控制台应用到 index.html 的 root 节点。
+// Mounts the React console app into the root node from index.html.
 createRoot(root).render(
   <React.StrictMode>
     <App />

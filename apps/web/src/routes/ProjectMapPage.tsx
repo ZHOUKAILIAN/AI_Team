@@ -13,6 +13,8 @@ type Props = {
 
 type ProjectFilter = "all" | "blocked" | "waiting_human";
 
+// ProjectMapPage：展示项目级拓扑、筛选器和当前选中项目概览。
+// ProjectMapPage: renders the project topology, filters, and selected project overview.
 export function ProjectMapPage({ snapshot, language, searchQuery, onOpenProject }: Props) {
   const t = messages[language];
   const [selectedId, setSelectedId] = useState("");
@@ -120,6 +122,8 @@ export function ProjectMapPage({ snapshot, language, searchQuery, onOpenProject 
   );
 }
 
+// ProjectNode：把一个项目渲染成地图上的圆形节点。
+// ProjectNode: renders one project as a circular node on the map.
 function ProjectNode({
   project,
   index,
@@ -164,6 +168,8 @@ function ProjectNode({
   );
 }
 
+// 判断项目及其 session 文本是否匹配搜索词。
+// Checks whether project and session text matches the search query.
 function matchesProject(project: ProjectSummary, searchQuery: string) {
   const query = searchQuery.trim().toLowerCase();
   if (!query) return true;
@@ -183,12 +189,16 @@ function matchesProject(project: ProjectSummary, searchQuery: string) {
   return haystack.includes(query);
 }
 
+// 判断项目是否满足当前风险筛选器。
+// Checks whether a project satisfies the current risk filter.
 function matchesFilter(project: ProjectSummary, filter: ProjectFilter) {
   if (filter === "blocked") return project.blocked_count > 0;
   if (filter === "waiting_human") return project.waiting_human_count > 0;
   return true;
 }
 
+// 根据项目阻塞/等待/活跃数量生成风险标签。
+// Builds a risk label from project blocked, waiting, and active counts.
 function projectRiskLabel(project: ProjectSummary, language: Language) {
   const t = messages[language];
   if (project.blocked_count > 0) return `${project.blocked_count} ${t.blocked}`;
@@ -196,6 +206,8 @@ function projectRiskLabel(project: ProjectSummary, language: Language) {
   return `${project.active_count} ${t.active}`;
 }
 
+// MetricGrid：展示项目的 worktree/session/blocked 关键指标。
+// MetricGrid: displays key worktree, session, and blocked metrics for a project.
 function MetricGrid({ project, language }: { project: ProjectSummary; language: Language }) {
   const t = messages[language];
   return (
@@ -207,6 +219,8 @@ function MetricGrid({ project, language }: { project: ProjectSummary; language: 
   );
 }
 
+// Metric：渲染一个小型数字指标块。
+// Metric: renders one compact numeric metric block.
 function Metric({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-2xl border border-console-line bg-white p-3">
@@ -216,6 +230,8 @@ function Metric({ label, value }: { label: string; value: number }) {
   );
 }
 
+// Legend：渲染项目地图的状态颜色图例。
+// Legend: renders one status color legend entry for the project map.
 function Legend({ color, label }: { color: string; label: string }) {
   return (
     <div className="flex items-center gap-2">

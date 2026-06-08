@@ -20,7 +20,8 @@ program
   .description("Agent Team Runtime JS CLI")
   .version("0.3.0-alpha.0");
 
-// 初始化当前仓库的 runtime 状态目录和配置。
+// init 命令：初始化当前仓库的 runtime 状态目录和配置。
+// init command: initialize the runtime state layout and config for one repository.
 program
   .command("init")
   .description("初始化 .agt 状态目录和配置")
@@ -30,6 +31,8 @@ program
   .option("--default-model <model>", "OpenAI model", "gpt-5.4-mini")
   .option("--task-worktree", "enable isolated task worktrees by default")
   .option("--human-gates", "enable human gates by default")
+  // 处理 init：解析路径和默认配置，然后创建 .agt layout。
+  // Handles init: resolve paths and default config, then create the .agt layout.
   .action(async (options: InitOptions) => {
     const repoRoot = path.resolve(options.repoRoot);
     const result = await initRuntime({
@@ -52,7 +55,8 @@ program
     console.log(`config_path: ${result.configPath}`);
   });
 
-// 启动新的 workflow session，或继续已有的未完成 session。
+// run 命令：启动新的 workflow session，或继续已有的未完成 session。
+// run command: start a new workflow session or continue an unfinished session.
 program
   .command("run")
   .description("运行或继续一个 agent workflow")
@@ -65,6 +69,8 @@ program
   .option("--task-worktree", "create an isolated git worktree for this run")
   .option("--no-task-worktree", "disable configured task worktree for this run")
   .option("--human-gates", "stop full profile at ProductDefinition, TechnicalDesign, and final handoff gates")
+  // 处理 run：决定直接在当前仓库执行、创建 task worktree，或继续旧 session。
+  // Handles run: choose current repo execution, create a task worktree, or continue an old session.
   .action(async (messageParts: string[], options: RunOptions) => {
     const sourceRepoRoot = path.resolve(options.repoRoot);
     const sourceStateRoot = path.resolve(options.stateRoot ?? path.join(sourceRepoRoot, ".agt"));
@@ -90,6 +96,7 @@ program
     }
 
     // 当命令行显式要求，或配置默认开启时，为本次任务创建隔离 worktree。
+    // Create an isolated worktree when requested by CLI or enabled by config.
     const useTaskWorktree = options.taskWorktree || (config.task_worktree.enabled && options.taskWorktree !== false);
     let repoRoot = sourceRepoRoot;
     let stateRoot = sourceStateRoot;
@@ -123,7 +130,8 @@ program
     printResult(result);
   });
 
-// 记录人工关卡决策，并在 rework 时重置目标阶段之后的状态。
+// decision 命令：记录人工关卡决策，并在 rework 时重置目标阶段之后的状态。
+// decision command: record a human gate decision and reset downstream state on rework.
 program
   .command("decision")
   .description("记录 session 的 go、no-go 或 rework 决策")
@@ -131,6 +139,8 @@ program
   .requiredOption("--decision <decision>", "go | no-go | rework")
   .option("--target-role <role>", "role to reset to when --decision rework")
   .option("--state-root <path>", "state root", path.join(process.cwd(), ".agt"))
+  // 处理 decision：定位真实 session store，写入人工决策，再同步主索引。
+  // Handles decision: resolve the real session store, record the decision, then mirror the root index.
   .action(async (sessionId: string, options: DecisionOptions) => {
     const sourceStore = new RuntimeStore(path.resolve(options.stateRoot));
     const target = await resolveSessionStore(sourceStore, sessionId);
@@ -144,12 +154,15 @@ program
     printResult(result);
   });
 
-// 打印最新 session 或指定 session 的 workflow 概览状态。
+// status 命令：打印最新 session 或指定 session 的 workflow 概览状态。
+// status command: print the high-level workflow state for the latest or requested session.
 program
   .command("status")
   .description("查看 workflow 状态")
   .argument("[session-id]", "session id")
   .option("--state-root <path>", "state root", path.join(process.cwd(), ".agt"))
+  // 处理 status：解析 session 位置，并输出 workflow 的关键状态字段。
+  // Handles status: resolve the session location and print key workflow fields.
   .action(async (sessionId: string | undefined, options: { stateRoot: string }) => {
     const store = new RuntimeStore(path.resolve(options.stateRoot));
     const target = sessionId
@@ -173,12 +186,15 @@ program
     }
   });
 
-// 以 JSON 输出一个 session 的 trace ledger，方便调试或复盘。
+// inspect 命令：以 JSON 输出一个 session 的 trace ledger，方便调试或复盘。
+// inspect command: dump a session trace ledger as JSON for debugging or review.
 program
   .command("inspect")
   .description("查看 session 的 workflow、prompt、artifact、agent run 和 tool call")
   .argument("<session-id>", "session id")
   .option("--state-root <path>", "state root", path.join(process.cwd(), ".agt"))
+  // 处理 inspect：聚合 session、workflow、prompt、artifact、agent run 和 tool call。
+  // Handles inspect: collect session, workflow, prompts, artifacts, agent runs, and tool calls.
   .action(async (sessionId: string, options: { stateRoot: string }) => {
     const sourceStore = new RuntimeStore(path.resolve(options.stateRoot));
     const target = await resolveSessionStore(sourceStore, sessionId);
@@ -192,7 +208,8 @@ program
     console.log(JSON.stringify({ session, workflow, prompts, artifacts, agent_runs: agentRuns, tool_calls: toolCalls }, null, 2));
   });
 
-// 将旧 Python/Codex runtime 的 session 迁移到新的 .agt session schema。
+// migrate 命令：将旧 Python/Codex runtime 的 session 迁移到新的 .agt session schema。
+// migrate command: convert legacy Python/Codex runtime sessions into the new .agt session schema.
 program
   .command("migrate")
   .description("迁移旧 runtime session")
@@ -200,6 +217,8 @@ program
   .option("--state-root <path>", "target state root", path.join(process.cwd(), ".agt"))
   .option("--dry-run", "scan without writing")
   .option("--apply", "write migrated sessions")
+  // 处理 migrate：执行 dry-run 扫描或 apply 写入，并输出迁移报告。
+  // Handles migrate: run a dry-run scan or apply writes, then print the migration report.
   .action(async (options: { from: string; stateRoot: string; dryRun?: boolean; apply?: boolean }) => {
     if (!options.dryRun && !options.apply) {
       throw new Error("Use --dry-run or --apply.");
@@ -212,13 +231,16 @@ program
     console.log(JSON.stringify(report, null, 2));
   });
 
-// 启动本地 API 和 web 控制台，用于读取 session 状态和 trace 产物。
+// server 命令：启动本地 API 和 web 控制台，用于读取 session 状态和 trace 产物。
+// server command: serve the local API and web console for session state and trace artifacts.
 program
   .command("server")
   .description("启动 session API 和 web 控制台")
   .option("--state-root <path>", "state root", path.join(process.cwd(), ".agt"))
   .option("--host <host>", "host", "127.0.0.1")
   .option("--port <port>", "port", "8765")
+  // 处理 server：启动只读控制台服务，并打印访问地址。
+  // Handles server: start the read-only console service and print its URL.
   .action(async (options: { stateRoot: string; host: string; port: string }) => {
     const url = await runServer({
       stateRoot: path.resolve(options.stateRoot),
@@ -228,6 +250,8 @@ program
     console.log(`server_url: ${url}`);
   });
 
+// 顶层错误处理：把 CLI 异常转成 stderr 和非零退出码。
+// Top-level error handler: convert CLI failures into stderr and a non-zero exit code.
 program.parseAsync().catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
@@ -258,6 +282,8 @@ type DecisionOptions = {
   stateRoot: string;
 };
 
+// 解析 profile 参数，只允许 runtime 已定义的三种 workflow 形态。
+// Parses the profile argument and allows only the three supported workflow shapes.
 function parseProfile(value: string): RuntimeProfile {
   if (value === "quick" || value === "investigate" || value === "full") {
     return value;
@@ -265,6 +291,8 @@ function parseProfile(value: string): RuntimeProfile {
   throw new Error(`Unsupported profile: ${value}`);
 }
 
+// 解析人工决策参数，避免未知字符串写入 workflow 状态。
+// Parses the human decision argument so unknown strings cannot enter workflow state.
 function parseDecision(value: string): "go" | "no-go" | "rework" {
   if (value === "go" || value === "no-go" || value === "rework") {
     return value;
@@ -272,6 +300,8 @@ function parseDecision(value: string): "go" | "no-go" | "rework" {
   throw new Error(`Unsupported decision: ${value}`);
 }
 
+// 解析 agent role 参数，用于 rework 时锁定可重置的目标阶段。
+// Parses the agent role argument used to target the reset point for rework.
 function parseAgentRole(value: string): AgentRole {
   const allowed = new Set<AgentRole>([
     "planner",
@@ -297,6 +327,8 @@ function parseAgentRole(value: string): AgentRole {
   throw new Error(`Unsupported role: ${value}`);
 }
 
+// 解析继续运行的目标 session，优先使用显式 session，其次找未完成 session。
+// Resolves the session to continue, preferring an explicit id and then unfinished sessions.
 async function resolveContinuation(store: RuntimeStore, requestedSessionId?: string): Promise<{
   sessionId: string;
   repoRoot: string;
@@ -317,6 +349,8 @@ async function resolveContinuation(store: RuntimeStore, requestedSessionId?: str
   return { sessionId: latest.session_id, repoRoot: latest.repo_root, stateRoot: latest.state_root };
 }
 
+// 解析 session 的真实 store；task worktree session 可能不在当前 stateRoot 下。
+// Resolves the real store for a session; task-worktree sessions may live outside the current stateRoot.
 async function resolveSessionStore(store: RuntimeStore, requestedSessionId: string): Promise<{
   sessionId: string;
   repoRoot: string;
@@ -337,6 +371,8 @@ async function resolveSessionStore(store: RuntimeStore, requestedSessionId: stri
   }
 }
 
+// 解析最近更新的 session，合并当前 stateRoot 和 session-index 的视角。
+// Resolves the most recently updated session across the current stateRoot and session-index view.
 async function resolveLatestSessionStore(store: RuntimeStore): Promise<{
   sessionId: string;
   repoRoot: string;
@@ -354,12 +390,16 @@ async function resolveLatestSessionStore(store: RuntimeStore): Promise<{
   throw new Error("No sessions found.");
 }
 
+// 把 worktree 内的 session 摘要同步回主 stateRoot 的 session-index。
+// Mirrors a worktree session summary back into the root stateRoot session-index.
 async function mirrorSessionIndex(sourceStore: RuntimeStore, targetStateRoot: string, sessionId: string): Promise<void> {
   const targetStore = new RuntimeStore(targetStateRoot);
   const session = await targetStore.loadSession(sessionId);
   await sourceStore.upsertSessionIndex(session);
 }
 
+// 输出 run/decision 的标准结果字段，方便脚本和人工查看同一份摘要。
+// Prints standard run/decision result fields for both scripts and human readers.
 function printResult(result: Awaited<ReturnType<typeof runWorkflow>>): void {
   console.log(`session_id: ${result.session_id}`);
   console.log(`profile: ${result.profile}`);

@@ -5,6 +5,8 @@ type Props = {
   label: string;
 };
 
+// StagePill：按 workflow 状态渲染颜色标签。
+// StagePill: renders a color-coded label for workflow status.
 export function StagePill({ status, label }: Props) {
   const className =
     status === "blocked"

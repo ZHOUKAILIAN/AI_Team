@@ -28,6 +28,8 @@ type ContentPreview = {
   content: string;
 };
 
+// SessionDetailPage：展示单个 session 的 workflow、prompt、artifact、tool call 和事件明细。
+// SessionDetailPage: shows one session's workflow, prompts, artifacts, tool calls, and events.
 export function SessionDetailPage({ snapshot, projectId, sessionId, language, onBack }: Props) {
   const t = messages[language];
   const [detail, setDetail] = useState<PanelSnapshot | null>(null);
@@ -36,6 +38,8 @@ export function SessionDetailPage({ snapshot, projectId, sessionId, language, on
   const project = snapshot.projects.find((item) => item.project_id === projectId);
   const summary = project?.sessions.find((session) => session.session_id === sessionId);
 
+  // 根据 sessionId 拉取详情，并把错误同步到页面状态。
+  // Fetches detail by sessionId and mirrors errors into page state.
   useEffect(() => {
     fetchSessionDetail(sessionId)
       .then((payload) => {
@@ -51,12 +55,16 @@ export function SessionDetailPage({ snapshot, projectId, sessionId, language, on
   const steps = useMemo(() => detail?.state.steps ?? [], [detail?.state.steps]);
   const currentStage = String(detail?.state.current_stage ?? summary?.current_stage ?? "");
 
+  // 打开 prompt 预览弹层，显示实际发送给 runner 的 prompt.md。
+  // Opens the prompt preview modal with the actual prompt.md sent to the runner.
   const openPrompt = (prompt: PromptTrace) => {
     fetchPromptContent(sessionId, prompt.prompt_id)
       .then((payload) => setPreview({ title: `${prompt.role} / ${prompt.prompt_id}`, content: payload.content }))
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
   };
 
+  // 打开 artifact 预览弹层，显示阶段产物正文。
+  // Opens the artifact preview modal with stage artifact content.
   const openArtifact = (artifact: Artifact) => {
     fetchArtifactContent(sessionId, artifact.name)
       .then((payload) => setPreview({ title: artifact.name, content: payload.content }))
@@ -199,6 +207,8 @@ export function SessionDetailPage({ snapshot, projectId, sessionId, language, on
   );
 }
 
+// StepRow：渲染 trace ledger 中的一个 workflow step。
+// StepRow: renders one workflow step in the trace ledger.
 function StepRow({ step, index, active, language }: { step: WorkflowStep; index: number; active: boolean; language: Language }) {
   return (
     <div className={`grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-start gap-3 rounded-2xl border p-3 ${active ? "border-console-amber bg-amber-50" : "border-console-line bg-white"}`}>
@@ -222,6 +232,8 @@ function StepRow({ step, index, active, language }: { step: WorkflowStep; index:
   );
 }
 
+// AgentRunCard：渲染一个 agent run 的输入、输出和 metadata。
+// AgentRunCard: renders input, output, and metadata for one agent run.
 function AgentRunCard({ run, language }: { run: AgentRun; language: Language }) {
   return (
     <details className="rounded-2xl border border-console-line bg-white p-3">
@@ -238,6 +250,8 @@ function AgentRunCard({ run, language }: { run: AgentRun; language: Language }) 
   );
 }
 
+// ToolCallCard：渲染一个 tool call 的输入和输出。
+// ToolCallCard: renders input and output for one tool call.
 function ToolCallCard({ call }: { call: ToolCall }) {
   return (
     <details className="rounded-2xl border border-console-line bg-white p-3">
@@ -253,6 +267,8 @@ function ToolCallCard({ call }: { call: ToolCall }) {
   );
 }
 
+// TraceBlock：以可滚动 pre 区块展示长文本 trace 内容。
+// TraceBlock: displays long trace text in a scrollable pre block.
 function TraceBlock({ label, value }: { label: string; value: string }) {
   return (
     <div>
@@ -264,12 +280,16 @@ function TraceBlock({ label, value }: { label: string; value: string }) {
   );
 }
 
+// 将 step status 映射到 StagePill 支持的状态类别。
+// Maps a step status into the status category supported by StagePill.
 function statusForPill(status: string) {
   if (status === "blocked") return "blocked";
   if (status === "completed") return "done";
   return "in_progress";
 }
 
+// 根据语言把内部 role 名转换为可读标签。
+// Converts an internal role name into a readable label for the selected language.
 function roleLabel(role: string, language: Language) {
   const zh: Record<string, string> = {
     planner: "规划",

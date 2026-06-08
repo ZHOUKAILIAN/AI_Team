@@ -21,6 +21,8 @@ const defaultSnapshot: ConsoleSnapshot = {
   projects: []
 };
 
+// App：控制台根组件，负责路由、语言、搜索和实时刷新。
+// App: root console component that owns routing, language, search, and live refresh.
 export function App() {
   const [language, setLanguage] = useState<Language>(() => readLanguage());
   const [route, setRoute] = useState<RouteState>(() => parseRoute(window.location.pathname));
@@ -29,6 +31,8 @@ export function App() {
   const [error, setError] = useState("");
   const t = messages[language];
 
+  // 重新拉取控制台快照，并把错误状态同步到页面。
+  // Reloads the console snapshot and synchronizes error state into the page.
   const reloadSnapshot = useCallback(() => {
     fetchConsoleSnapshot()
       .then((payload) => {
@@ -42,20 +46,30 @@ export function App() {
 
   const socketState = useRuntimeSocket(reloadSnapshot);
 
+  // 首次加载和 reload 函数变化时刷新控制台数据。
+  // Refreshes console data on first load and whenever the reload function changes.
   useEffect(() => {
     reloadSnapshot();
   }, [reloadSnapshot]);
 
+  // 持久化语言偏好，供下次打开控制台时复用。
+  // Persists language preference so it can be reused on the next console visit.
   useEffect(() => {
     window.localStorage.setItem("agent-team-console-language", language);
   }, [language]);
 
+  // 监听浏览器前进后退，并把 pathname 重新解析成本地路由状态。
+  // Listens to browser history navigation and parses pathname back into local route state.
   useEffect(() => {
+    // onPopState：同步浏览器 history 变化到 React route state。
+    // onPopState: syncs browser history changes into React route state.
     const onPopState = () => setRoute(parseRoute(window.location.pathname));
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
+  // 把 websocket 状态转成当前语言下的显示文案。
+  // Converts websocket state into a localized display label.
   const socketLabel = useMemo(() => {
     if (socketState === "connected") return t.connected;
     if (socketState === "connecting") return t.connecting;
@@ -63,6 +77,8 @@ export function App() {
     return t.disconnected;
   }, [socketState, t]);
 
+  // 更新浏览器路径和本地 route state。
+  // Updates both browser path and local route state.
   const navigate = (nextRoute: RouteState) => {
     const path = routeToPath(nextRoute);
     window.history.pushState(null, "", path);
@@ -151,11 +167,15 @@ export function App() {
   );
 }
 
+// 从 localStorage 读取语言偏好，默认中文。
+// Reads language preference from localStorage and defaults to Chinese.
 function readLanguage(): Language {
   const value = window.localStorage.getItem("agent-team-console-language");
   return value === "en" ? "en" : "zh";
 }
 
+// 把 URL pathname 解析成控制台内部路由状态。
+// Parses URL pathname into the console's internal route state.
 function parseRoute(pathname: string): RouteState {
   const parts = pathname.split("/").filter(Boolean);
   if (parts[0] === "projects" && parts[1] && parts[2] === "sessions" && parts[3]) {
@@ -167,12 +187,16 @@ function parseRoute(pathname: string): RouteState {
   return { name: "projects" };
 }
 
+// 把内部路由状态转换成浏览器路径。
+// Converts internal route state into a browser path.
 function routeToPath(route: RouteState): string {
   if (route.name === "project") return `/projects/${route.projectId}`;
   if (route.name === "session") return `/projects/${route.projectId}/sessions/${route.sessionId}`;
   return "/projects";
 }
 
+// 根据是否激活生成移动端底部导航按钮样式。
+// Builds mobile bottom-nav button classes from active state.
 function mobileNavClass(active: boolean) {
   return [
     "min-h-11 rounded-xl px-2 text-sm font-semibold",

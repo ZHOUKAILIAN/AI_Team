@@ -32,9 +32,13 @@ export type AgentTaskResult = {
 
 export type AgentRunner = {
   name: AgentRunRecord["runner"];
+  // 执行一个 workflow stage，并返回 agent run、输出和可观察证据。
+  // Runs one workflow stage and returns the agent run, output, and observable evidence.
   runTask(task: AgentTask): Promise<AgentTaskResult>;
 };
 
+// 根据环境变量选择真实 OpenAI sandbox runner 或本地 deterministic fallback。
+// Selects the real OpenAI sandbox runner or deterministic local fallback from environment variables.
 export function buildAgentRunner(store: RuntimeStore): AgentRunner {
   if (process.env.OPENAI_API_KEY || process.env.OPENAI_BASE_URL) {
     return new OpenAISandboxRunner(store);
@@ -42,11 +46,17 @@ export function buildAgentRunner(store: RuntimeStore): AgentRunner {
   return new LocalFallbackRunner(store);
 }
 
+// OpenAISandboxRunner：通过 OpenAI Agents SDK 在 sandbox 中执行 stage agent。
+// OpenAISandboxRunner: executes stage agents in a sandbox through the OpenAI Agents SDK.
 export class OpenAISandboxRunner implements AgentRunner {
   readonly name = "openai_sandbox" as const;
 
+  // 保存 RuntimeStore，用于写入 agent run、tool call 和 artifact trace。
+  // Stores RuntimeStore so agent runs, tool calls, and artifact traces can be written.
   constructor(private readonly store: RuntimeStore) {}
 
+  // 执行一个 stage prompt，并把 SDK 结果转成 runtime 的标准 trace。
+  // Runs one stage prompt and converts SDK results into the runtime trace schema.
   async runTask(task: AgentTask): Promise<AgentTaskResult> {
     const config = await this.store.loadConfig();
     const model = process.env.AGT_OPENAI_MODEL || process.env.OPENAI_MODEL || config.default_model;
@@ -130,6 +140,8 @@ export class OpenAISandboxRunner implements AgentRunner {
     }
   }
 
+  // 创建带有角色说明和读写权限约束的 SandboxAgent。
+  // Creates a SandboxAgent with role instructions and read/write permission constraints.
   private createAgent(task: AgentTask, model: string): Agent | SandboxAgent {
     const instructions = [
       `You are the ${task.role} agent in Agent Team Runtime.`,
@@ -149,6 +161,8 @@ export class OpenAISandboxRunner implements AgentRunner {
     });
   }
 
+  // 从 SDK run items 中提取 tool-like 记录，并写入 tool-calls.jsonl。
+  // Extracts tool-like records from SDK run items and writes them to tool-calls.jsonl.
   private async recordSdkToolCalls(task: AgentTask, agentRun: AgentRunRecord, items: unknown[]): Promise<void> {
     for (const item of items) {
       const json = serializeRunItem(item);
@@ -171,6 +185,8 @@ export class OpenAISandboxRunner implements AgentRunner {
     }
   }
 
+  // 记录 runtime 自身的一次 agent_run 级别 tool call。
+  // Records the runtime's own agent_run-level tool call.
   private async recordRuntimeToolCall(
     task: AgentTask,
     agentRun: AgentRunRecord,
@@ -190,6 +206,8 @@ export class OpenAISandboxRunner implements AgentRunner {
     await this.store.appendToolCall(call);
   }
 
+  // 捕获执行前的 git diff 文件列表，用于后续计算新增变更。
+  // Captures the pre-run git diff file list so later changes can be calculated.
   private async snapshotGit(repoRoot: string): Promise<string> {
     try {
       const result = await execa("git", ["diff", "--name-only"], { cwd: repoRoot });
@@ -199,6 +217,8 @@ export class OpenAISandboxRunner implements AgentRunner {
     }
   }
 
+  // 对比执行前后的 git diff，返回本次 stage 新增变化的文件。
+  // Compares git diff before and after execution and returns files newly changed by this stage.
   private async changedFiles(repoRoot: string, before: string): Promise<string[]> {
     try {
       const result = await execa("git", ["diff", "--name-only"], { cwd: repoRoot });
@@ -213,11 +233,17 @@ export class OpenAISandboxRunner implements AgentRunner {
   }
 }
 
+// LocalFallbackRunner：无 OpenAI 环境变量时的确定性本地 runner。
+// LocalFallbackRunner: deterministic local runner used when OpenAI environment variables are missing.
 export class LocalFallbackRunner implements AgentRunner {
   readonly name = "local_fallback" as const;
 
+  // 保存 RuntimeStore，用于记录 fallback run 的状态和 tool call。
+  // Stores RuntimeStore so fallback run state and tool calls can be recorded.
   constructor(private readonly store: RuntimeStore) {}
 
+  // 执行本地 fallback，只采集 git status 作为 smoke evidence。
+  // Runs the local fallback and records git status as smoke-test evidence.
   async runTask(task: AgentTask): Promise<AgentTaskResult> {
     const agentRun = await this.store.createAgentRun({
       sessionId: task.sessionId,
@@ -262,6 +288,8 @@ export class LocalFallbackRunner implements AgentRunner {
   }
 }
 
+// 执行 git status --short，并整理变更文件列表和摘要。
+// Runs git status --short and normalizes changed files plus a summary.
 async function runGitStatus(repoRoot: string): Promise<{
   stdout: string;
   stderr: string;
@@ -288,6 +316,8 @@ async function runGitStatus(repoRoot: string): Promise<{
   }
 }
 
+// 把 SDK finalOutput 统一转成可写入 artifact 的字符串。
+// Converts SDK finalOutput into a string suitable for artifact storage.
 function stringifyFinalOutput(value: unknown): string {
   if (typeof value === "string") {
     return value;
@@ -298,11 +328,15 @@ function stringifyFinalOutput(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+// 序列化 SDK run item，优先使用 toJSON 输出。
+// Serializes an SDK run item, preferring its toJSON output.
 function serializeRunItem(value: unknown): Record<string, unknown> {
   const withToJson = value as { toJSON?: () => unknown };
   return safeRecord(typeof withToJson?.toJSON === "function" ? withToJson.toJSON() : value);
 }
 
+// 压缩 OpenAI SDK 结果，生成可落盘的 sdk trace artifact。
+// Summarizes an OpenAI SDK result into a persisted sdk trace artifact.
 function summarizeOpenAIResult(result: {
   finalOutput?: unknown;
   lastResponseId?: string;
@@ -319,6 +353,8 @@ function summarizeOpenAIResult(result: {
   };
 }
 
+// 摘要化单个 raw response，避免把完整响应直接塞进控制台。
+// Summarizes one raw response so the console does not need the full response body.
 function summarizeRawResponse(value: unknown, index: number): Record<string, unknown> {
   const response = safeRecord(value);
   return {
@@ -331,6 +367,8 @@ function summarizeRawResponse(value: unknown, index: number): Record<string, unk
   };
 }
 
+// 摘要化单个 run item，并裁剪过长输入输出。
+// Summarizes one run item and truncates overly large inputs and outputs.
 function summarizeRunItem(value: unknown, index: number): Record<string, unknown> {
   const json = serializeRunItem(value);
   const raw = safeRecord(json.rawItem ?? json);
@@ -347,6 +385,8 @@ function summarizeRunItem(value: unknown, index: number): Record<string, unknown
   };
 }
 
+// 从 shell_call run items 中提取去重后的命令列表。
+// Extracts a deduplicated command list from shell_call run items.
 function commandsFromRunItems(items: unknown[]): string[] {
   const commands: string[] = [];
   for (const item of items) {
@@ -362,6 +402,8 @@ function commandsFromRunItems(items: unknown[]): string[] {
   return [...new Set(commands)];
 }
 
+// 判断 SDK run item 类型是否应记录为 runtime tool call。
+// Checks whether an SDK run item type should be recorded as a runtime tool call.
 function isToolLikeRunItem(rawType: string): boolean {
   return [
     "hosted_tool_call",
@@ -376,6 +418,8 @@ function isToolLikeRunItem(rawType: string): boolean {
   ].includes(rawType);
 }
 
+// 将 SDK run item 类型映射到 runtime tool call kind。
+// Maps an SDK run item type to a runtime tool-call kind.
 function kindForRunItem(rawType: string): ToolCallRecord["kind"] {
   if (rawType.startsWith("shell_call")) {
     return "shell";
@@ -386,6 +430,8 @@ function kindForRunItem(rawType: string): ToolCallRecord["kind"] {
   return "runtime";
 }
 
+// 为 SDK run item 推导一个稳定的 tool call 名称。
+// Derives a stable tool-call name for an SDK run item.
 function nameForRunItem(rawType: string, raw: Record<string, unknown>): string {
   if (typeof raw.name === "string" && raw.name) {
     return raw.name;
@@ -399,6 +445,8 @@ function nameForRunItem(rawType: string, raw: Record<string, unknown>): string {
   return rawType;
 }
 
+// 从 SDK run item 中抽取适合落盘的输入字段。
+// Extracts persistable input fields from an SDK run item.
 function inputForRunItem(rawType: string, raw: Record<string, unknown>): Record<string, unknown> {
   if (rawType === "shell_call") {
     return safeRecord(raw.action);
@@ -415,6 +463,8 @@ function inputForRunItem(rawType: string, raw: Record<string, unknown>): Record<
   return { call_id: raw.callId ?? raw.call_id ?? "", raw_type: rawType };
 }
 
+// 从 SDK run item 中抽取适合落盘的输出字段。
+// Extracts persistable output fields from an SDK run item.
 function outputForRunItem(rawType: string, raw: Record<string, unknown>): Record<string, unknown> {
   if (rawType === "shell_call_output") {
     return { output: raw.output ?? [] };
@@ -431,6 +481,8 @@ function outputForRunItem(rawType: string, raw: Record<string, unknown>): Record
   return {};
 }
 
+// 从 shell_call_output 中解析退出码；无法解析时保持 undefined。
+// Parses exit code from shell_call_output and leaves it undefined when unavailable.
 function exitCodeForRunItem(rawType: string, raw: Record<string, unknown>): number | null | undefined {
   if (rawType !== "shell_call_output" || !Array.isArray(raw.output)) {
     return undefined;
@@ -444,14 +496,20 @@ function exitCodeForRunItem(rawType: string, raw: Record<string, unknown>): numb
   return undefined;
 }
 
+// 把 unknown 安全收窄为普通对象；非对象返回空对象。
+// Safely narrows unknown to a plain record and returns an empty record otherwise.
 function safeRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
+// 把 unknown 安全收窄为字符串；非字符串返回空串。
+// Safely narrows unknown to a string and returns an empty string otherwise.
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+// 裁剪过长字符串，避免 trace artifact 和 UI 输出过大。
+// Truncates overly long strings so trace artifacts and UI output stay bounded.
 function redactLargeStrings(value: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(value).map(([key, item]) => [

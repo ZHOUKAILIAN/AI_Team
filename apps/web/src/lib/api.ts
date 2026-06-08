@@ -181,27 +181,37 @@ export type PanelSnapshot = {
 
 export type TextPayload<T> = T & { content: string };
 
+// 拉取控制台总览快照，用于项目地图和统计入口。
+// Fetches the console snapshot used by the project map and summary stats.
 export async function fetchConsoleSnapshot(): Promise<ConsoleSnapshot> {
   return fetchJson<ConsoleSnapshot>("/api/console/snapshot");
 }
 
+// 拉取单个 session 的面板详情快照。
+// Fetches the panel detail snapshot for one session.
 export async function fetchSessionDetail(sessionId: string): Promise<PanelSnapshot> {
   const payload = await fetchJson<{ snapshot: PanelSnapshot }>(`/api/sessions/${encodeURIComponent(sessionId)}`);
   return payload.snapshot;
 }
 
+// 拉取指定 prompt trace 的正文内容。
+// Fetches the text content for one prompt trace.
 export async function fetchPromptContent(sessionId: string, promptId: string): Promise<TextPayload<{ prompt: PromptTrace }>> {
   return fetchJson<TextPayload<{ prompt: PromptTrace }>>(
     `/api/sessions/${encodeURIComponent(sessionId)}/prompts/${encodeURIComponent(promptId)}`
   );
 }
 
+// 拉取指定 artifact 的正文内容。
+// Fetches the text content for one artifact.
 export async function fetchArtifactContent(sessionId: string, artifactName: string): Promise<TextPayload<{ artifact: Artifact }>> {
   return fetchJson<TextPayload<{ artifact: Artifact }>>(
     `/api/sessions/${encodeURIComponent(sessionId)}/artifacts/${encodeURIComponent(artifactName)}`
   );
 }
 
+// 统一 JSON 请求逻辑，并把 HTTP 非 2xx 转成异常。
+// Centralizes JSON requests and converts non-2xx HTTP responses into errors.
 async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url, { headers: { Accept: "application/json" } });
   if (!response.ok) {

@@ -5,6 +5,8 @@ type Props = {
   label: string;
 };
 
+// SocketIndicator：展示 websocket 连接状态。
+// SocketIndicator: displays websocket connection state.
 export function SocketIndicator({ state, label }: Props) {
   const color = state === "connected" ? "bg-console-green" : state === "connecting" ? "bg-console-amber" : "bg-console-red";
   return (

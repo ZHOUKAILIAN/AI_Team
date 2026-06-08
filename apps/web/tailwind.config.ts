@@ -1,5 +1,7 @@
 import type { Config } from "tailwindcss";
 
+// Tailwind 配置：定义控制台主题 token 和扫描范围。
+// Tailwind config: defines console theme tokens and content scan scope.
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {

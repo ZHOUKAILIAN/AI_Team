@@ -37,6 +37,8 @@ export type MigrationReport = {
   items: MigrationItem[];
 };
 
+// 扫描旧 runtime session，并按 dry-run/apply 模式生成迁移报告。
+// Scans legacy runtime sessions and builds a migration report in dry-run or apply mode.
 export async function migrateLegacySessions(options: MigrationOptions): Promise<MigrationReport> {
   const sourceRoot = path.resolve(options.sourceRoot);
   const targetStateRoot = path.resolve(options.targetStateRoot);
@@ -71,6 +73,8 @@ export async function migrateLegacySessions(options: MigrationOptions): Promise<
   return report;
 }
 
+// 迁移单个 legacy session，必要时保留 partial/skipped 原因。
+// Migrates one legacy session while preserving partial or skipped reasons.
 async function migrateOne(args: {
   sourceRoot: string;
   sourceDir: string;
@@ -167,6 +171,8 @@ async function migrateOne(args: {
   };
 }
 
+// 查找旧 runtime 可能存放 session 的目录。
+// Finds directories where legacy runtime sessions may be stored.
 async function findLegacySessionDirs(sourceRoot: string): Promise<string[]> {
   const candidates = [
     path.join(sourceRoot, "_runtime", "sessions"),
@@ -187,6 +193,8 @@ async function findLegacySessionDirs(sourceRoot: string): Promise<string[]> {
   return [...new Set(dirs)].sort();
 }
 
+// 从旧 workflow_summary 的 stage_statuses 生成新 workflow steps。
+// Converts legacy workflow_summary stage_statuses into new workflow steps.
 function legacySteps(summary: Record<string, unknown>) {
   const statuses = safeObject(summary.stage_statuses);
   return Object.entries(statuses).map(([role, status]) => ({
@@ -200,6 +208,8 @@ function legacySteps(summary: Record<string, unknown>) {
   }));
 }
 
+// 复制旧 events.jsonl，并包装成新 runtime event 结构。
+// Copies legacy events.jsonl and wraps entries into the new runtime event structure.
 async function copyLegacyEvents(sourceDir: string, targetSessionId: string, store: RuntimeStore): Promise<void> {
   const sourceEvents = path.join(sourceDir, "events.jsonl");
   if (!existsSync(sourceEvents)) {
@@ -224,6 +234,8 @@ async function copyLegacyEvents(sourceDir: string, targetSessionId: string, stor
   }
 }
 
+// 把旧 session 和 workflow 摘要复制成 migration artifact。
+// Copies legacy session and workflow summaries as migration artifacts.
 async function copyLegacyArtifacts(sourceDir: string, targetSessionId: string, store: RuntimeStore): Promise<void> {
   for (const name of ["session.json", "workflow_summary.json"]) {
     const source = path.join(sourceDir, name);
@@ -245,6 +257,8 @@ async function copyLegacyArtifacts(sourceDir: string, targetSessionId: string, s
   });
 }
 
+// 将旧 current_state 映射为新 workflow status。
+// Maps legacy current_state into the new workflow status.
 function mapStatus(currentState: string): "in_progress" | "waiting_human" | "blocked" | "done" {
   if (currentState === "Done") return "done";
   if (currentState.startsWith("WaitFor")) return "waiting_human";
@@ -252,6 +266,8 @@ function mapStatus(currentState: string): "in_progress" | "waiting_human" | "blo
   return "in_progress";
 }
 
+// 将旧 stage status 归一化为新 step status。
+// Normalizes a legacy stage status into the new step status.
 function normalizeStepStatus(status: string): "pending" | "running" | "completed" | "blocked" | "skipped" {
   if (["completed", "passed", "recommended_go", "approved"].includes(status)) return "completed";
   if (["blocked", "failed"].includes(status)) return "blocked";
@@ -259,6 +275,8 @@ function normalizeStepStatus(status: string): "pending" | "running" | "completed
   return "pending";
 }
 
+// 将旧阶段名归一化为当前 AgentRole。
+// Normalizes a legacy stage name into the current AgentRole.
 function normalizeLegacyRole(value: string): AgentRole {
   const normalized = value.toLowerCase().replace(/[-_\s]/g, "");
   const map: Record<string, AgentRole> = {
@@ -279,6 +297,8 @@ function normalizeLegacyRole(value: string): AgentRole {
   return map[normalized] ?? "migration";
 }
 
+// 安全地把 unknown 收窄为普通对象，非对象返回空对象。
+// Safely narrows unknown to a plain record and returns an empty record otherwise.
 function safeObject(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
