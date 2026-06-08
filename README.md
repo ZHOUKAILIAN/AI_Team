@@ -125,6 +125,8 @@ SDK runner 会创建 `SandboxAgent`，把当前仓库挂载到 sandbox 的 `/wor
       artifacts/
         index.jsonl
         <role-output>.md
+  local/
+    worktree-policy.json
   prompt_traces/
     index.jsonl
     <prompt_id>/
@@ -134,6 +136,7 @@ SDK runner 会创建 `SandboxAgent`，把当前仓库挂载到 sandbox 的 `/wor
 ```
 
 这些文件是 runtime 的事实来源。控制台和 CLI 都从这里读取，不再从模型摘要反推状态。
+`agt init` 也会写入 `.agt/local/worktree-policy.json`，用于记录 task worktree 的默认策略。
 
 如果不需要保留旧 session、prompt trace、tool-call 记录和历史控制台数据，可以直接删除旧 `.agt` 后重新初始化：
 
