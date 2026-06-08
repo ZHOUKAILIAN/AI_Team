@@ -1,227 +1,231 @@
-# Agent Team CLI Runtime
+# Agent Team Runtime
 
-`Agent Team` 是一个 CLI-first 的 AI team orchestration runtime。它的目标不是提供一组 prompt，而是用状态机、stage contract、证据 gate 和可回放运行态，把 AI 团队工作约束成可审计、可恢复、可自我进化的工程流程。
+`agent-team-runtime` 是一个 JS/TypeScript 的 agent workflow runtime。它的目标是把“小需求快速跑、复杂需求可追踪”做成同一套本地工具，而不是每次再启动一组黑盒的 `codex --yolo` 进程。
 
-## 定位
+新的入口是 `agt` CLI。runtime 自己负责 session、workflow、agent run、tool call 和迁移记录；模型执行通过 OpenAI Agents SDK 的 `SandboxAgent` 完成。没有 OpenAI 环境变量时会自动使用 deterministic local fallback，方便测试和离线验证。
 
-- 对外主入口是 `agt` CLI，完整命令仍兼容 `agent-team`。
-- 对内是可扩展的 orchestration runtime。
-- 默认运行五层九阶段流程，而不是旧的 Product / Dev / QA 三角色串联。
-- 反馈、返工、证据、人工决策和本地接力都会沉淀成运行时资产。
+## 当前能力
 
-## 根目录约定
-
-- `agt-control/`: 仓库内共享、正式、可提交的 Agent Team 控制面。
-- `.agt/`: 本地隐藏的运行态、私有配置、session 状态、memory 和 runtime trace。
-
-## 五层阶段
-
-权威流程链路：
-
-```text
-Route -> ProductDefinition approval -> ProjectRuntime -> TechnicalDesign approval -> Implementation -> Verification -> GovernanceReview -> Acceptance -> SessionHandoff -> human Go/No-Go
-```
-
-阶段对应关系：
-
-- `Route`: 需求路由，识别 L1/L2/L3/L4/L5 影响、红线和所需阶段。
-- `ProductDefinition`: L1 产品定义 delta，只处理稳定产品语义、核心对象、运行模型和长期边界。
-- `ProjectRuntime`: L3 项目落地 delta，记录本项目入口、目录、运行、打包和默认承载方式。
-- `TechnicalDesign`: L2 技术设计，基于 L1/L3 和当前实现现实制定实现方案。
-- `Implementation`: L2 实现现实，修改代码、测试、运行脚本并记录自检证据。
-- `Verification`: 独立验证实现结果，不能被 Implementation 自测替代。
-- `GovernanceReview`: L4 仓库治理审查，检查五层边界、证据、回写和 public/private 风险。
-- `Acceptance`: AI 最终验收建议，不代替人的最终决策。
-- `SessionHandoff`: L5 本地开发控制层，保留接力、未决项和本地现场。
-
-下层依赖上层：低层只能报告 drift 或 delta，不能反向改写上层正式依据。
-
-## CLI
-
-主要命令：
-
-```bash
-agt init
-agt run --message "<你的需求>"
-agt status --session-id <session_id> [--verbose|--json]
-agt panel --session-id <session_id> [--json]
-agt verify-stage-result --session-id <session_id> [--dry-run]
-agt record-human-decision --session-id <session_id> --decision go
-agt record-feedback --session-id <session_id> --source-stage Verification --target-stage Implementation --issue "<issue>" --apply-rework
-agt skill list|show|preferences|default
-```
-
-初始化项目：
-
-```bash
-cd /path/to/your/project
-agt init
-```
-
-`init` 会创建 `agt-control/project/five-layer/` 并准备五层分类 prompt。交互终端默认会尝试调用 `codex exec`，使用 GitHub skill source：
-
-```text
-https://github.com/ZHOUKAILIAN/skills/tree/feature/five-layer-classifier-skill/five-layer-classifier
-```
-
-非交互式脚本默认跳过实际 Codex 执行，只写入：
-
-```text
-agt-control/project/five-layer/classification.md
-agt-control/project/five-layer/classification-run.json
-agt-control/project/five-layer/classification-prompt.md
-```
-
-强制运行或跳过：
-
-```bash
-agt init --five-layer-classification run
-agt init --five-layer-classification skip
-```
-
-## 运行
-
-真实执行默认使用 `codex-exec`：
-
-```bash
-agt run --message "写个js文件，并打印agent-team-runtime"
-```
-
-离线验证 workflow 文件和 gate：
-
-```bash
-agt run --message "写个js文件，并打印agent-team-runtime" --executor dry-run
-```
-
-`--auto` 只自动推进非人工 gate。`ProductDefinition`、`TechnicalDesign` 和最终 `SessionHandoff` 仍然需要人工决策：
-
-```bash
-agt run --session-id <session_id> --executor dry-run --auto
-agt record-human-decision --session-id <session_id> --decision go
-```
-
-## Task worktrees
-
-`agt run` 默认不会直接从当前 `HEAD` 继续做，而是先按 clean base 策略创建新的 task worktree 和最小 branch。
-
-- 本地策略文件：`.agt/local/worktree-policy.json`
-- 默认 clean base fallback：`["origin/test", "origin/main", "test", "main"]`
-- 默认分支格式：`feature/<date>-<slug>`
-- 默认 worktree 目录：`.worktrees/`
-
-新 worktree 只复制 AGT 的本地支持状态，不复制历史运行现场：
-
-- 会复制：`.agt/executor-env.json`、`.agt/skill-preferences.yaml`、`.agt/local/`、`.agt/memory/`
-- 不会复制：`.agt/session-index.json`、`.agt/_runtime/`、历史 session 产物
-
-`continue` 只会重新打开已经记录到 `.agt/session-index.json` 的 worktree，不会新建 worktree。
-
-## 产物
-
-人类可读 session 产物位于：
-
-```text
-<repo-root>/.agt/<session_id>/
-```
-
-典型产物：
-
-```text
-route-packet.json
-product-definition-delta.md
-project-landing-delta.md
-technical-design.md
-implementation.md
-verification-report.md
-governance-review.md
-acceptance-report.md
-session-handoff.md
-```
-
-机器运行态位于：
-
-```text
-<repo-root>/.agt/_runtime/sessions/<session_id>/
-```
-
-每个 stage-run 记录不可跳过链路：
-
-```text
-contract_built -> execution_context_built -> stage_run_acquired -> executor_started -> executor_completed -> result_submitted -> gate_evaluated -> state_advanced
-```
-
-stage 调试文件形如：
-
-```text
-_runtime/sessions/<session-id>/roles/<role>/attempt-001/stage-results/<role>-stage-result.json
-_runtime/sessions/<session-id>/roles/<role>/attempt-001/execution-contexts/<role>-input-context.json
-_runtime/sessions/<session-id>/roles/<role>/attempt-001/command-outputs/<role>-command-stdout.txt
-```
-
-## Skill defaults and runtime workflow
-
-`.agt/skill-preferences.yaml` 保存每个阶段的默认 skill、上次选择和使用频率。
-
-```bash
-agt skill list
-agt skill show security-audit
-agt skill preferences
-agt skill default Implementation plan
-agt skill default Verification security-audit
-agt skill default Acceptance e2e-coverage-guard
-```
-
-单次覆盖：
-
-```bash
-agt run --message "<你的需求>" --with-skills Implementation:plan --skip-skills Verification:security-audit
-agt run --message "<你的需求>" --skills-empty
-```
-
-每次注入的 skill 会记录在 stage result 的 `steps[].details.skill_injection` 中，包含 skill 名称、source type、source ref、scope、delivery、installed path，以及是否进入 prompt。`codex-exec` 会记录 prompt 注入；command executor 会记录 command-only execution path；超时后恢复已写出的 result bundle 时会标记 artifact recovery 和 `result_parse_status=recovered_after_timeout`。
+- `quick` profile：面向小需求，按 `planner -> repo_scout -> writer -> verifier -> summarizer` 快速跑完。
+- `investigate` profile：面向只查问题不改代码，按 `planner -> repo_scout -> test_scout -> summarizer` 收敛证据。
+- `full` profile：面向大需求，保留五层九阶段：`route -> product_definition -> project_runtime -> technical_design -> implementation -> verification -> governance_review -> acceptance -> session_handoff`。
+- 每个 session 都写入结构化状态：`session.json`、`workflow.json`、`events.jsonl`、`tool-calls.jsonl`、`agents/*.json`。
+- 旧 Python/Codex CLI runtime 的 session 可以迁移到新 `.agt/sessions/` schema，迁移不会修改旧目录。
+- 内置 Fastify API 和 web 静态资源服务，供控制台读取项目、session、事件和工具调用。
 
 ## 安装
 
 前提：
 
-- Python 3.13+
-- `curl`
-- `shasum` 或 `sha256sum`
-- 能访问 GitHub Releases 和 PyPI
-
-安装最新版本：
-
-```bash
-curl -fsSL https://github.com/ZHOUKAILIAN/agent-team-runtime/releases/latest/download/install.sh | sh
-```
-
-安装固定版本：
-
-```bash
-curl -fsSL https://github.com/ZHOUKAILIAN/agent-team-runtime/releases/download/v0.1.0/install.sh | sh
-```
+- Node.js 22+
+- npm
 
 开发安装：
 
 ```bash
-pip install -e .
+npm install
+npm run build
 ```
 
-## 核心文档
+本地使用 CLI：
 
-- [运行时设计](docs/workflow-specs/2026-04-11-agent-team-cli-runtime-design.md)
-- [当前流程说明](docs/workflow-specs/2026-04-11-agent-team-cli-runtime-flow.md)
-- [CLI 使用说明](docs/workflow-specs/2026-04-11-agent-team-cli-runtime-usage.md)
-- [Codex 运行 Help](docs/workflow-specs/2026-04-11-agent-team-codex-cli-help.md)
-- [Codex Harness 方案](docs/workflow-specs/2026-04-11-agent-team-codex-harness-solution.md)
-- [Stage 资产说明](docs/workflow-specs/2026-04-11-agent-team-skill-integration.md)
-- [变更记录](CHANGELOG.md)
+```bash
+node packages/cli/dist/index.js --help
+node packages/cli/dist/index.js run "整理这个仓库的测试入口" --profile quick
+```
 
-## 原则
+如果通过 npm link 安装，本地命令是：
 
-- CLI 是用户主入口。
-- runtime 是流程事实来源。
-- skill 是阶段能力素材，不是流程控制器。
-- evidence 不完整就不能算通过。
-- Acceptance 只能建议，不能代替人工决策。
-- SessionHandoff 保留 L5 本地现场，但不自动升级为正式共享依据。
+```bash
+npm link
+agt --help
+```
+
+## 运行任务
+
+快速需求：
+
+```bash
+agt run "修一个小问题" --profile quick
+```
+
+调查型需求：
+
+```bash
+agt run "查一下这个接口为什么慢，不要改代码" --profile investigate
+```
+
+完整流程：
+
+```bash
+agt run "做一个跨模块需求" --profile full
+```
+
+常用参数：
+
+```bash
+agt run "..." --repo-root /path/to/repo --state-root /path/to/repo/.agt --profile quick
+agt status
+agt status <session_id>
+agt inspect <session_id>
+```
+
+如果启用 task worktree，`agt run --continue`、`agt status`、`agt inspect` 和 `agt decision` 会先读主状态目录的 `session-index.json`，再跳到对应 worktree 的 `state_root` 读取真实 session。因此从主项目目录也能继续或检查 worktree 里的任务。
+
+## OpenAI SDK 执行
+
+当存在 `OPENAI_API_KEY` 或 `OPENAI_BASE_URL` 时，runtime 会使用 OpenAI Agents SDK：
+
+```bash
+export OPENAI_API_KEY=...
+export AGT_OPENAI_MODEL=gpt-5.4-mini
+agt run "实现一个小功能" --profile quick
+```
+
+SDK runner 会创建 `SandboxAgent`，把当前仓库挂载到 sandbox 的 `/workspace`：
+
+- 只读阶段使用 read-only mount。
+- 写入阶段使用 read-write mount。
+- 每个 agent run 会记录输入、输出、runner、状态和 tool call 摘要。
+- SDK 返回的 tool-like run item 会落到 `tool-calls.jsonl`。
+- 每次 SDK run 会额外写一个 `<agent_run_id>-sdk-trace.json` artifact，记录 raw response 数量、new item 数量、last response id 和压缩后的 run item 摘要。
+
+默认模型和每个 profile 的最大 turns 可以写在 `.agt/config.json`：
+
+```json
+{
+  "schema_version": 1,
+  "default_profile": "quick",
+  "default_model": "gpt-5.4-mini",
+  "state_root": ".agt",
+  "max_turns": {
+    "quick": 4,
+    "investigate": 5,
+    "full": 8
+  }
+}
+```
+
+如果没有 OpenAI 环境变量，runtime 会走 `local_fallback`，只执行确定性的本地检查并写入同样的状态文件。这样 `npm test`、CLI smoke 和迁移验证不依赖外部模型。
+
+## 状态目录
+
+默认状态目录是 `<repo>/.agt`：
+
+```text
+.agt/
+  sessions/
+    <session_id>/
+      session.json
+      workflow.json
+      events.jsonl
+      tool-calls.jsonl
+      agents/
+        <agent_run_id>.json
+      artifacts/
+        index.jsonl
+        <role-output>.md
+  prompt_traces/
+    index.jsonl
+    <prompt_id>/
+      meta.json
+      prompt.md
+  session-index.json
+```
+
+这些文件是 runtime 的事实来源。控制台和 CLI 都从这里读取，不再从模型摘要反推状态。
+
+如果不需要保留旧 session、prompt trace、tool-call 记录和历史控制台数据，可以直接删除旧 `.agt` 后重新初始化：
+
+```bash
+rm -rf .agt
+agt init
+agt run "你的第一个需求" --profile quick
+```
+
+这条路径最适合从旧 Python/Codex CLI runtime 切到 JS runtime 的全新开始。删除 `.agt` 会永久丢弃旧运行历史；如果需要保留旧记录，先使用 `agt migrate --dry-run` 和 `agt migrate --apply`。
+
+每个 workflow step 会记录：
+
+- `prompt_trace_id`：这一阶段实际发送给 runner 的 prompt。
+- `agent_run_id`：这一阶段的 executor run 记录。
+- `artifact_path`：这一阶段输出 artifact。
+- `files_changed` / `commands_run`：runtime 能观察到的变更和命令证据。
+
+人工决策使用：
+
+```bash
+agt decision <session_id> --decision go
+agt decision <session_id> --decision no-go
+agt decision <session_id> --decision rework --target-role implementation
+```
+
+`rework` 会从目标阶段开始清空下游 step 的 `agent_run_id`、`prompt_trace_id`、`artifact_path`、`files_changed`、`commands_run` 和摘要，避免控制台继续展示旧 trace。
+
+## 迁移旧状态
+
+先 dry-run：
+
+```bash
+agt migrate --from /path/to/legacy/repo --state-root /path/to/repo/.agt --dry-run
+```
+
+确认后写入：
+
+```bash
+agt migrate --from /path/to/legacy/repo --state-root /path/to/repo/.agt --apply
+```
+
+migrator 会扫描：
+
+- `<source>/_runtime/sessions`
+- `<source>/.agt/_runtime/sessions`
+- `<source>/.agent-team/_runtime/sessions`
+
+迁移结果会写入新 session 的 `migration.json`，并把旧 `session.json`、`workflow_summary.json` 复制到 `artifacts/` 作为 legacy evidence。
+
+## 控制台服务
+
+启动 API 和前端静态资源：
+
+```bash
+agt server --state-root /path/to/repo/.agt --host 127.0.0.1 --port 8765
+```
+
+主要接口：
+
+- `GET /api/console/snapshot`
+- `GET /api/projects`
+- `GET /api/sessions`
+- `GET /api/sessions/:sessionId`
+- `GET /api/sessions/:sessionId/events`
+- `GET /api/sessions/:sessionId/tool-calls`
+- `GET /api/sessions/:sessionId/prompts`
+- `GET /api/sessions/:sessionId/prompts/:promptId`
+- `GET /api/sessions/:sessionId/artifacts`
+- `GET /api/sessions/:sessionId/artifacts/:artifactName`
+- `GET /api/sessions/:sessionId/agent-runs`
+- `GET /api/session`
+- `GET /ws/runtime`
+
+控制台的 session detail 页会展示 workflow steps、prompt traces、agent runs、tool calls、artifacts 和 events，并能直接预览 prompt/artifact 内容。
+
+## 开发验证
+
+```bash
+npm run typecheck
+npm run build
+npm test
+```
+
+CLI smoke：
+
+```bash
+node packages/cli/dist/index.js run "smoke quick js runtime" --repo-root . --state-root /tmp/agt-js-smoke-state
+node packages/cli/dist/index.js migrate --from . --state-root /tmp/agt-js-migrate-state --dry-run
+node packages/cli/dist/index.js server --state-root /tmp/agt-js-smoke-state --host 127.0.0.1 --port 8765
+```
+
+## 技术方案
+
+本次 JS rewrite 的详细方案在 [docs/workflow-specs/2026-06-06-js-runtime-rewrite.md](docs/workflow-specs/2026-06-06-js-runtime-rewrite.md)。

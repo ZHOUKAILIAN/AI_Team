@@ -1,0 +1,24 @@
+{
+  "name": "@agent-team-runtime/cli",
+  "version": "0.3.0-alpha.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "agt": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@agent-team-runtime/migrator": "0.3.0-alpha.0",
+    "@agent-team-runtime/runtime": "0.3.0-alpha.0",
+    "@agent-team-runtime/server": "0.3.0-alpha.0",
+    "commander": "^14.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
+  }
+}
