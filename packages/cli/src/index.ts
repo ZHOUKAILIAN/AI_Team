@@ -6,8 +6,10 @@ import {
   createTaskWorktree,
   initRuntime,
   recordHumanDecision,
+  readSessionStatus,
   runWorkflow,
   type AgentRole,
+  type SessionStatusSnapshot,
   type RuntimeProfile,
   RuntimeStore,
 } from "@agent-team-runtime/runtime";
@@ -141,26 +143,28 @@ program
   .command("status")
   .argument("[session-id]", "session id")
   .option("--state-root <path>", "state root", path.join(process.cwd(), ".agt"))
-  .action(async (sessionId: string | undefined, options: { stateRoot: string }) => {
+  .option("--watch", "poll status until the session leaves running/in_progress")
+  .option("--interval <seconds>", "poll interval for --watch", "5")
+  .option("--stalled-after <seconds>", "mark running agent runs as stalled after this many seconds without heartbeat", "120")
+  .option("--json", "print JSON status")
+  .action(async (sessionId: string | undefined, options: StatusOptions) => {
     const store = new RuntimeStore(path.resolve(options.stateRoot));
     const target = sessionId
       ? await resolveSessionStore(store, sessionId)
       : await resolveLatestSessionStore(store);
     const targetStore = new RuntimeStore(target.stateRoot);
-    const session = await targetStore.loadSession(target.sessionId);
-    if (!session) {
-      throw new Error("No sessions found.");
+    const intervalMs = parsePositiveSeconds(options.interval, "--interval") * 1000;
+    const stalledAfterMs = parsePositiveSeconds(options.stalledAfter, "--stalled-after") * 1000;
+    await printStatusOnce(targetStore, target.sessionId, { ...options, stalledAfterMs });
+    if (!options.watch) {
+      return;
     }
-    const workflow = await targetStore.loadWorkflow(session.session_id);
-    console.log(`session_id: ${session.session_id}`);
-    console.log(`profile: ${session.profile}`);
-    console.log(`status: ${workflow.status}`);
-    console.log(`current_stage: ${workflow.current_stage}`);
-    console.log(`repo_root: ${session.repo_root}`);
-    console.log(`state_root: ${session.state_root}`);
-    console.log(`summary: ${workflow.summary}`);
-    if (workflow.blocked_reason) {
-      console.log(`blocked_reason: ${workflow.blocked_reason}`);
+    while (true) {
+      await sleep(intervalMs);
+      const snapshot = await printStatusOnce(targetStore, target.sessionId, { ...options, stalledAfterMs });
+      if (!isWatchableRuntimeStatus(snapshot.runtime_status)) {
+        break;
+      }
     }
   });
 
@@ -241,6 +245,14 @@ type DecisionOptions = {
   decision: string;
   targetRole?: string;
   stateRoot: string;
+};
+
+type StatusOptions = {
+  stateRoot: string;
+  watch?: boolean;
+  interval: string;
+  stalledAfter: string;
+  json?: boolean;
 };
 
 function parseProfile(value: string): RuntimeProfile {
@@ -357,4 +369,91 @@ function printResult(result: Awaited<ReturnType<typeof runWorkflow>>): void {
     console.log(`blocked_reason: ${result.blocked_reason}`);
   }
   console.log(`summary: ${result.summary}`);
+}
+
+async function printStatusOnce(
+  store: RuntimeStore,
+  sessionId: string,
+  options: StatusOptions & { stalledAfterMs: number },
+): Promise<SessionStatusSnapshot> {
+  const snapshot = await readSessionStatus(store, sessionId, { stalledAfterMs: options.stalledAfterMs });
+  if (options.json) {
+    console.log(JSON.stringify(snapshot, null, 2));
+  } else {
+    printStatus(snapshot);
+  }
+  return snapshot;
+}
+
+function printStatus(snapshot: SessionStatusSnapshot): void {
+  console.log(`generated_at: ${snapshot.generated_at}`);
+  console.log(`session_id: ${snapshot.session_id}`);
+  console.log(`profile: ${snapshot.profile}`);
+  console.log(`status: ${snapshot.workflow_status}`);
+  console.log(`runtime_status: ${snapshot.runtime_status}`);
+  console.log(`current_stage: ${snapshot.current_stage}`);
+  console.log(`repo_root: ${snapshot.repo_root}`);
+  console.log(`state_root: ${snapshot.state_root}`);
+  if (snapshot.active_run) {
+    console.log(`active_run_id: ${snapshot.active_run.agent_run_id}`);
+    console.log(`active_role: ${snapshot.active_run.role}`);
+    console.log(`active_status: ${snapshot.active_run.runtime_status}`);
+    console.log(`active_started_at: ${snapshot.active_run.started_at}`);
+    console.log(`active_last_heartbeat_at: ${snapshot.active_run.last_heartbeat_at ?? ""}`);
+    console.log(`active_heartbeat_count: ${snapshot.active_run.heartbeat_count}`);
+    console.log(`active_elapsed: ${formatDuration(snapshot.active_run.elapsed_ms)}`);
+    if (snapshot.active_run.heartbeat_age_ms !== undefined) {
+      console.log(`active_heartbeat_age: ${formatDuration(snapshot.active_run.heartbeat_age_ms)}`);
+    }
+  } else if (snapshot.latest_run) {
+    console.log(`latest_run_id: ${snapshot.latest_run.agent_run_id}`);
+    console.log(`latest_role: ${snapshot.latest_run.role}`);
+    console.log(`latest_status: ${snapshot.latest_run.runtime_status}`);
+    console.log(`latest_elapsed: ${formatDuration(snapshot.latest_run.elapsed_ms)}`);
+    if (snapshot.latest_run.executor_status) {
+      console.log(`latest_executor_status: ${snapshot.latest_run.executor_status}`);
+    }
+    if (snapshot.latest_run.result_parse_status) {
+      console.log(`latest_result_parse_status: ${snapshot.latest_run.result_parse_status}`);
+    }
+    if (snapshot.latest_run.prompt_trace_id) {
+      console.log(`latest_prompt_trace_id: ${snapshot.latest_run.prompt_trace_id}`);
+    }
+  }
+  if (snapshot.latest_event) {
+    console.log(`latest_event: ${snapshot.latest_event.kind}${snapshot.latest_event.message ? ` - ${snapshot.latest_event.message}` : ""}`);
+  }
+  if (snapshot.latest_tool_call) {
+    console.log(`latest_tool_call: ${snapshot.latest_tool_call.name}`);
+  }
+  if (snapshot.blocked_reason) {
+    console.log(`blocked_reason: ${snapshot.blocked_reason}`);
+  }
+  console.log(`summary: ${snapshot.summary}`);
+}
+
+function isWatchableRuntimeStatus(status: SessionStatusSnapshot["runtime_status"]): boolean {
+  return status === "running" || status === "stalled" || status === "in_progress";
+}
+
+function parsePositiveSeconds(value: string, label: string): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`${label} must be a positive number of seconds.`);
+  }
+  return parsed;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatDuration(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  if (minutes === 0) {
+    return `${remainingSeconds}s`;
+  }
+  return `${minutes}m${remainingSeconds}s`;
 }

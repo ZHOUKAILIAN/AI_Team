@@ -193,6 +193,8 @@ export class RuntimeStore {
       input: args.input,
       output: "",
       started_at: nowIso(),
+      last_heartbeat_at: undefined,
+      heartbeat_count: 0,
       error: "",
       metadata: args.metadata ?? {},
     };
@@ -210,11 +212,19 @@ export class RuntimeStore {
   }
 
   async completeAgentRun(record: AgentRunRecord, patch: Partial<AgentRunRecord>): Promise<AgentRunRecord> {
+    const current = await this.readAgentRun(record.session_id, record.agent_run_id).catch(() => record);
+    const completedAt = patch.completed_at ?? nowIso();
     const completed = AgentRunSchema.parse({
-      ...record,
+      ...current,
       ...patch,
       status: patch.status ?? "completed",
-      completed_at: patch.completed_at ?? nowIso(),
+      completed_at: completedAt,
+      last_heartbeat_at: patch.last_heartbeat_at ?? current.last_heartbeat_at ?? completedAt,
+      heartbeat_count: patch.heartbeat_count ?? current.heartbeat_count,
+      metadata: {
+        ...current.metadata,
+        ...patch.metadata,
+      },
     });
     await this.writeAgentRun(completed);
     await this.appendEvent({
@@ -229,10 +239,49 @@ export class RuntimeStore {
     return completed;
   }
 
+  async heartbeatAgentRun(
+    record: AgentRunRecord,
+    details: Record<string, unknown> = {},
+  ): Promise<AgentRunRecord> {
+    const existing = await this.readAgentRun(record.session_id, record.agent_run_id).catch(() => record);
+    if (existing.status !== "running") {
+      return existing;
+    }
+    const heartbeatAt = nowIso();
+    const updated = AgentRunSchema.parse({
+      ...existing,
+      last_heartbeat_at: heartbeatAt,
+      heartbeat_count: existing.heartbeat_count + 1,
+      metadata: {
+        ...existing.metadata,
+        last_heartbeat_at: heartbeatAt,
+      },
+    });
+    await this.writeAgentRun(updated);
+    await this.updateWorkflow(updated.session_id, (workflow) => ({
+      ...workflow,
+      updated_at: heartbeatAt,
+    }));
+    await this.appendEvent({
+      at: heartbeatAt,
+      session_id: updated.session_id,
+      kind: "agent_run_heartbeat",
+      role: updated.role,
+      status: "running",
+      message: `${updated.role} still running.`,
+      details: { agent_run_id: updated.agent_run_id, heartbeat_count: updated.heartbeat_count, ...details },
+    });
+    return updated;
+  }
+
   async writeAgentRun(record: AgentRunRecord): Promise<void> {
     const parsed = AgentRunSchema.parse(record);
     await mkdir(this.agentsDir(parsed.session_id), { recursive: true });
     await writeJson(path.join(this.agentsDir(parsed.session_id), `${parsed.agent_run_id}.json`), parsed);
+  }
+
+  async readAgentRun(sessionId: string, agentRunId: string): Promise<AgentRunRecord> {
+    return AgentRunSchema.parse(await readJson(path.join(this.agentsDir(sessionId), `${agentRunId}.json`)));
   }
 
   async listSessions(): Promise<SessionRecord[]> {

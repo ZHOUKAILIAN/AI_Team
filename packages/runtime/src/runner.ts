@@ -59,6 +59,7 @@ export class OpenAISandboxRunner implements AgentRunner {
       input: task.prompt,
       metadata: { profile: task.profile, write_allowed: Boolean(task.writeAllowed), model, max_turns: maxTurns },
     });
+    const heartbeat = startAgentRunHeartbeat(this.store, agentRun, config.monitoring.heartbeat_interval_ms);
     const started = Date.now();
     const toolCallsBefore = await this.snapshotGit(task.repoRoot);
     try {
@@ -90,6 +91,7 @@ export class OpenAISandboxRunner implements AgentRunner {
         content: JSON.stringify(summarizeOpenAIResult(result), null, 2),
         metadata: { agent_run_id: agentRun.agent_run_id, kind: "sdk_trace" },
       });
+      await heartbeat.stop();
       const completed = await this.store.completeAgentRun(agentRun, {
         status: "completed",
         output,
@@ -116,6 +118,7 @@ export class OpenAISandboxRunner implements AgentRunner {
       return { agentRun: completed, output, filesChanged, commandsRun };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      await heartbeat.stop();
       const completed = await this.store.completeAgentRun(agentRun, {
         status: "failed",
         error: message,
@@ -127,6 +130,8 @@ export class OpenAISandboxRunner implements AgentRunner {
         output: { error: message },
       });
       return { agentRun: completed, output: message, filesChanged: [], commandsRun: [] };
+    } finally {
+      await heartbeat.stop();
     }
   }
 
@@ -229,37 +234,72 @@ export class LocalFallbackRunner implements AgentRunner {
         reason: "OPENAI_API_KEY/OPENAI_BASE_URL not set; using deterministic local runner.",
       },
     });
+    const config = await this.store.loadConfig();
+    const heartbeat = startAgentRunHeartbeat(this.store, agentRun, config.monitoring.heartbeat_interval_ms);
     const started = Date.now();
-    const git = await runGitStatus(task.repoRoot);
-    const output = [
-      `${task.role} local fallback completed.`,
-      `Profile: ${task.profile}`,
-      `Write allowed: ${Boolean(task.writeAllowed)}`,
-      git.summary,
-    ].join("\n");
-    await this.store.appendToolCall({
-      at: nowIso(),
-      session_id: task.sessionId,
-      agent_run_id: agentRun.agent_run_id,
-      role: task.role,
-      kind: "shell",
-      name: "git_status",
-      input: { command: "git status --short" },
-      output: { stdout: git.stdout, stderr: git.stderr },
-      exit_code: git.exitCode,
-      duration_ms: Date.now() - started,
-    });
-    const completed = await this.store.completeAgentRun(agentRun, {
-      status: "completed",
-      output,
-    });
-    return {
-      agentRun: completed,
-      output,
-      filesChanged: git.changedFiles,
-      commandsRun: ["git status --short"],
-    };
+    try {
+      const git = await runGitStatus(task.repoRoot);
+      const output = [
+        `${task.role} local fallback completed.`,
+        `Profile: ${task.profile}`,
+        `Write allowed: ${Boolean(task.writeAllowed)}`,
+        git.summary,
+      ].join("\n");
+      await this.store.appendToolCall({
+        at: nowIso(),
+        session_id: task.sessionId,
+        agent_run_id: agentRun.agent_run_id,
+        role: task.role,
+        kind: "shell",
+        name: "git_status",
+        input: { command: "git status --short" },
+        output: { stdout: git.stdout, stderr: git.stderr },
+        exit_code: git.exitCode,
+        duration_ms: Date.now() - started,
+      });
+      await heartbeat.stop();
+      const completed = await this.store.completeAgentRun(agentRun, {
+        status: "completed",
+        output,
+      });
+      return {
+        agentRun: completed,
+        output,
+        filesChanged: git.changedFiles,
+        commandsRun: ["git status --short"],
+      };
+    } finally {
+      await heartbeat.stop();
+    }
   }
+}
+
+function startAgentRunHeartbeat(store: RuntimeStore, agentRun: AgentRunRecord, intervalMs: number): { stop: () => Promise<void> } {
+  let stopped = false;
+  let pending = Promise.resolve();
+  const beat = (details: Record<string, unknown> = {}) => {
+    if (stopped) {
+      return;
+    }
+    pending = pending.then(() => store.heartbeatAgentRun(agentRun, details)).then(
+      () => undefined,
+      () => {
+        // Heartbeat is observability only; do not fail the executor because status persistence hiccuped.
+      },
+    );
+  };
+  const interval = setInterval(() => {
+    beat();
+  }, intervalMs);
+  interval.unref?.();
+  beat({ reason: "started" });
+  return {
+    stop: async () => {
+      stopped = true;
+      clearInterval(interval);
+      await pending;
+    },
+  };
 }
 
 async function runGitStatus(repoRoot: string): Promise<{

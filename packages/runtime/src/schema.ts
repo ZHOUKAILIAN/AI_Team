@@ -122,6 +122,8 @@ export const AgentRunSchema = z.object({
   input: z.string(),
   output: z.string().default(""),
   started_at: z.string(),
+  last_heartbeat_at: z.string().optional(),
+  heartbeat_count: z.number().int().nonnegative().default(0),
   completed_at: z.string().optional(),
   error: z.string().default(""),
   metadata: z.record(z.string(), z.unknown()).default({}),
@@ -214,6 +216,15 @@ export const RuntimeConfigSchema = z.object({
       branch_prefix: "feature/",
       worktree_root: ".worktrees",
       slug_max_length: 40,
+    }),
+  monitoring: z
+    .object({
+      heartbeat_interval_ms: z.number().int().positive().default(30_000),
+      stalled_after_ms: z.number().int().positive().default(120_000),
+    })
+    .default({
+      heartbeat_interval_ms: 30_000,
+      stalled_after_ms: 120_000,
     }),
   human_gates: z.boolean().default(false),
 });

@@ -7,6 +7,7 @@ import {
   type AgentRunner,
   type AgentTask,
   type AgentTaskResult,
+  readSessionStatus,
   recordHumanDecision,
   runWorkflow,
   RuntimeStore,
@@ -73,6 +74,31 @@ class CountingRunner extends FakeRunner {
   }
 }
 
+class HeartbeatRunner implements AgentRunner {
+  readonly name = "local_fallback" as const;
+
+  async runTask(task: AgentTask): Promise<AgentTaskResult> {
+    const store = new RuntimeStore(path.join(task.repoRoot, ".agt-test"));
+    const agentRun = await store.createAgentRun({
+      sessionId: task.sessionId,
+      role: task.role,
+      runner: this.name,
+      input: task.prompt,
+    });
+    const heartbeat = await store.heartbeatAgentRun(agentRun, { test: true });
+    const completed = await store.completeAgentRun(heartbeat, {
+      status: "completed",
+      output: `${task.role} ok`,
+    });
+    return {
+      agentRun: completed,
+      output: `${task.role} ok`,
+      filesChanged: [],
+      commandsRun: ["echo heartbeat"],
+    };
+  }
+}
+
 describe("profiles", () => {
   it("uses the lightweight quick profile by default", () => {
     expect(stepsForProfile("quick").map((step) => step.role)).toEqual([
@@ -121,6 +147,67 @@ describe("profiles", () => {
     expect(events.some((event) => event.kind === "agent_run_started")).toBe(true);
     expect(events.some((event) => event.kind === "prompt_trace_recorded")).toBe(true);
     expect(events.some((event) => event.kind === "artifact_written")).toBe(true);
+  });
+
+  it("records agent run heartbeat state for CLI polling", async () => {
+    const repoRoot = await mkdtemp(path.join(tmpdir(), "agt-runtime-"));
+    const stateRoot = path.join(repoRoot, ".agt-test");
+    const result = await runWorkflow({
+      repoRoot,
+      stateRoot,
+      request: "observe heartbeat",
+      profile: "quick",
+      runner: new HeartbeatRunner(),
+    });
+
+    const store = new RuntimeStore(stateRoot);
+    const runs = await store.listAgentRuns(result.session_id);
+    expect(runs.every((run) => run.heartbeat_count >= 1)).toBe(true);
+    expect(runs.every((run) => run.last_heartbeat_at)).toBe(true);
+
+    const status = await readSessionStatus(store, result.session_id);
+    expect(status.runtime_status).toBe("done");
+    expect(status.latest_run?.heartbeat_count).toBeGreaterThanOrEqual(1);
+    const events = await store.readEvents(result.session_id);
+    expect(events.some((event) => event.kind === "agent_run_heartbeat")).toBe(true);
+  });
+
+  it("marks a running agent run as stalled when heartbeat is stale", async () => {
+    const repoRoot = await mkdtemp(path.join(tmpdir(), "agt-runtime-"));
+    const stateRoot = path.join(repoRoot, ".agt-test");
+    const store = new RuntimeStore(stateRoot);
+    const session = await store.createSession({
+      request: "stalled status",
+      profile: "quick",
+      repoRoot,
+    });
+    await store.updateWorkflow(session.session_id, (workflow) => ({
+      ...workflow,
+      current_stage: "planner",
+      status: "in_progress",
+      updated_at: "2026-06-16T00:00:00.000Z",
+    }));
+    const run = await store.createAgentRun({
+      sessionId: session.session_id,
+      role: "planner",
+      runner: "local_fallback",
+      input: "prompt",
+    });
+    await store.writeAgentRun({
+      ...run,
+      started_at: "2026-06-16T00:00:00.000Z",
+      last_heartbeat_at: "2026-06-16T00:00:01.000Z",
+      heartbeat_count: 1,
+    });
+
+    const status = await readSessionStatus(store, session.session_id, {
+      now: new Date("2026-06-16T00:01:00.000Z"),
+      stalledAfterMs: 10_000,
+    });
+
+    expect(status.runtime_status).toBe("stalled");
+    expect(status.active_run?.runtime_status).toBe("stalled");
+    expect(status.active_run?.heartbeat_age_ms).toBe(59_000);
   });
 
   it("stops at full-profile human gates and continues after approval", async () => {

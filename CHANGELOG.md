@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.3.0-alpha.1] - 2026-06-16
+
+- Added agent run heartbeats and reusable runtime status snapshots for observing long-running JS workflow stages.
+- Extended `agt status` with `--watch`, `--json`, `--interval`, and `--stalled-after` so CLI users can poll running sessions and detect stale heartbeats.
+- Preserved prompt trace, executor status, and parse status in blocked runs while keeping status handling generic and not tied to a specific project.
+- Added configurable skill routing for JS workflow prompts and blocked execution when required routed skills are missing.
+
 ## [0.2.0b12] - 2026-06-05
 
 - Added stable partial and `needs_verification` semantics across Verification, GovernanceReview, and Acceptance.
