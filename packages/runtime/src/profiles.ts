@@ -1,5 +1,5 @@
 import path from "node:path";
-import { buildAgentRunner, type AgentRunner } from "./runner.js";
+import { buildAgentRunner, type AgentRunner, type AgentTaskResult } from "./runner.js";
 import {
   type AgentRole,
   type RunResult,
@@ -8,6 +8,7 @@ import {
   type WorkflowRecord,
   nowIso,
 } from "./schema.js";
+import { renderSkillInjection, resolveSkillRouting, skillRoutingMetadata } from "./skill-routing.js";
 import { RuntimeStore } from "./store.js";
 
 export type RunWorkflowOptions = {
@@ -91,14 +92,30 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<RunResul
       ),
       updated_at: nowIso(),
     }));
-    const prompt = promptForStep(profile, step.role, session.request, completedSummaries(workflow, outputs));
+    const routing = await resolveSkillRouting({
+      repoRoot,
+      projectRoot: session.project_root || repoRoot,
+      role: step.role,
+      profile,
+    });
+    const prompt = promptForStep(
+      profile,
+      step.role,
+      session.request,
+      completedSummaries(workflow, outputs),
+      renderSkillInjection(routing),
+    );
     const trace = await store.recordPromptTrace({
       sessionId: session.session_id,
       role: step.role,
       prompt,
       runner: runner.name,
       source: "runtime.runWorkflow",
-      metadata: { profile, write_allowed: step.writeAllowed },
+      metadata: {
+        profile,
+        write_allowed: step.writeAllowed,
+        skill_routing: skillRoutingMetadata(routing),
+      },
     });
     await store.updateWorkflow(session.session_id, (workflow) => ({
       ...workflow,
@@ -107,13 +124,16 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<RunResul
       ),
       updated_at: nowIso(),
     }));
-    const result = await runner.runTask({
+    const result = await runStepSafely({
+      store,
+      runner,
       sessionId: session.session_id,
       role: step.role,
       profile,
       repoRoot,
       prompt,
       writeAllowed: step.writeAllowed,
+      traceId: trace.prompt_id,
     });
     const artifact = await store.writeArtifact({
       sessionId: session.session_id,
@@ -123,6 +143,8 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<RunResul
       metadata: {
         agent_run_id: result.agentRun.agent_run_id,
         prompt_trace_id: trace.prompt_id,
+        executor_status: result.agentRun.metadata.executor_status ?? result.agentRun.status,
+        result_parse_status: result.agentRun.metadata.result_parse_status ?? "",
       },
     });
     outputs.push(result.output);
@@ -154,6 +176,20 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<RunResul
       updated_at: nowIso(),
     }));
     if (result.agentRun.status !== "completed") {
+      await store.appendEvent({
+        at: nowIso(),
+        session_id: session.session_id,
+        kind: "workflow_step_blocked",
+        role: step.role,
+        status: result.agentRun.status,
+        message: `${step.role} blocked before workflow could continue.`,
+        details: {
+          agent_run_id: result.agentRun.agent_run_id,
+          prompt_trace_id: trace.prompt_id,
+          executor_status: result.agentRun.metadata.executor_status ?? result.agentRun.status,
+          result_parse_status: result.agentRun.metadata.result_parse_status ?? "",
+        },
+      });
       break;
     }
     if (options.humanGates && step.humanGateAfter) {
@@ -322,11 +358,106 @@ function completedSummaries(workflow: WorkflowRecord, outputs: string[]): string
   ];
 }
 
-function promptForStep(profile: RuntimeProfile, role: AgentRole, request: string, previousOutputs: string[]): string {
+async function runStepSafely(args: {
+  store: RuntimeStore;
+  runner: AgentRunner;
+  sessionId: string;
+  role: AgentRole;
+  profile: RuntimeProfile;
+  repoRoot: string;
+  prompt: string;
+  writeAllowed: boolean;
+  traceId: string;
+}): Promise<AgentTaskResult> {
+  try {
+    const result = await args.runner.runTask({
+      sessionId: args.sessionId,
+      role: args.role,
+      profile: args.profile,
+      repoRoot: args.repoRoot,
+      prompt: args.prompt,
+      writeAllowed: args.writeAllowed,
+    });
+    if (result.agentRun.status !== "completed") {
+      return normalizeBlockedResult(args, result);
+    }
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const agentRun = await args.store.createAgentRun({
+      sessionId: args.sessionId,
+      role: args.role,
+      runner: args.runner.name,
+      input: args.prompt,
+      metadata: {
+        profile: args.profile,
+        write_allowed: args.writeAllowed,
+        executor_status: isTimeoutMessage(message) ? "timeout" : "failed",
+        result_parse_status: "not_produced",
+        prompt_trace_id: args.traceId,
+      },
+    });
+    const completed = await args.store.completeAgentRun(agentRun, {
+      status: "blocked",
+      output: blockedOutput(args.role, message),
+      error: message,
+      metadata: {
+        ...agentRun.metadata,
+        blocked_kind: isTimeoutMessage(message) ? "executor_timeout" : "executor_error",
+      },
+    });
+    return {
+      agentRun: completed,
+      output: completed.output,
+      filesChanged: [],
+      commandsRun: [],
+    };
+  }
+}
+
+function normalizeBlockedResult(
+  args: {
+    store: RuntimeStore;
+    role: AgentRole;
+    profile: RuntimeProfile;
+    writeAllowed: boolean;
+    traceId: string;
+  },
+  result: AgentTaskResult,
+): Promise<AgentTaskResult> {
+  const metadata = result.agentRun.metadata;
+  const executorStatus = String(metadata.executor_status ?? result.agentRun.status);
+  const resultParseStatus = String(metadata.result_parse_status ?? (result.output ? "recovered_after_executor_failure" : "not_produced"));
+  return args.store.completeAgentRun(result.agentRun, {
+    status: "blocked",
+    output: blockedOutput(args.role, result.output || result.agentRun.error || "Agent run did not complete."),
+    metadata: {
+      ...metadata,
+      profile: args.profile,
+      write_allowed: args.writeAllowed,
+      prompt_trace_id: args.traceId,
+      executor_status: executorStatus,
+      result_parse_status: resultParseStatus,
+    },
+  }).then((normalizedRun) => ({
+    ...result,
+    agentRun: normalizedRun,
+    output: normalizedRun.output,
+  }));
+}
+
+function promptForStep(
+  profile: RuntimeProfile,
+  role: AgentRole,
+  request: string,
+  previousOutputs: string[],
+  skillInjection: string,
+): string {
   return [
     `Profile: ${profile}`,
     `Role: ${role}`,
     `User request: ${request}`,
+    skillInjection,
     previousOutputs.length ? `Previous agent summaries:\n${previousOutputs.join("\n\n---\n\n")}` : "",
     "Produce a concise, evidence-backed result for this role.",
   ]
@@ -400,4 +531,16 @@ function firstLine(value: string): string {
 
 function unique(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))];
+}
+
+function blockedOutput(role: AgentRole, reason: string): string {
+  const guidance =
+    role === "verification" || role === "verifier"
+      ? "Verification did not complete. Treat this as needs_verification and rerun or request rework with the recorded prompt trace."
+      : "The workflow step did not complete. Rerun this step or request rework with the recorded prompt trace.";
+  return [`${role} blocked.`, `Reason: ${reason}`, guidance].join("\n");
+}
+
+function isTimeoutMessage(message: string): boolean {
+  return /timeout|timed out|ETIMEDOUT|AbortError/i.test(message);
 }

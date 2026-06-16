@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -32,6 +32,33 @@ class FakeRunner implements AgentRunner {
       agentRun: completed,
       output: `${task.role} ok`,
       filesChanged: task.writeAllowed ? ["example.txt"] : [],
+      commandsRun: ["echo test"],
+    };
+  }
+}
+
+class ThrowingRunner implements AgentRunner {
+  readonly name = "local_fallback" as const;
+
+  async runTask(task: AgentTask): Promise<AgentTaskResult> {
+    if (task.role === "verification") {
+      throw new Error("Executor timed out after 900 seconds.");
+    }
+    const store = new RuntimeStore(path.join(task.repoRoot, ".agt-test"));
+    const agentRun = await store.createAgentRun({
+      sessionId: task.sessionId,
+      role: task.role,
+      runner: this.name,
+      input: task.prompt,
+    });
+    const completed = await store.completeAgentRun(agentRun, {
+      status: "completed",
+      output: `${task.role} ok`,
+    });
+    return {
+      agentRun: completed,
+      output: `${task.role} ok`,
+      filesChanged: [],
       commandsRun: ["echo test"],
     };
   }
@@ -167,5 +194,109 @@ describe("profiles", () => {
     expect(product?.artifact_path).toBe("");
     expect(design?.status).toBe("pending");
     expect(design?.prompt_trace_id).toBe("");
+  });
+
+  it("blocks verification timeouts without losing prompt trace context", async () => {
+    const repoRoot = await mkdtemp(path.join(tmpdir(), "agt-runtime-"));
+    const stateRoot = path.join(repoRoot, ".agt-test");
+    const result = await runWorkflow({
+      repoRoot,
+      stateRoot,
+      request: "verify timeout behavior",
+      profile: "full",
+      runner: new ThrowingRunner(),
+    });
+
+    expect(result.status).toBe("blocked");
+    expect(result.current_stage).toBe("verification");
+    expect(result.blocked_reason).toContain("Executor timed out after 900 seconds");
+
+    const store = new RuntimeStore(stateRoot);
+    const workflow = await store.loadWorkflow(result.session_id);
+    const implementation = workflow.steps.find((step) => step.role === "implementation");
+    const verification = workflow.steps.find((step) => step.role === "verification");
+    expect(implementation?.status).toBe("completed");
+    expect(verification?.status).toBe("blocked");
+    expect(verification?.prompt_trace_id).toBeTruthy();
+    expect(verification?.artifact_path).toBeTruthy();
+
+    const runs = await store.listAgentRuns(result.session_id);
+    const verificationRun = runs.find((run) => run.role === "verification");
+    expect(verificationRun?.status).toBe("blocked");
+    expect(verificationRun?.metadata.executor_status).toBe("timeout");
+    expect(verificationRun?.metadata.result_parse_status).toBe("not_produced");
+  });
+
+  it("records configured skill routing in prompt trace metadata and prompt content", async () => {
+    const repoRoot = await mkdtemp(path.join(tmpdir(), "agt-runtime-"));
+    const stateRoot = path.join(repoRoot, ".agt-test");
+    const configRoot = await mkdtemp(path.join(tmpdir(), "agt-routing-"));
+    const skillRoot = path.join(configRoot, "skills");
+    const skillDir = path.join(skillRoot, "backend-service-verification");
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(
+      path.join(skillDir, "SKILL.md"),
+      [
+        "---",
+        "name: backend-service-verification",
+        "---",
+        "",
+        "# Backend Service Verification",
+        "",
+        "Run concrete service checks before claiming verification.",
+      ].join("\n"),
+    );
+    const configPath = path.join(configRoot, "skill-routing.yaml");
+    await writeFile(
+      configPath,
+      [
+        "schema_version: 0.1",
+        "project:",
+        "  name: crewpals-mp",
+        "  repo_family:",
+        `    - ${repoRoot}`,
+        "skill_sources:",
+        "  installed_skills:",
+        `    - ${skillRoot}`,
+        "stage_routes:",
+        "  verification:",
+        "    required_skills:",
+        "      - backend-service-verification",
+      ].join("\n"),
+    );
+    const previous = process.env.AGT_SKILL_ROUTING_CONFIG;
+    process.env.AGT_SKILL_ROUTING_CONFIG = configPath;
+    try {
+      const result = await runWorkflow({
+        repoRoot,
+        projectRoot: path.join(repoRoot, "crewpals-mp"),
+        stateRoot,
+        request: "verify with routed skill",
+        profile: "full",
+        humanGates: false,
+        runner: new FakeRunner(),
+      });
+
+      expect(result.status).toBe("done");
+      const store = new RuntimeStore(stateRoot);
+      const workflow = await store.loadWorkflow(result.session_id);
+      const verification = workflow.steps.find((step) => step.role === "verification");
+      expect(verification?.prompt_trace_id).toBeTruthy();
+      const prompt = await store.readPromptContent(verification!.prompt_trace_id);
+      expect(prompt.content).toContain("# Routed Skills");
+      expect(prompt.content).toContain("backend-service-verification");
+      expect(prompt.prompt.metadata.skill_routing).toMatchObject({
+        matched: true,
+        selected_skill_count: 1,
+        included_skill_count: 1,
+        missing_skills: [],
+      });
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AGT_SKILL_ROUTING_CONFIG;
+      } else {
+        process.env.AGT_SKILL_ROUTING_CONFIG = previous;
+      }
+    }
   });
 });
