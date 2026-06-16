@@ -7,6 +7,7 @@ import { type AgentRole, type RuntimeProfile } from "./schema.js";
 
 export type ResolvedSkill = {
   name: string;
+  required: boolean;
   source: "project_config" | "installed" | "missing";
   scope: "project";
   delivery: "prompt";
@@ -25,7 +26,13 @@ export type SkillRoutingDecision = {
   matched: boolean;
   selected_skills: ResolvedSkill[];
   missing_skills: string[];
+  missing_required_skills: string[];
   reasons: string[];
+};
+
+type SkillRequirement = {
+  name: string;
+  required: boolean;
 };
 
 type RoutingConfig = {
@@ -33,7 +40,7 @@ type RoutingConfig = {
   projectName: string;
   repoFamily: string[];
   skillDirs: string[];
-  stageRoutes: Record<string, string[]>;
+  stageRoutes: Record<string, SkillRequirement[]>;
 };
 
 export async function resolveSkillRouting(args: {
@@ -54,8 +61,8 @@ export async function resolveSkillRouting(args: {
       reasons.push(`config did not match repo: ${candidate}`);
       continue;
     }
-    const skillNames = skillNamesForRole(config, args.role);
-    const selected = await Promise.all(skillNames.map((skillName) => resolveSkill(skillName, config.skillDirs)));
+    const skillRequirements = skillRequirementsForRole(config, args.role);
+    const selected = await Promise.all(skillRequirements.map((requirement) => resolveSkill(requirement, config.skillDirs)));
     return {
       config_path: candidate,
       project_name: config.projectName,
@@ -64,7 +71,13 @@ export async function resolveSkillRouting(args: {
       matched: true,
       selected_skills: selected,
       missing_skills: selected.filter((skill) => !skill.included_in_prompt).map((skill) => skill.name),
-      reasons: [...reasons, skillNames.length ? `matched ${skillNames.length} skill(s)` : `no skills configured for ${args.role}`],
+      missing_required_skills: selected
+        .filter((skill) => skill.required && !skill.included_in_prompt)
+        .map((skill) => skill.name),
+      reasons: [
+        ...reasons,
+        skillRequirements.length ? `matched ${skillRequirements.length} skill(s)` : `no skills configured for ${args.role}`,
+      ],
     };
   }
   return {
@@ -75,6 +88,7 @@ export async function resolveSkillRouting(args: {
     matched: false,
     selected_skills: [],
     missing_skills: [],
+    missing_required_skills: [],
     reasons,
   };
 }
@@ -89,6 +103,7 @@ export function skillRoutingMetadata(decision: SkillRoutingDecision): Record<str
     selected_skill_count: decision.selected_skills.length,
     included_skill_count: decision.selected_skills.filter((skill) => skill.included_in_prompt).length,
     missing_skills: decision.missing_skills,
+    missing_required_skills: decision.missing_required_skills,
     reasons: decision.reasons,
     selected_skills: decision.selected_skills.map(({ content, ...skill }) => skill),
   };
@@ -108,10 +123,14 @@ export function renderSkillInjection(decision: SkillRoutingDecision): string {
   if (decision.missing_skills.length) {
     sections.push(`Missing skills: ${decision.missing_skills.join(", ")}`);
   }
+  if (decision.missing_required_skills.length) {
+    sections.push(`Missing required skills: ${decision.missing_required_skills.join(", ")}`);
+  }
   for (const skill of decision.selected_skills) {
     sections.push(
       [
         `## Skill: ${skill.name}`,
+        `Required: ${skill.required}`,
         `Source: ${skill.source}`,
         `Path: ${skill.path || "not found"}`,
         `Included in prompt: ${skill.included_in_prompt}`,
@@ -126,20 +145,19 @@ async function routingConfigCandidates(repoRoot: string, projectRoot: string): P
   const explicit = process.env.AGT_SKILL_ROUTING_CONFIG ? [process.env.AGT_SKILL_ROUTING_CONFIG] : [];
   const roots = [projectRoot, repoRoot].filter(Boolean).map((item) => path.resolve(item));
   const names = [...new Set(roots.map(projectNameFromPath).filter(Boolean))];
-  const home = process.env.HOME || "";
-  const projectConfigs = home
-    ? names.map((name) => path.join(home, ".config", "agt", "projects", name, "skill-routing.yaml"))
+  const projectConfigRoot = process.env.AGT_PROJECT_CONFIG_ROOT || defaultProjectConfigRoot();
+  const projectConfigs = projectConfigRoot
+    ? names.map((name) => path.join(projectConfigRoot, name, "skill-routing.yaml"))
     : [];
   const repoLocal = roots.map((root) => path.join(root, ".agt", "skill-routing.yaml"));
-  const discoverable = await discoverProjectRoutingConfigs(home);
+  const discoverable = await discoverProjectRoutingConfigs(projectConfigRoot);
   return [...new Set([...explicit, ...projectConfigs, ...repoLocal, ...discoverable])];
 }
 
-async function discoverProjectRoutingConfigs(home: string): Promise<string[]> {
-  if (!home) {
+async function discoverProjectRoutingConfigs(root: string): Promise<string[]> {
+  if (!root) {
     return [];
   }
-  const root = path.join(home, ".config", "agt", "projects");
   if (!existsSync(root)) {
     return [];
   }
@@ -214,7 +232,10 @@ function parseRoutingConfig(configPath: string, content: string): RoutingConfig 
       continue;
     }
     if (section === "stage_routes" && stage && listTarget.startsWith(`${stage}.`) && indent >= 6 && trimmed.startsWith("- ")) {
-      config.stageRoutes[stage]?.push(scalarValue(trimmed.slice(2)));
+      config.stageRoutes[stage]?.push({
+        name: scalarValue(trimmed.slice(2)),
+        required: listTarget.endsWith(".required_skills"),
+      });
     }
   }
   config.skillDirs = [...new Set(config.skillDirs.filter(Boolean).map((dir) => path.resolve(expandHome(dir))))];
@@ -232,21 +253,30 @@ function configMatchesRepo(config: RoutingConfig, repoRoot: string, projectRoot:
   return config.repoFamily.some((pattern) => roots.some((root) => globMatch(expandHome(pattern), root)));
 }
 
-function skillNamesForRole(config: RoutingConfig, role: AgentRole): string[] {
+function skillRequirementsForRole(config: RoutingConfig, role: AgentRole): SkillRequirement[] {
   const aliases = stageAliases(role);
-  const names = aliases.flatMap((alias) => config.stageRoutes[alias] ?? []);
-  return [...new Set(names)];
+  const requirements = aliases.flatMap((alias) => config.stageRoutes[alias] ?? []);
+  const byName = new Map<string, SkillRequirement>();
+  for (const requirement of requirements) {
+    const existing = byName.get(requirement.name);
+    byName.set(requirement.name, {
+      name: requirement.name,
+      required: Boolean(existing?.required || requirement.required),
+    });
+  }
+  return [...byName.values()];
 }
 
-async function resolveSkill(skillName: string, skillDirs: string[]): Promise<ResolvedSkill> {
+async function resolveSkill(requirement: SkillRequirement, skillDirs: string[]): Promise<ResolvedSkill> {
   for (const dir of skillDirs) {
-    const skillPath = path.join(dir, skillName, "SKILL.md");
+    const skillPath = path.join(dir, requirement.name, "SKILL.md");
     if (!existsSync(skillPath)) {
       continue;
     }
     const content = await readFile(skillPath, "utf8");
     return {
-      name: skillName,
+      name: requirement.name,
+      required: requirement.required,
       source: "installed",
       scope: "project",
       delivery: "prompt",
@@ -258,7 +288,8 @@ async function resolveSkill(skillName: string, skillDirs: string[]): Promise<Res
     };
   }
   return {
-    name: skillName,
+    name: requirement.name,
+    required: requirement.required,
     source: "missing",
     scope: "project",
     delivery: "prompt",
@@ -290,16 +321,28 @@ function projectNameFromPath(value: string): string {
 }
 
 function defaultSkillDirs(): string[] {
+  const explicit = process.env.AGT_SKILL_ROOTS
+    ?.split(path.delimiter)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (explicit?.length) {
+    return explicit.map(expandHome);
+  }
   const home = process.env.HOME || "";
   if (!home) {
     return [];
   }
+  const codexHome = process.env.CODEX_HOME || path.join(home, ".codex");
+  const agentsHome = process.env.AGENTS_HOME || path.join(home, ".agents");
   return [
-    path.join(home, ".codex", "skills"),
-    path.join(home, ".agents", "skills"),
-    path.join(home, "Desktop", "work", "debug-skills", "skills"),
-    path.join(home, "Desktop", "mySelf", "skills"),
+    path.join(codexHome, "skills"),
+    path.join(agentsHome, "skills"),
   ];
+}
+
+function defaultProjectConfigRoot(): string {
+  const home = process.env.HOME || "";
+  return home ? path.join(home, ".config", "agt", "projects") : "";
 }
 
 function expandHome(value: string): string {

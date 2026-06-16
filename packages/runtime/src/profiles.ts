@@ -117,6 +117,87 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<RunResul
         skill_routing: skillRoutingMetadata(routing),
       },
     });
+    if (routing.missing_required_skills.length > 0) {
+      const blockedRun = await store.createAgentRun({
+        sessionId: session.session_id,
+        role: step.role,
+        runner: runner.name,
+        input: prompt,
+        metadata: {
+          profile,
+          write_allowed: step.writeAllowed,
+          executor_status: "blocked",
+          result_parse_status: "not_produced",
+          prompt_trace_id: trace.prompt_id,
+          routing_config_gap: true,
+        },
+      });
+      const completed = await store.completeAgentRun(blockedRun, {
+        status: "blocked",
+        output: blockedOutput(
+          step.role,
+          `Routing config gap: missing required skills ${routing.missing_required_skills.join(", ")}.`,
+        ),
+        metadata: {
+          ...blockedRun.metadata,
+          routing_config_gap: true,
+          missing_required_skills: routing.missing_required_skills,
+        },
+      });
+      const artifact = await store.writeArtifact({
+        sessionId: session.session_id,
+        role: step.role,
+        name: artifactNameForRole(step.role),
+        content: completed.output,
+        metadata: {
+          agent_run_id: completed.agent_run_id,
+          prompt_trace_id: trace.prompt_id,
+          executor_status: "blocked",
+          result_parse_status: "not_produced",
+          routing_config_gap: true,
+        },
+      });
+      workflow = await store.updateWorkflow(session.session_id, (workflow) => ({
+        ...workflow,
+        current_stage: step.role,
+        steps: workflow.steps.map((item) =>
+          item.role === step.role
+            ? {
+                ...item,
+                status: "blocked",
+                agent_run_id: completed.agent_run_id,
+                prompt_trace_id: trace.prompt_id,
+                artifact_path: artifact.path,
+                files_changed: [],
+                commands_run: [],
+                completed_at: nowIso(),
+                summary: firstLine(completed.output),
+              }
+            : item,
+        ),
+        status: "blocked",
+        blocked_reason: completed.output,
+        files_changed: filesChanged,
+        commands_run: commandsRun,
+        summary: firstLine(completed.output),
+        updated_at: nowIso(),
+      }));
+      await store.appendEvent({
+        at: nowIso(),
+        session_id: session.session_id,
+        kind: "workflow_step_blocked",
+        role: step.role,
+        status: "blocked",
+        message: `${step.role} blocked because routing requirements were not satisfied.`,
+        details: {
+          agent_run_id: completed.agent_run_id,
+          prompt_trace_id: trace.prompt_id,
+          missing_required_skills: routing.missing_required_skills,
+          routing_config_gap: true,
+        },
+      });
+      break;
+    }
     await store.updateWorkflow(session.session_id, (workflow) => ({
       ...workflow,
       steps: workflow.steps.map((item) =>

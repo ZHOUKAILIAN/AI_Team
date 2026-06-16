@@ -64,6 +64,15 @@ class ThrowingRunner implements AgentRunner {
   }
 }
 
+class CountingRunner extends FakeRunner {
+  calls = 0;
+
+  override async runTask(task: AgentTask): Promise<AgentTaskResult> {
+    this.calls += 1;
+    return super.runTask(task);
+  }
+}
+
 describe("profiles", () => {
   it("uses the lightweight quick profile by default", () => {
     expect(stepsForProfile("quick").map((step) => step.role)).toEqual([
@@ -265,7 +274,9 @@ describe("profiles", () => {
       ].join("\n"),
     );
     const previous = process.env.AGT_SKILL_ROUTING_CONFIG;
+    const previousSkillRoots = process.env.AGT_SKILL_ROOTS;
     process.env.AGT_SKILL_ROUTING_CONFIG = configPath;
+    process.env.AGT_SKILL_ROOTS = skillRoot;
     try {
       const result = await runWorkflow({
         repoRoot,
@@ -296,6 +307,78 @@ describe("profiles", () => {
         delete process.env.AGT_SKILL_ROUTING_CONFIG;
       } else {
         process.env.AGT_SKILL_ROUTING_CONFIG = previous;
+      }
+      if (previousSkillRoots === undefined) {
+        delete process.env.AGT_SKILL_ROOTS;
+      } else {
+        process.env.AGT_SKILL_ROOTS = previousSkillRoots;
+      }
+    }
+  });
+
+  it("blocks when routing selects missing required skills", async () => {
+    const repoRoot = await mkdtemp(path.join(tmpdir(), "agt-runtime-"));
+    const stateRoot = path.join(repoRoot, ".agt-test");
+    const configRoot = await mkdtemp(path.join(tmpdir(), "agt-routing-"));
+    const emptySkillRoot = path.join(configRoot, "empty-skills");
+    await mkdir(emptySkillRoot, { recursive: true });
+    const configPath = path.join(configRoot, "skill-routing.yaml");
+    await writeFile(
+      configPath,
+      [
+        "schema_version: 0.1",
+        "project:",
+        "  name: generic-tool-project",
+        "  repo_family:",
+        `    - ${repoRoot}`,
+        "skill_sources:",
+        "  installed_skills:",
+        `    - ${emptySkillRoot}`,
+        "stage_routes:",
+        "  verification:",
+        "    required_skills:",
+        "      - required-verification-skill",
+      ].join("\n"),
+    );
+    const previous = process.env.AGT_SKILL_ROUTING_CONFIG;
+    const previousSkillRoots = process.env.AGT_SKILL_ROOTS;
+    process.env.AGT_SKILL_ROUTING_CONFIG = configPath;
+    process.env.AGT_SKILL_ROOTS = emptySkillRoot;
+    const runner = new CountingRunner();
+    try {
+      const result = await runWorkflow({
+        repoRoot,
+        projectRoot: repoRoot,
+        stateRoot,
+        request: "verify with missing routed skill",
+        profile: "full",
+        humanGates: false,
+        runner,
+      });
+
+      expect(result.status).toBe("blocked");
+      expect(result.current_stage).toBe("verification");
+      expect(result.blocked_reason).toContain("Routing config gap");
+      expect(runner.calls).toBe(5);
+
+      const store = new RuntimeStore(stateRoot);
+      const workflow = await store.loadWorkflow(result.session_id);
+      const verification = workflow.steps.find((step) => step.role === "verification");
+      expect(verification?.status).toBe("blocked");
+      const runs = await store.listAgentRuns(result.session_id);
+      const verificationRun = runs.find((run) => run.role === "verification");
+      expect(verificationRun?.metadata.routing_config_gap).toBe(true);
+      expect(verificationRun?.metadata.missing_required_skills).toEqual(["required-verification-skill"]);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AGT_SKILL_ROUTING_CONFIG;
+      } else {
+        process.env.AGT_SKILL_ROUTING_CONFIG = previous;
+      }
+      if (previousSkillRoots === undefined) {
+        delete process.env.AGT_SKILL_ROOTS;
+      } else {
+        process.env.AGT_SKILL_ROOTS = previousSkillRoots;
       }
     }
   });
