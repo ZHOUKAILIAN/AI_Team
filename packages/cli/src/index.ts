@@ -20,7 +20,7 @@ const program = new Command();
 program
   .name("agt")
   .description("Agent Team Runtime JS CLI")
-  .version("0.3.0-alpha.0");
+  .version("0.3.0-alpha.1");
 
 program
   .command("init")
