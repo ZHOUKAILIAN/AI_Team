@@ -2,14 +2,14 @@
 
 `agent-team-runtime` 是一个 JS/TypeScript 的 agent workflow runtime。它的目标是把“小需求快速跑、复杂需求可追踪”做成同一套本地工具，而不是每次再启动一组黑盒的 `codex --yolo` 进程。
 
-新的入口是 `agt` CLI。runtime 自己负责 session、workflow、agent run、tool call 和迁移记录；模型执行通过 OpenAI Agents SDK 的 `SandboxAgent` 完成。没有 OpenAI 环境变量时会自动使用 deterministic local fallback，方便测试和离线验证。
+新的入口是 `agt` CLI。runtime 自己负责 session、两层 workflow、agent run、tool call 和迁移记录；模型执行通过 OpenAI Agents SDK 的 `SandboxAgent` 完成。没有 OpenAI 环境变量时会自动使用 deterministic local fallback，方便测试和离线验证。
 
 ## 当前能力
 
 - `quick` profile：面向小需求，按 `planner -> repo_scout -> writer -> verifier -> summarizer` 快速跑完。
 - `investigate` profile：面向只查问题不改代码，按 `planner -> repo_scout -> test_scout -> summarizer` 收敛证据。
 - `full` profile：面向大需求，保留五层九阶段：`route -> product_definition -> project_runtime -> technical_design -> implementation -> verification -> governance_review -> acceptance -> session_handoff`。
-- 每个 session 都写入结构化状态：`session.json`、`workflow.json`、`events.jsonl`、`tool-calls.jsonl`、`agents/*.json`。
+- 每个 session 都写入结构化状态：`session.json`、`delivery-workflow.json`、`execution-workflow.json`、`events.jsonl`、`tool-calls.jsonl`、`agents/*.json`。
 - 旧 Python/Codex CLI runtime 的 session 可以迁移到新 `.agt/sessions/` schema，迁移不会修改旧目录。
 - 内置 Fastify API 和 web 静态资源服务，供控制台读取项目、session、事件和工具调用。
 
@@ -31,7 +31,7 @@ npm run build
 
 ```bash
 node packages/cli/dist/index.js --help
-node packages/cli/dist/index.js run "整理这个仓库的测试入口" --profile quick
+node packages/cli/dist/index.js run "整理这个仓库的测试入口"
 ```
 
 如果通过 npm link 安装，本地命令是：
@@ -58,13 +58,17 @@ agt run "查一下这个接口为什么慢，不要改代码" --profile investig
 完整流程：
 
 ```bash
-agt run "做一个跨模块需求" --profile full
+agt run "做一个跨模块需求"
 ```
+
+`full` 是默认 profile；只有明确要快速小改或只调查时，才显式传 `--profile quick` 或 `--profile investigate`。
 
 常用参数：
 
 ```bash
-agt run "..." --repo-root /path/to/repo --state-root /path/to/repo/.agt --profile quick
+agt run "..." --repo-root /path/to/repo --state-root /path/to/repo/.agt
+agt run --from docs/requirement.md --repo-root /path/to/repo
+agt run --from-dir docs/requirement-folder --repo-root /path/to/repo
 agt status
 agt status <session_id>
 agt inspect <session_id>
@@ -95,7 +99,7 @@ SDK runner 会创建 `SandboxAgent`，把当前仓库挂载到 sandbox 的 `/wor
 ```json
 {
   "schema_version": 1,
-  "default_profile": "quick",
+  "default_profile": "full",
   "default_model": "gpt-5.4-mini",
   "state_root": ".agt",
   "max_turns": {
@@ -117,7 +121,8 @@ SDK runner 会创建 `SandboxAgent`，把当前仓库挂载到 sandbox 的 `/wor
   sessions/
     <session_id>/
       session.json
-      workflow.json
+      delivery-workflow.json
+      execution-workflow.json
       events.jsonl
       tool-calls.jsonl
       agents/
@@ -138,17 +143,21 @@ SDK runner 会创建 `SandboxAgent`，把当前仓库挂载到 sandbox 的 `/wor
 这些文件是 runtime 的事实来源。控制台和 CLI 都从这里读取，不再从模型摘要反推状态。
 `agt init` 也会写入 `.agt/local/worktree-policy.json`，用于记录 task worktree 的默认策略。
 
+`delivery-workflow.json` 是外层业务交付状态，面向用户和 CLI 默认展示：`requirement -> development -> verification -> handoff`。它记录每个 phase 的状态、blockers 和 evidence_refs。
+
+`execution-workflow.json` 是 AGT 内部执行状态，面向调试和追踪：不同 profile 会展开成 `quick`、`investigate` 或 `full` 的执行 steps。execution 的变化会通过 runtime projector 更新 delivery；delivery 不会反向改 execution。
+
 如果不需要保留旧 session、prompt trace、tool-call 记录和历史控制台数据，可以直接删除旧 `.agt` 后重新初始化：
 
 ```bash
 rm -rf .agt
 agt init
-agt run "你的第一个需求" --profile quick
+agt run "你的第一个需求"
 ```
 
 这条路径最适合从旧 Python/Codex CLI runtime 切到 JS runtime 的全新开始。删除 `.agt` 会永久丢弃旧运行历史；如果需要保留旧记录，先使用 `agt migrate --dry-run` 和 `agt migrate --apply`。
 
-每个 workflow step 会记录：
+每个 execution workflow step 会记录：
 
 - `prompt_trace_id`：这一阶段实际发送给 runner 的 prompt。
 - `agent_run_id`：这一阶段的 executor run 记录。
@@ -232,3 +241,4 @@ node packages/cli/dist/index.js server --state-root /tmp/agt-js-smoke-state --ho
 ## 技术方案
 
 本次 JS rewrite 的详细方案在 [docs/workflow-specs/2026-06-06-js-runtime-rewrite.md](docs/workflow-specs/2026-06-06-js-runtime-rewrite.md)。
+两层 workflow 状态模型在 [docs/workflow-specs/2026-06-18-delivery-execution-workflow.md](docs/workflow-specs/2026-06-18-delivery-execution-workflow.md)。

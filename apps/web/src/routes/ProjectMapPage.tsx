@@ -98,7 +98,7 @@ export function ProjectMapPage({ snapshot, language, searchQuery, onOpenProject 
                       onClick={() => onOpenProject(selected.project_id)}
                     >
                       <strong className="block line-clamp-2 text-sm">{session.request}</strong>
-                      <span className="mt-1 block text-xs text-console-muted">{session.current_stage}</span>
+                      <span className="mt-1 block text-xs text-console-muted">{session.current_phase ?? session.current_stage}</span>
                     </button>
                   ))}
                 </div>
@@ -172,6 +172,7 @@ function matchesProject(project: ProjectSummary, searchQuery: string) {
     project.project_root,
     ...project.sessions.flatMap((session) => [
       session.request,
+      session.current_phase,
       session.current_stage,
       session.current_state,
       session.branch,

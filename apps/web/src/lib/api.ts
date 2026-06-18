@@ -23,6 +23,17 @@ export type WorkflowStep = {
   completed_at?: string;
 };
 
+export type DeliveryPhase = {
+  phase: string;
+  status: string;
+  summary?: string;
+  blockers?: Array<Record<string, unknown>>;
+  evidence_refs?: Array<Record<string, unknown>>;
+  started_at?: string;
+  completed_at?: string;
+  updated_at?: string;
+};
+
 export type PromptTrace = {
   prompt_id: string;
   session_id: string;
@@ -93,8 +104,11 @@ export type SessionSummary = {
   state_root: string;
   request: string;
   current_state: string;
+  current_phase?: string;
   current_stage: string;
   workflow_status: WorkflowStatus;
+  delivery_status?: WorkflowStatus;
+  execution_status?: WorkflowStatus;
   blocked_reason: string;
   active_run: unknown;
   artifact_paths: Record<string, string>;
@@ -154,9 +168,14 @@ export type PanelSnapshot = {
   };
   state: Record<string, unknown> & {
     current_state?: string;
+    current_phase?: string;
     current_stage?: string;
+    delivery_status?: string;
+    execution_status?: string;
     blocked_reason?: string;
     artifact_paths?: Record<string, string>;
+    phases?: DeliveryPhase[];
+    blockers?: Array<Record<string, unknown>>;
     steps?: WorkflowStep[];
   };
   operator: {
@@ -166,8 +185,8 @@ export type PanelSnapshot = {
     latest_event: RuntimeEvent | null;
   };
   evidence: {
-    required: string[];
-    provided: string[];
+    required: unknown[];
+    provided: unknown[];
     pending: string[];
     acceptance_criteria: string[];
     unresolved_items: string[];

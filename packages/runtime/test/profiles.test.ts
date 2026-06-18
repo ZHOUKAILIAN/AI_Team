@@ -100,7 +100,7 @@ class HeartbeatRunner implements AgentRunner {
 }
 
 describe("profiles", () => {
-  it("uses the lightweight quick profile by default", () => {
+  it("keeps the lightweight quick profile available", () => {
     expect(stepsForProfile("quick").map((step) => step.role)).toEqual([
       "planner",
       "repo_scout",
@@ -123,11 +123,19 @@ describe("profiles", () => {
 
     expect(result.status).toBe("done");
     const store = new RuntimeStore(stateRoot);
-    const workflow = await store.loadWorkflow(result.session_id);
+    const workflow = await store.loadExecutionWorkflow(result.session_id);
+    const delivery = await store.loadDeliveryWorkflow(result.session_id);
     expect(workflow.steps).toHaveLength(5);
     expect(workflow.files_changed).toContain("example.txt");
     expect(workflow.steps.every((step) => step.prompt_trace_id)).toBe(true);
     expect(workflow.steps.every((step) => step.artifact_path)).toBe(true);
+    expect(delivery.status).toBe("done");
+    expect(delivery.phases.map((phase) => [phase.phase, phase.status])).toEqual([
+      ["requirement", "passed"],
+      ["development", "passed"],
+      ["verification", "passed"],
+      ["handoff", "passed"],
+    ]);
 
     const prompts = await store.readPromptTraces(result.session_id);
     expect(prompts).toHaveLength(5);
@@ -181,7 +189,7 @@ describe("profiles", () => {
       profile: "quick",
       repoRoot,
     });
-    await store.updateWorkflow(session.session_id, (workflow) => ({
+    await store.updateExecutionWorkflow(session.session_id, (workflow) => ({
       ...workflow,
       current_stage: "planner",
       status: "in_progress",
@@ -208,6 +216,38 @@ describe("profiles", () => {
     expect(status.runtime_status).toBe("stalled");
     expect(status.active_run?.runtime_status).toBe("stalled");
     expect(status.active_run?.heartbeat_age_ms).toBe(59_000);
+  });
+
+  it("projects an execution-level blocker even when no step is blocked", async () => {
+    const repoRoot = await mkdtemp(path.join(tmpdir(), "agt-runtime-"));
+    const stateRoot = path.join(repoRoot, ".agt-test");
+    const store = new RuntimeStore(stateRoot);
+    const session = await store.createSession({
+      request: "project blocked execution",
+      profile: "full",
+      repoRoot,
+    });
+
+    await store.updateExecutionWorkflow(session.session_id, (workflow) => ({
+      ...workflow,
+      status: "blocked",
+      current_stage: "implementation",
+      blocked_reason: "Git worktree could not be created.",
+      steps: [],
+      updated_at: "2026-06-16T00:00:00.000Z",
+    }));
+
+    const delivery = await store.loadDeliveryWorkflow(session.session_id);
+    const updatedSession = await store.loadSession(session.session_id);
+    expect(delivery.status).toBe("blocked");
+    expect(delivery.current_phase).toBe("development");
+    expect(delivery.blockers[0]).toMatchObject({
+      phase: "development",
+      source_role: "implementation",
+      reason: "Git worktree could not be created.",
+    });
+    expect(updatedSession.delivery_status).toBe("blocked");
+    expect(updatedSession.current_phase).toBe("development");
   });
 
   it("stops at full-profile human gates and continues after approval", async () => {
@@ -244,9 +284,12 @@ describe("profiles", () => {
     expect(second.current_stage).toBe("technical_design");
 
     const store = new RuntimeStore(stateRoot);
-    const workflow = await store.loadWorkflow(first.session_id);
+    const workflow = await store.loadExecutionWorkflow(first.session_id);
+    const delivery = await store.loadDeliveryWorkflow(first.session_id);
     expect(workflow.steps.find((step) => step.role === "product_definition")?.status).toBe("completed");
     expect(workflow.steps.find((step) => step.role === "technical_design")?.status).toBe("completed");
+    expect(delivery.status).toBe("waiting_human");
+    expect(delivery.current_phase).toBe("requirement");
     expect((await store.readPromptTraces(first.session_id)).length).toBeGreaterThanOrEqual(4);
   });
 
@@ -279,7 +322,7 @@ describe("profiles", () => {
     expect(rework.current_stage).toBe("product_definition");
 
     const store = new RuntimeStore(stateRoot);
-    const workflow = await store.loadWorkflow(first.session_id);
+    const workflow = await store.loadExecutionWorkflow(first.session_id);
     const route = workflow.steps.find((step) => step.role === "route");
     const product = workflow.steps.find((step) => step.role === "product_definition");
     const design = workflow.steps.find((step) => step.role === "technical_design");
@@ -308,7 +351,8 @@ describe("profiles", () => {
     expect(result.blocked_reason).toContain("Executor timed out after 900 seconds");
 
     const store = new RuntimeStore(stateRoot);
-    const workflow = await store.loadWorkflow(result.session_id);
+    const workflow = await store.loadExecutionWorkflow(result.session_id);
+    const delivery = await store.loadDeliveryWorkflow(result.session_id);
     const implementation = workflow.steps.find((step) => step.role === "implementation");
     const verification = workflow.steps.find((step) => step.role === "verification");
     expect(implementation?.status).toBe("completed");
@@ -321,6 +365,9 @@ describe("profiles", () => {
     expect(verificationRun?.status).toBe("blocked");
     expect(verificationRun?.metadata.executor_status).toBe("timeout");
     expect(verificationRun?.metadata.result_parse_status).toBe("not_produced");
+    expect(delivery.status).toBe("blocked");
+    expect(delivery.current_phase).toBe("verification");
+    expect(delivery.blockers[0]?.source_role).toBe("verification");
   });
 
   it("records configured skill routing in prompt trace metadata and prompt content", async () => {
@@ -377,7 +424,7 @@ describe("profiles", () => {
 
       expect(result.status).toBe("done");
       const store = new RuntimeStore(stateRoot);
-      const workflow = await store.loadWorkflow(result.session_id);
+      const workflow = await store.loadExecutionWorkflow(result.session_id);
       const verification = workflow.steps.find((step) => step.role === "verification");
       expect(verification?.prompt_trace_id).toBeTruthy();
       const prompt = await store.readPromptContent(verification!.prompt_trace_id);
@@ -449,7 +496,7 @@ describe("profiles", () => {
       expect(runner.calls).toBe(5);
 
       const store = new RuntimeStore(stateRoot);
-      const workflow = await store.loadWorkflow(result.session_id);
+      const workflow = await store.loadExecutionWorkflow(result.session_id);
       const verification = workflow.steps.find((step) => step.role === "verification");
       expect(verification?.status).toBe("blocked");
       const runs = await store.listAgentRuns(result.session_id);

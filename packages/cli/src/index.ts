@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { Command } from "commander";
+import { createHash } from "node:crypto";
+import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { migrateLegacySessions } from "@agent-team-runtime/migrator";
 import {
@@ -9,6 +11,8 @@ import {
   readSessionStatus,
   runWorkflow,
   type AgentRole,
+  type RequestSourceRecord,
+  type RuntimeConfig,
   type SessionStatusSnapshot,
   type RuntimeProfile,
   RuntimeStore,
@@ -26,27 +30,35 @@ program
   .command("init")
   .option("--repo-root <path>", "repository root", process.cwd())
   .option("--state-root <path>", "state root; defaults to <repo>/.agt")
-  .option("--default-profile <profile>", "quick | investigate | full", "quick")
-  .option("--default-model <model>", "OpenAI model", "gpt-5.4-mini")
+  .option("--default-profile <profile>", "quick | investigate | full")
+  .option("--default-model <model>", "OpenAI model")
   .option("--task-worktree", "enable isolated task worktrees by default")
   .option("--human-gates", "enable human gates by default")
   .action(async (options: InitOptions) => {
     const repoRoot = path.resolve(options.repoRoot);
+    const config: Partial<RuntimeConfig> = {};
+    if (options.defaultProfile) {
+      config.default_profile = parseProfile(options.defaultProfile);
+    }
+    if (options.defaultModel) {
+      config.default_model = options.defaultModel;
+    }
+    if (options.taskWorktree) {
+      config.task_worktree = {
+        enabled: true,
+        base_ref_candidates: ["origin/test", "origin/main", "test", "main"],
+        branch_prefix: "feature/",
+        worktree_root: ".worktrees",
+        slug_max_length: 40,
+      };
+    }
+    if (options.humanGates) {
+      config.human_gates = true;
+    }
     const result = await initRuntime({
       repoRoot,
       stateRoot: options.stateRoot ? path.resolve(options.stateRoot) : undefined,
-      config: {
-        default_profile: parseProfile(options.defaultProfile),
-        default_model: options.defaultModel,
-        task_worktree: {
-          enabled: Boolean(options.taskWorktree),
-          base_ref_candidates: ["origin/test", "origin/main", "test", "main"],
-          branch_prefix: "feature/",
-          worktree_root: ".worktrees",
-          slug_max_length: 40,
-        },
-        human_gates: Boolean(options.humanGates),
-      },
+      config,
     });
     console.log(`state_root: ${result.stateRoot}`);
     console.log(`config_path: ${result.configPath}`);
@@ -58,6 +70,8 @@ program
   .option("--profile <profile>", "quick | investigate | full")
   .option("--repo-root <path>", "repository root", process.cwd())
   .option("--state-root <path>", "state root; defaults to <repo>/.agt")
+  .option("--from <path>", "read request context from a file")
+  .option("--from-dir <path>", "read request context from all files under a directory")
   .option("--session-id <session-id>", "existing session to continue")
   .option("--continue", "continue latest unfinished session from session-index.json")
   .option("--task-worktree", "create an isolated git worktree for this run")
@@ -68,7 +82,6 @@ program
     const sourceStateRoot = path.resolve(options.stateRoot ?? path.join(sourceRepoRoot, ".agt"));
     const sourceStore = new RuntimeStore(sourceStateRoot);
     const config = await sourceStore.loadConfig();
-    const request = messageParts.join(" ").trim();
 
     if (options.continue || options.sessionId) {
       const target = await resolveContinuation(sourceStore, options.sessionId);
@@ -83,8 +96,10 @@ program
       return;
     }
 
+    const requestInput = await readRequestInput(messageParts, options);
+    const request = requestInput.request;
     if (!request) {
-      throw new Error("agt run requires a request message.");
+      throw new Error("agt run requires a request message, --from, or --from-dir.");
     }
 
     const useTaskWorktree = options.taskWorktree || (config.task_worktree.enabled && options.taskWorktree !== false);
@@ -112,6 +127,7 @@ program
       projectRoot: sourceRepoRoot,
       stateRoot,
       worktree,
+      requestSources: requestInput.sources,
       humanGates: Boolean(options.humanGates || config.human_gates),
     });
     if (useTaskWorktree) {
@@ -177,12 +193,21 @@ program
     const target = await resolveSessionStore(sourceStore, sessionId);
     const store = new RuntimeStore(target.stateRoot);
     const session = await store.loadSession(target.sessionId);
-    const workflow = await store.loadWorkflow(target.sessionId);
+    const deliveryWorkflow = await store.loadDeliveryWorkflow(target.sessionId);
+    const executionWorkflow = await store.loadExecutionWorkflow(target.sessionId);
     const toolCalls = await store.readToolCalls(target.sessionId);
     const prompts = await store.readPromptTraces(target.sessionId);
     const artifacts = await store.readArtifacts(target.sessionId);
     const agentRuns = await store.listAgentRuns(target.sessionId);
-    console.log(JSON.stringify({ session, workflow, prompts, artifacts, agent_runs: agentRuns, tool_calls: toolCalls }, null, 2));
+    console.log(JSON.stringify({
+      session,
+      delivery_workflow: deliveryWorkflow,
+      execution_workflow: executionWorkflow,
+      prompts,
+      artifacts,
+      agent_runs: agentRuns,
+      tool_calls: toolCalls,
+    }, null, 2));
   });
 
 program
@@ -235,6 +260,8 @@ type RunOptions = {
   profile?: string;
   repoRoot: string;
   stateRoot?: string;
+  from?: string;
+  fromDir?: string;
   sessionId?: string;
   continue?: boolean;
   taskWorktree?: boolean;
@@ -292,6 +319,75 @@ function parseAgentRole(value: string): AgentRole {
     return value as AgentRole;
   }
   throw new Error(`Unsupported role: ${value}`);
+}
+
+async function readRequestInput(
+  messageParts: string[],
+  options: Pick<RunOptions, "from" | "fromDir">,
+): Promise<{ request: string; sources: RequestSourceRecord[] }> {
+  const message = messageParts.join(" ").trim();
+  const sourceBlocks: string[] = [];
+  const sources: RequestSourceRecord[] = [];
+  if (options.from) {
+    const resolved = path.resolve(options.from);
+    const content = await readFile(resolved, "utf8");
+    sourceBlocks.push(renderSourceBlock(resolved, content));
+    sources.push(sourceRecord("file", resolved, content));
+  }
+  if (options.fromDir) {
+    const root = path.resolve(options.fromDir);
+    const files = await collectRequestFiles(root);
+    for (const file of files) {
+      const content = await readFile(file, "utf8");
+      sourceBlocks.push(renderSourceBlock(path.relative(root, file) || file, content));
+      sources.push(sourceRecord("directory_file", file, content));
+    }
+  }
+  return {
+    request: [message, ...sourceBlocks].filter(Boolean).join("\n\n"),
+    sources,
+  };
+}
+
+async function collectRequestFiles(root: string): Promise<string[]> {
+  const rootStat = await stat(root);
+  if (rootStat.isFile()) {
+    return [root];
+  }
+  if (!rootStat.isDirectory()) {
+    throw new Error(`--from-dir is not a directory: ${root}`);
+  }
+  const ignored = new Set([".git", ".agt", "node_modules", "dist", "build"]);
+  const files: string[] = [];
+  async function visit(dir: string): Promise<void> {
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (ignored.has(entry.name)) {
+        continue;
+      }
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await visit(fullPath);
+      } else if (entry.isFile()) {
+        files.push(fullPath);
+      }
+    }
+  }
+  await visit(root);
+  return files.sort();
+}
+
+function renderSourceBlock(label: string, content: string): string {
+  return [`# Source: ${label}`, "", content.trim()].join("\n");
+}
+
+function sourceRecord(type: RequestSourceRecord["type"], filePath: string, content: string): RequestSourceRecord {
+  return {
+    type,
+    path: filePath,
+    sha256: createHash("sha256").update(content).digest("hex"),
+    bytes: Buffer.byteLength(content, "utf8"),
+  };
 }
 
 async function resolveContinuation(store: RuntimeStore, requestedSessionId?: string): Promise<{
@@ -360,7 +456,9 @@ async function mirrorSessionIndex(sourceStore: RuntimeStore, targetStateRoot: st
 function printResult(result: Awaited<ReturnType<typeof runWorkflow>>): void {
   console.log(`session_id: ${result.session_id}`);
   console.log(`profile: ${result.profile}`);
-  console.log(`status: ${result.status}`);
+  console.log(`delivery_status: ${result.delivery_status}`);
+  console.log(`current_phase: ${result.current_phase}`);
+  console.log(`execution_status: ${result.execution_status}`);
   console.log(`current_stage: ${result.current_stage}`);
   console.log(`repo_root: ${result.repo_root}`);
   console.log(`state_root: ${result.state_root}`);
@@ -389,7 +487,19 @@ function printStatus(snapshot: SessionStatusSnapshot): void {
   console.log(`generated_at: ${snapshot.generated_at}`);
   console.log(`session_id: ${snapshot.session_id}`);
   console.log(`profile: ${snapshot.profile}`);
-  console.log(`status: ${snapshot.workflow_status}`);
+  console.log(`delivery_status: ${snapshot.delivery_status}`);
+  console.log(`current_phase: ${snapshot.current_phase}`);
+  console.log("phases:");
+  for (const phase of snapshot.phases) {
+    console.log(`  ${phase.phase}: ${phase.status}`);
+  }
+  if (snapshot.blockers.length > 0) {
+    console.log("blockers:");
+    for (const blocker of snapshot.blockers) {
+      printIndentedValue(`  ${blocker.phase}${blocker.source_role ? `/${blocker.source_role}` : ""}`, blocker.reason, "    ");
+    }
+  }
+  console.log(`execution_status: ${snapshot.execution_status}`);
   console.log(`runtime_status: ${snapshot.runtime_status}`);
   console.log(`current_stage: ${snapshot.current_stage}`);
   console.log(`repo_root: ${snapshot.repo_root}`);
@@ -427,9 +537,17 @@ function printStatus(snapshot: SessionStatusSnapshot): void {
     console.log(`latest_tool_call: ${snapshot.latest_tool_call.name}`);
   }
   if (snapshot.blocked_reason) {
-    console.log(`blocked_reason: ${snapshot.blocked_reason}`);
+    printIndentedValue("blocked_reason", snapshot.blocked_reason, "  ");
   }
   console.log(`summary: ${snapshot.summary}`);
+}
+
+function printIndentedValue(label: string, value: string, continuationIndent: string): void {
+  const lines = value.split("\n");
+  console.log(`${label}: ${lines[0] ?? ""}`);
+  for (const line of lines.slice(1)) {
+    console.log(`${continuationIndent}${line}`);
+  }
 }
 
 function isWatchableRuntimeStatus(status: SessionStatusSnapshot["runtime_status"]): boolean {

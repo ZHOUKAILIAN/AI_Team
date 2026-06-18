@@ -7,11 +7,12 @@ import {
   RuntimeStore,
   type AgentRunRecord,
   type ArtifactRecord,
+  type DeliveryWorkflowRecord,
+  type ExecutionWorkflowRecord,
   type PromptTraceRecord,
   type RuntimeEvent,
   type SessionRecord,
   type ToolCallRecord,
-  type WorkflowRecord,
 } from "@agent-team-runtime/runtime";
 
 export type CreateServerOptions = {
@@ -21,7 +22,8 @@ export type CreateServerOptions = {
 
 type HydratedSession = {
   session: SessionRecord;
-  workflow: WorkflowRecord;
+  deliveryWorkflow: DeliveryWorkflowRecord;
+  executionWorkflow: ExecutionWorkflowRecord;
   events: RuntimeEvent[];
   toolCalls: ToolCallRecord[];
   prompts: PromptTraceRecord[];
@@ -67,7 +69,9 @@ export async function createServer(options: CreateServerOptions) {
       const hydrated = await hydrateSession(store, request.params.sessionId);
       return {
         session: hydrated.session,
-        workflow: hydrated.workflow,
+        delivery_workflow: hydrated.deliveryWorkflow,
+        execution_workflow: hydrated.executionWorkflow,
+        workflow: hydrated.executionWorkflow,
         prompts: hydrated.prompts,
         artifacts: hydrated.artifacts,
         agent_runs: hydrated.agentRuns,
@@ -196,10 +200,12 @@ async function hydrateSessions(store: RuntimeStore): Promise<HydratedSession[]> 
 
 async function hydrateSession(store: RuntimeStore, sessionId: string): Promise<HydratedSession> {
   const session = await store.loadSession(sessionId);
-  const workflow = await store.loadWorkflow(sessionId);
+  const deliveryWorkflow = await store.loadDeliveryWorkflow(sessionId);
+  const executionWorkflow = await store.loadExecutionWorkflow(sessionId);
   return {
     session,
-    workflow,
+    deliveryWorkflow,
+    executionWorkflow,
     events: await store.readEvents(sessionId),
     toolCalls: await store.readToolCalls(sessionId),
     prompts: await store.readPromptTraces(sessionId),
@@ -286,7 +292,9 @@ function ensureWorktreeSummary(project: any, session: SessionRecord) {
 
 function sessionSummary(item: HydratedSession, projectId: string) {
   const session = item.session;
-  const workflow = item.workflow;
+  const delivery = item.deliveryWorkflow;
+  const execution = item.executionWorkflow;
+  const blocker = delivery.blockers.find((item) => item.status === "open");
   return {
     session_id: session.session_id,
     project_id: projectId,
@@ -296,12 +304,15 @@ function sessionSummary(item: HydratedSession, projectId: string) {
     branch: session.worktree?.branch ?? "",
     state_root: session.state_root,
     request: session.request,
-    current_state: workflow.status === "done" ? "Done" : workflow.current_stage,
-    current_stage: workflow.current_stage,
-    workflow_status: workflow.status,
-    blocked_reason: workflow.blocked_reason,
+    current_state: delivery.status === "done" ? "Done" : delivery.current_phase,
+    current_phase: delivery.current_phase,
+    current_stage: execution.current_stage,
+    workflow_status: delivery.status,
+    delivery_status: delivery.status,
+    execution_status: execution.status,
+    blocked_reason: blocker?.reason ?? execution.blocked_reason,
     active_run: item.agentRuns.find((run) => run.status === "running") ?? null,
-    artifact_paths: artifactPaths(workflow),
+    artifact_paths: artifactPaths(execution),
     prompt_count: item.prompts.length,
     artifact_count: item.artifacts.length,
     tool_call_count: item.toolCalls.length,
@@ -312,14 +323,15 @@ function sessionSummary(item: HydratedSession, projectId: string) {
 }
 
 function buildPanelSnapshot(item: HydratedSession) {
-  const { session, workflow, events, artifacts, prompts, agentRuns, toolCalls } = item;
+  const { session, deliveryWorkflow, executionWorkflow, events, artifacts, prompts, agentRuns, toolCalls } = item;
+  const blocker = deliveryWorkflow.blockers.find((item) => item.status === "open");
   return {
     overview: {
       project: path.basename(session.project_root || session.repo_root),
-      role: workflow.current_stage,
-      status: workflow.status,
-      text: workflow.summary || session.request,
-      detail: workflow.blocked_reason,
+      role: deliveryWorkflow.current_phase,
+      status: deliveryWorkflow.status,
+      text: deliveryWorkflow.summary || session.request,
+      detail: blocker?.reason ?? executionWorkflow.blocked_reason,
     },
     session: {
       session_id: session.session_id,
@@ -333,29 +345,35 @@ function buildPanelSnapshot(item: HydratedSession) {
       project_root: session.project_root || session.repo_root,
     },
     state: {
-      current_state: workflow.status === "done" ? "Done" : workflow.current_stage,
-      current_stage: workflow.current_stage,
-      workflow_status: workflow.status,
-      blocked_reason: workflow.blocked_reason,
-      artifact_paths: artifactPaths(workflow),
-      steps: workflow.steps,
+      current_state: deliveryWorkflow.status === "done" ? "Done" : deliveryWorkflow.current_phase,
+      current_phase: deliveryWorkflow.current_phase,
+      current_stage: executionWorkflow.current_stage,
+      workflow_status: deliveryWorkflow.status,
+      delivery_status: deliveryWorkflow.status,
+      execution_status: executionWorkflow.status,
+      blocked_reason: blocker?.reason ?? executionWorkflow.blocked_reason,
+      artifact_paths: artifactPaths(executionWorkflow),
+      phases: deliveryWorkflow.phases,
+      blockers: deliveryWorkflow.blockers,
+      steps: executionWorkflow.steps,
     },
     operator: {
-      current_action: workflow.summary,
-      next_action: workflow.status === "done" ? "" : `Continue ${workflow.current_stage}`,
-      blocked_reason: workflow.blocked_reason,
+      current_action: deliveryWorkflow.summary,
+      next_action: deliveryWorkflow.status === "done" ? "" : `Continue ${deliveryWorkflow.current_phase}`,
+      blocked_reason: blocker?.reason ?? executionWorkflow.blocked_reason,
       latest_event: events.at(-1) ?? null,
     },
     evidence: {
-      required: workflow.commands_run,
-      provided: workflow.commands_run,
+      required: deliveryWorkflow.evidence_refs,
+      provided: deliveryWorkflow.evidence_refs,
       pending: [],
       acceptance_criteria: [],
-      unresolved_items: workflow.blocked_reason ? [workflow.blocked_reason] : [],
+      unresolved_items: deliveryWorkflow.blockers.map((item) => item.reason),
     },
     artifacts: [
       { name: "session.json", path: path.join(session.state_root, "sessions", session.session_id, "session.json"), exists: true },
-      { name: "workflow.json", path: path.join(session.state_root, "sessions", session.session_id, "workflow.json"), exists: true },
+      { name: "delivery-workflow.json", path: path.join(session.state_root, "sessions", session.session_id, "delivery-workflow.json"), exists: true },
+      { name: "execution-workflow.json", path: path.join(session.state_root, "sessions", session.session_id, "execution-workflow.json"), exists: true },
       { name: "tool-calls.jsonl", path: path.join(session.state_root, "sessions", session.session_id, "tool-calls.jsonl"), exists: true },
       ...artifacts.map((artifact) => ({ ...artifact, exists: true })),
     ],
@@ -366,7 +384,7 @@ function buildPanelSnapshot(item: HydratedSession) {
   };
 }
 
-function artifactPaths(workflow: WorkflowRecord): Record<string, string> {
+function artifactPaths(workflow: ExecutionWorkflowRecord): Record<string, string> {
   return Object.fromEntries(
     workflow.steps
       .filter((step) => step.artifact_path)

@@ -4,9 +4,12 @@ import path from "node:path";
 import {
   RuntimeStore,
   type AgentRole,
+  type DeliveryWorkflowRecord,
+  type ExecutionWorkflowRecord,
   type RuntimeProfile,
   type RuntimeEvent,
   type SessionRecord,
+  projectDeliveryWorkflow,
   readJson,
   writeJson,
   nowIso,
@@ -109,18 +112,40 @@ async function migrateOne(args: {
     await mkdir(path.join(targetDir, "agents"), { recursive: true });
     await mkdir(path.join(targetDir, "artifacts"), { recursive: true });
     const now = nowIso();
+    const updatedAt = String(legacySession.updated_at ?? legacySummary.updated_at ?? now);
+    const currentStage = normalizeLegacyRole(String(legacySummary.current_stage ?? legacySummary.current_state ?? "migration"));
+    const execution: ExecutionWorkflowRecord = {
+      schema_version: 1,
+      session_id: targetSessionId,
+      profile: "full" satisfies RuntimeProfile,
+      status,
+      current_stage: currentStage,
+      steps: legacySteps(legacySummary),
+      summary: String(legacySummary.summary ?? legacySummary.blocked_reason ?? ""),
+      blocked_reason: String(legacySummary.blocked_reason ?? ""),
+      files_changed: [],
+      commands_run: [],
+      updated_at: updatedAt,
+    };
+    const delivery = status === "done"
+      ? completedLegacyDelivery(targetSessionId, String(execution.summary || "Migrated legacy workflow."), updatedAt)
+      : projectDeliveryWorkflow(execution, undefined);
     const session: SessionRecord = {
       schema_version: 1,
       session_id: targetSessionId,
       request,
+      request_sources: [],
       profile: "full",
-      status,
+      delivery_status: delivery.status,
+      execution_status: execution.status,
+      status: delivery.status,
+      current_phase: delivery.current_phase,
       project_root: String(legacySession.project_root ?? legacySession.repo_root ?? legacySession.worktree_path ?? args.sourceRoot),
       repo_root: String(legacySession.repo_root ?? legacySession.worktree_path ?? args.sourceRoot),
       state_root: args.store.stateRoot,
       created_at: String(legacySession.created_at ?? now),
-      updated_at: String(legacySession.updated_at ?? legacySummary.updated_at ?? now),
-      current_stage: String(legacySummary.current_stage ?? legacySummary.current_state ?? "migrated"),
+      updated_at: updatedAt,
+      current_stage: execution.current_stage,
       source: "migrated",
       prompt_trace_ids: [],
       migration: {
@@ -130,19 +155,9 @@ async function migrateOne(args: {
       },
     };
     await args.store.writeSession(session);
-    await args.store.writeWorkflow({
-      schema_version: 1,
-      session_id: targetSessionId,
-      profile: "full" satisfies RuntimeProfile,
-      status,
-      current_stage: session.current_stage,
-      steps: legacySteps(legacySummary),
-      summary: String(legacySummary.summary ?? legacySummary.blocked_reason ?? ""),
-      blocked_reason: String(legacySummary.blocked_reason ?? ""),
-      files_changed: [],
-      commands_run: [],
-      updated_at: session.updated_at,
-    });
+    await args.store.writeDeliveryWorkflow(delivery);
+    await args.store.writeExecutionWorkflow(execution);
+    await args.store.upsertSessionIndex(session);
     await writeJson(path.join(targetDir, "migration.json"), {
       source_root: args.sourceRoot,
       source_session_id: sourceSessionId,
@@ -250,6 +265,27 @@ function mapStatus(currentState: string): "in_progress" | "waiting_human" | "blo
   if (currentState.startsWith("WaitFor")) return "waiting_human";
   if (currentState === "Blocked") return "blocked";
   return "in_progress";
+}
+
+function completedLegacyDelivery(sessionId: string, summary: string, updatedAt: string): DeliveryWorkflowRecord {
+  return {
+    schema_version: 1,
+    session_id: sessionId,
+    status: "done",
+    current_phase: "handoff",
+    phases: ["requirement", "development", "verification", "handoff"].map((phase) => ({
+      phase: phase as DeliveryWorkflowRecord["current_phase"],
+      status: "passed" as const,
+      summary: `Migrated ${phase} phase.`,
+      blockers: [],
+      evidence_refs: [],
+      updated_at: updatedAt,
+    })),
+    blockers: [],
+    evidence_refs: [],
+    summary,
+    updated_at: updatedAt,
+  };
 }
 
 function normalizeStepStatus(status: string): "pending" | "running" | "completed" | "blocked" | "skipped" {

@@ -103,7 +103,8 @@ route -> product_definition -> project_runtime -> technical_design -> implementa
   sessions/
     <session_id>/
       session.json
-      workflow.json
+      delivery-workflow.json
+      execution-workflow.json
       events.jsonl
       tool-calls.jsonl
       agents/
@@ -119,15 +120,16 @@ route -> product_definition -> project_runtime -> technical_design -> implementa
 
 关键原则：
 
-- `session.json` 记录请求、profile、repo root、state root、当前状态。
-- `workflow.json` 记录阶段列表、当前阶段、状态、文件变更和命令证据。
+- `session.json` 记录请求、profile、repo root、state root、delivery/execution 状态索引。
+- `delivery-workflow.json` 记录面向用户的交付状态：requirement、development、verification、handoff、blockers 和 evidence_refs。
+- `execution-workflow.json` 记录 AGT 内部阶段列表、当前阶段、状态、文件变更和命令证据。
 - `events.jsonl` 记录生命周期事件。
 - `tool-calls.jsonl` 记录 runtime 能观察到的工具调用。
 - `agents/*.json` 记录每次 subagent 的输入、输出、runner、错误和 metadata。
 - `prompt_traces/*/prompt.md` 记录每个阶段实际发送给 runner 的 prompt。
 - `artifacts/index.jsonl` 记录阶段输出、SDK trace 和迁移证据。
 
-每个 workflow step 通过 `prompt_trace_id`、`agent_run_id` 和 `artifact_path` 串起输入、执行和输出。人工 `rework` 会从目标阶段开始清空下游 step 的 trace 指针、文件变更、命令记录和摘要，避免旧证据被误当成新执行结果。
+每个 execution workflow step 通过 `prompt_trace_id`、`agent_run_id` 和 `artifact_path` 串起输入、执行和输出。人工 `rework` 会从目标阶段开始清空下游 step 的 trace 指针、文件变更、命令记录和摘要，避免旧证据被误当成新执行结果。
 
 ## 配置
 
@@ -136,7 +138,7 @@ route -> product_definition -> project_runtime -> technical_design -> implementa
 ```json
 {
   "schema_version": 1,
-  "default_profile": "quick",
+  "default_profile": "full",
   "default_model": "gpt-5.4-mini",
   "state_root": ".agt",
   "max_turns": {
