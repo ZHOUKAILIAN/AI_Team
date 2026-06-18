@@ -6,6 +6,12 @@ export type RuntimeProfile = z.infer<typeof ProfileSchema>;
 export const WorkflowStatusSchema = z.enum(["in_progress", "waiting_human", "blocked", "done"]);
 export type WorkflowStatus = z.infer<typeof WorkflowStatusSchema>;
 
+export const DeliveryPhaseSchema = z.enum(["requirement", "development", "verification", "handoff"]);
+export type DeliveryPhase = z.infer<typeof DeliveryPhaseSchema>;
+
+export const DeliveryPhaseStatusSchema = z.enum(["pending", "in_progress", "waiting_human", "blocked", "passed"]);
+export type DeliveryPhaseStatus = z.infer<typeof DeliveryPhaseStatusSchema>;
+
 export const AgentRoleSchema = z.enum([
   "planner",
   "repo_scout",
@@ -47,12 +53,24 @@ export const WorktreeRecordSchema = z.object({
 });
 export type WorktreeRecord = z.infer<typeof WorktreeRecordSchema>;
 
+export const RequestSourceSchema = z.object({
+  type: z.enum(["file", "directory_file"]),
+  path: z.string(),
+  sha256: z.string(),
+  bytes: z.number().int().nonnegative(),
+});
+export type RequestSourceRecord = z.infer<typeof RequestSourceSchema>;
+
 export const SessionSchema = z.object({
   schema_version: z.literal(1),
   session_id: z.string(),
   request: z.string(),
+  request_sources: z.array(RequestSourceSchema).default([]),
   profile: ProfileSchema,
+  delivery_status: WorkflowStatusSchema,
+  execution_status: WorkflowStatusSchema,
   status: WorkflowStatusSchema,
+  current_phase: DeliveryPhaseSchema,
   project_root: z.string().default(""),
   repo_root: z.string(),
   state_root: z.string(),
@@ -72,7 +90,52 @@ export const SessionSchema = z.object({
 });
 export type SessionRecord = z.infer<typeof SessionSchema>;
 
-export const WorkflowStepSchema = z.object({
+export const EvidenceRefSchema = z.object({
+  kind: z.enum(["prompt_trace", "artifact", "agent_run", "file", "command", "event"]),
+  ref: z.string(),
+  role: AgentRoleSchema.optional(),
+  path: z.string().default(""),
+  summary: z.string().default(""),
+});
+export type EvidenceRef = z.infer<typeof EvidenceRefSchema>;
+
+export const DeliveryBlockerSchema = z.object({
+  id: z.string(),
+  phase: DeliveryPhaseSchema,
+  source_role: AgentRoleSchema.optional(),
+  reason: z.string(),
+  status: z.enum(["open", "resolved"]).default("open"),
+  evidence_refs: z.array(EvidenceRefSchema).default([]),
+  created_at: z.string(),
+});
+export type DeliveryBlocker = z.infer<typeof DeliveryBlockerSchema>;
+
+export const DeliveryWorkflowPhaseSchema = z.object({
+  phase: DeliveryPhaseSchema,
+  status: DeliveryPhaseStatusSchema,
+  summary: z.string().default(""),
+  blockers: z.array(DeliveryBlockerSchema).default([]),
+  evidence_refs: z.array(EvidenceRefSchema).default([]),
+  started_at: z.string().optional(),
+  completed_at: z.string().optional(),
+  updated_at: z.string(),
+});
+export type DeliveryWorkflowPhase = z.infer<typeof DeliveryWorkflowPhaseSchema>;
+
+export const DeliveryWorkflowSchema = z.object({
+  schema_version: z.literal(1),
+  session_id: z.string(),
+  status: WorkflowStatusSchema,
+  current_phase: DeliveryPhaseSchema,
+  phases: z.array(DeliveryWorkflowPhaseSchema),
+  blockers: z.array(DeliveryBlockerSchema).default([]),
+  evidence_refs: z.array(EvidenceRefSchema).default([]),
+  summary: z.string().default(""),
+  updated_at: z.string(),
+});
+export type DeliveryWorkflowRecord = z.infer<typeof DeliveryWorkflowSchema>;
+
+export const ExecutionWorkflowStepSchema = z.object({
   role: AgentRoleSchema,
   status: z.enum(["pending", "running", "completed", "blocked", "skipped"]),
   agent_run_id: z.string().optional(),
@@ -84,22 +147,22 @@ export const WorkflowStepSchema = z.object({
   started_at: z.string().optional(),
   completed_at: z.string().optional(),
 });
-export type WorkflowStep = z.infer<typeof WorkflowStepSchema>;
+export type ExecutionWorkflowStep = z.infer<typeof ExecutionWorkflowStepSchema>;
 
-export const WorkflowSchema = z.object({
+export const ExecutionWorkflowSchema = z.object({
   schema_version: z.literal(1),
   session_id: z.string(),
   profile: ProfileSchema,
   status: WorkflowStatusSchema,
   current_stage: z.string(),
-  steps: z.array(WorkflowStepSchema),
+  steps: z.array(ExecutionWorkflowStepSchema),
   summary: z.string().default(""),
   blocked_reason: z.string().default(""),
   files_changed: z.array(z.string()).default([]),
   commands_run: z.array(z.string()).default([]),
   updated_at: z.string(),
 });
-export type WorkflowRecord = z.infer<typeof WorkflowSchema>;
+export type ExecutionWorkflowRecord = z.infer<typeof ExecutionWorkflowSchema>;
 
 export const RuntimeEventSchema = z.object({
   at: z.string(),
@@ -176,10 +239,13 @@ export type ToolCallRecord = z.infer<typeof ToolCallSchema>;
 export const RunResultSchema = z.object({
   session_id: z.string(),
   status: WorkflowStatusSchema,
+  delivery_status: WorkflowStatusSchema,
+  execution_status: WorkflowStatusSchema,
   profile: ProfileSchema,
   state_root: z.string(),
   session_dir: z.string(),
   repo_root: z.string(),
+  current_phase: DeliveryPhaseSchema,
   current_stage: z.string(),
   summary: z.string(),
   blocked_reason: z.string().default(""),
@@ -188,7 +254,7 @@ export type RunResult = z.infer<typeof RunResultSchema>;
 
 export const RuntimeConfigSchema = z.object({
   schema_version: z.literal(1),
-  default_profile: ProfileSchema.default("quick"),
+  default_profile: ProfileSchema.default("full"),
   default_model: z.string().default("gpt-5.4-mini"),
   state_root: z.string().default(".agt"),
   max_turns: z
@@ -233,7 +299,10 @@ export type RuntimeConfig = z.infer<typeof RuntimeConfigSchema>;
 export const SessionIndexEntrySchema = z.object({
   session_id: z.string(),
   request: z.string(),
+  delivery_status: WorkflowStatusSchema,
+  execution_status: WorkflowStatusSchema,
   status: WorkflowStatusSchema,
+  current_phase: DeliveryPhaseSchema,
   current_stage: z.string(),
   profile: ProfileSchema,
   project_root: z.string(),

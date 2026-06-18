@@ -1,9 +1,13 @@
 import type {
   AgentRunRecord,
+  DeliveryBlocker,
+  DeliveryWorkflowPhase,
+  DeliveryWorkflowRecord,
+  EvidenceRef,
+  ExecutionWorkflowRecord,
   RuntimeEvent,
   SessionRecord,
   ToolCallRecord,
-  WorkflowRecord,
 } from "./schema.js";
 import type { RuntimeStore } from "./store.js";
 
@@ -44,12 +48,18 @@ export type SessionStatusSnapshot = {
   request: string;
   profile: string;
   workflow_status: string;
+  delivery_status: string;
+  execution_status: string;
   runtime_status: SessionRuntimeStatus;
+  current_phase: string;
   current_stage: string;
   repo_root: string;
   state_root: string;
   summary: string;
   blocked_reason: string;
+  phases: DeliveryWorkflowPhase[];
+  blockers: DeliveryBlocker[];
+  evidence_refs: EvidenceRef[];
   stalled_after_ms: number;
   active_run: AgentRunStatusSnapshot | null;
   latest_run: AgentRunStatusSnapshot | null;
@@ -63,16 +73,18 @@ export async function readSessionStatus(
   sessionId: string,
   options: { stalledAfterMs?: number; now?: Date } = {},
 ): Promise<SessionStatusSnapshot> {
-  const [session, workflow, agentRuns, events, toolCalls] = await Promise.all([
+  const [session, deliveryWorkflow, executionWorkflow, agentRuns, events, toolCalls] = await Promise.all([
     store.loadSession(sessionId),
-    store.loadWorkflow(sessionId),
+    store.loadDeliveryWorkflow(sessionId),
+    store.loadExecutionWorkflow(sessionId),
     store.listAgentRuns(sessionId),
     store.readEvents(sessionId),
     store.readToolCalls(sessionId),
   ]);
   return buildSessionStatusSnapshot({
     session,
-    workflow,
+    deliveryWorkflow,
+    executionWorkflow,
     agentRuns,
     events,
     toolCalls,
@@ -83,7 +95,8 @@ export async function readSessionStatus(
 
 export function buildSessionStatusSnapshot(args: {
   session: SessionRecord;
-  workflow: WorkflowRecord;
+  deliveryWorkflow: DeliveryWorkflowRecord;
+  executionWorkflow: ExecutionWorkflowRecord;
   agentRuns: AgentRunRecord[];
   events?: RuntimeEvent[];
   toolCalls?: ToolCallRecord[];
@@ -103,13 +116,19 @@ export function buildSessionStatusSnapshot(args: {
     session_id: args.session.session_id,
     request: args.session.request,
     profile: args.session.profile,
-    workflow_status: args.workflow.status,
-    runtime_status: sessionRuntimeStatus(args.workflow, activeRunStatus, latestRunStatus),
-    current_stage: args.workflow.current_stage,
+    workflow_status: args.deliveryWorkflow.status,
+    delivery_status: args.deliveryWorkflow.status,
+    execution_status: args.executionWorkflow.status,
+    runtime_status: sessionRuntimeStatus(args.deliveryWorkflow, activeRunStatus, latestRunStatus),
+    current_phase: args.deliveryWorkflow.current_phase,
+    current_stage: args.executionWorkflow.current_stage,
     repo_root: args.session.repo_root,
     state_root: args.session.state_root,
-    summary: args.workflow.summary,
-    blocked_reason: args.workflow.blocked_reason,
+    summary: args.deliveryWorkflow.summary || args.executionWorkflow.summary,
+    blocked_reason: args.deliveryWorkflow.blockers.find((blocker) => blocker.status === "open")?.reason ?? args.executionWorkflow.blocked_reason,
+    phases: args.deliveryWorkflow.phases,
+    blockers: args.deliveryWorkflow.blockers,
+    evidence_refs: args.deliveryWorkflow.evidence_refs,
     stalled_after_ms: stalledAfterMs,
     active_run: activeRunStatus,
     latest_run: latestRunStatus,
@@ -150,20 +169,20 @@ export function summarizeAgentRun(
 }
 
 function sessionRuntimeStatus(
-  workflow: WorkflowRecord,
+  deliveryWorkflow: DeliveryWorkflowRecord,
   activeRun: AgentRunStatusSnapshot | null,
   latestRun: AgentRunStatusSnapshot | null,
 ): SessionRuntimeStatus {
   if (activeRun) {
     return activeRun.runtime_status === "stalled" ? "stalled" : "running";
   }
-  if (workflow.status === "done" || workflow.status === "waiting_human") {
-    return workflow.status;
+  if (deliveryWorkflow.status === "done" || deliveryWorkflow.status === "waiting_human") {
+    return deliveryWorkflow.status;
   }
   if (latestRun?.status === "failed") {
     return "failed";
   }
-  if (workflow.status === "blocked") {
+  if (deliveryWorkflow.status === "blocked") {
     return latestRun?.executor_status === "timeout" ? "timeout" : "blocked";
   }
   return "in_progress";

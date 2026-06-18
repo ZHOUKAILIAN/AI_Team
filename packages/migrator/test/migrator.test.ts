@@ -46,8 +46,10 @@ describe("migrator", () => {
     const store = new RuntimeStore(target);
     const session = await store.loadSession("migrated-legacy-1");
     expect(session.source).toBe("migrated");
-    const workflow = await store.loadWorkflow("migrated-legacy-1");
-    expect(workflow.status).toBe("done");
+    const execution = await store.loadExecutionWorkflow("migrated-legacy-1");
+    const delivery = await store.loadDeliveryWorkflow("migrated-legacy-1");
+    expect(execution.status).toBe("done");
+    expect(delivery.status).toBe("done");
     const events = await store.readEvents("migrated-legacy-1");
     expect(events.some((event) => event.kind === "legacy")).toBe(true);
     expect(events.filter((event) => event.kind === "artifact_written")).toHaveLength(3);

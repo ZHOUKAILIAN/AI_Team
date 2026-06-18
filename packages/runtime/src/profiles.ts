@@ -2,10 +2,11 @@ import path from "node:path";
 import { buildAgentRunner, type AgentRunner, type AgentTaskResult } from "./runner.js";
 import {
   type AgentRole,
+  type ExecutionWorkflowRecord,
+  type RequestSourceRecord,
   type RunResult,
   type RuntimeProfile,
   type WorktreeRecord,
-  type WorkflowRecord,
   nowIso,
 } from "./schema.js";
 import { renderSkillInjection, resolveSkillRouting, skillRoutingMetadata } from "./skill-routing.js";
@@ -20,6 +21,7 @@ export type RunWorkflowOptions = {
   profile?: RuntimeProfile;
   humanGates?: boolean;
   worktree?: WorktreeRecord;
+  requestSources?: RequestSourceRecord[];
   runner?: AgentRunner;
 };
 
@@ -60,15 +62,16 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<RunResul
     ? await store.loadSession(options.sessionId)
     : await store.createSession({
         request: requiredRequest(options.request),
-        profile: options.profile ?? "quick",
+        profile: options.profile ?? "full",
         repoRoot,
         projectRoot: options.projectRoot,
         worktree: options.worktree,
+        requestSources: options.requestSources,
       });
   const profile = session.profile;
   const runner = options.runner ?? buildAgentRunner(store);
   const steps = stepsForProfile(profile);
-  let workflow = await ensureWorkflowSteps(store, session.session_id, steps);
+  let workflow = await ensureExecutionWorkflowSteps(store, session.session_id, steps);
 
   if (workflow.status === "done") {
     return runResult({ sessionId: session.session_id, workflow, profile, stateRoot, repoRoot, store });
@@ -81,7 +84,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<RunResul
   let filesChanged: string[] = workflow.files_changed;
   let commandsRun: string[] = workflow.commands_run;
   for (const step of remainingSteps(workflow, steps)) {
-    await store.updateWorkflow(session.session_id, (workflow) => ({
+    await store.updateExecutionWorkflow(session.session_id, (workflow) => ({
       ...workflow,
       status: "in_progress",
       current_stage: step.role,
@@ -157,7 +160,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<RunResul
           routing_config_gap: true,
         },
       });
-      workflow = await store.updateWorkflow(session.session_id, (workflow) => ({
+      workflow = await store.updateExecutionWorkflow(session.session_id, (workflow) => ({
         ...workflow,
         current_stage: step.role,
         steps: workflow.steps.map((item) =>
@@ -198,7 +201,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<RunResul
       });
       break;
     }
-    await store.updateWorkflow(session.session_id, (workflow) => ({
+    await store.updateExecutionWorkflow(session.session_id, (workflow) => ({
       ...workflow,
       steps: workflow.steps.map((item) =>
         item.role === step.role ? { ...item, prompt_trace_id: trace.prompt_id } : item,
@@ -231,7 +234,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<RunResul
     outputs.push(result.output);
     filesChanged = unique([...filesChanged, ...result.filesChanged]);
     commandsRun = unique([...commandsRun, ...result.commandsRun]);
-    workflow = await store.updateWorkflow(session.session_id, (workflow) => ({
+    workflow = await store.updateExecutionWorkflow(session.session_id, (workflow) => ({
       ...workflow,
       current_stage: step.role,
       steps: workflow.steps.map((item) =>
@@ -274,7 +277,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<RunResul
       break;
     }
     if (options.humanGates && step.humanGateAfter) {
-      workflow = await store.updateWorkflow(session.session_id, (workflow) => ({
+      workflow = await store.updateExecutionWorkflow(session.session_id, (workflow) => ({
         ...workflow,
         status: "waiting_human",
         current_stage: step.role,
@@ -294,7 +297,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<RunResul
     }
   }
 
-  workflow = await store.updateWorkflow(session.session_id, (current) => {
+  workflow = await store.updateExecutionWorkflow(session.session_id, (current) => {
     if (current.status === "waiting_human") {
       return current;
     }
@@ -322,9 +325,9 @@ export async function recordHumanDecision(options: {
 }): Promise<RunResult> {
   const store = new RuntimeStore(options.stateRoot);
   const session = await store.loadSession(options.sessionId);
-  const workflow = await store.loadWorkflow(options.sessionId);
+  const workflow = await store.loadExecutionWorkflow(options.sessionId);
   const now = nowIso();
-  const updated = await store.updateWorkflow(options.sessionId, (current) => {
+  const updated = await store.updateExecutionWorkflow(options.sessionId, (current) => {
     if (options.decision === "no-go") {
       return {
         ...current,
@@ -397,16 +400,16 @@ export function stepsForProfile(profile: RuntimeProfile): WorkflowStepPlan[] {
   return FULL_STEPS;
 }
 
-async function ensureWorkflowSteps(
+async function ensureExecutionWorkflowSteps(
   store: RuntimeStore,
   sessionId: string,
   steps: WorkflowStepPlan[],
-): Promise<WorkflowRecord> {
-  const workflow = await store.loadWorkflow(sessionId);
+): Promise<ExecutionWorkflowRecord> {
+  const workflow = await store.loadExecutionWorkflow(sessionId);
   if (workflow.steps.length > 0) {
     return workflow;
   }
-  return store.updateWorkflow(sessionId, (workflow) => ({
+  return store.updateExecutionWorkflow(sessionId, (workflow) => ({
     ...workflow,
     current_stage: steps[0]?.role ?? "done",
     steps: steps.map((step) => ({
@@ -422,7 +425,7 @@ async function ensureWorkflowSteps(
   }));
 }
 
-function remainingSteps(workflow: WorkflowRecord, steps: WorkflowStepPlan[]): WorkflowStepPlan[] {
+function remainingSteps(workflow: ExecutionWorkflowRecord, steps: WorkflowStepPlan[]): WorkflowStepPlan[] {
   const byRole = new Map(workflow.steps.map((step) => [step.role, step.status]));
   return steps.filter((step) => {
     const status = byRole.get(step.role);
@@ -430,7 +433,7 @@ function remainingSteps(workflow: WorkflowRecord, steps: WorkflowStepPlan[]): Wo
   });
 }
 
-function completedSummaries(workflow: WorkflowRecord, outputs: string[]): string[] {
+function completedSummaries(workflow: ExecutionWorkflowRecord, outputs: string[]): string[] {
   return [
     ...workflow.steps
       .filter((step) => step.status === "completed" && step.summary)
@@ -567,11 +570,11 @@ function artifactNameForRole(role: AgentRole): string {
   return names[role] ?? `${role}.md`;
 }
 
-function nextPendingStep(workflow: WorkflowRecord) {
+function nextPendingStep(workflow: ExecutionWorkflowRecord) {
   return workflow.steps.find((step) => step.status !== "completed" && step.status !== "skipped");
 }
 
-function shouldResetForRework(workflow: WorkflowRecord, role: AgentRole, target: string): boolean {
+function shouldResetForRework(workflow: ExecutionWorkflowRecord, role: AgentRole, target: string): boolean {
   const targetIndex = workflow.steps.findIndex((step) => step.role === target);
   const roleIndex = workflow.steps.findIndex((step) => step.role === role);
   return targetIndex >= 0 && roleIndex >= targetIndex;
@@ -579,23 +582,29 @@ function shouldResetForRework(workflow: WorkflowRecord, role: AgentRole, target:
 
 function runResult(args: {
   sessionId: string;
-  workflow: WorkflowRecord;
+  workflow: ExecutionWorkflowRecord;
   profile: RuntimeProfile;
   stateRoot: string;
   repoRoot: string;
   store: RuntimeStore;
-}): RunResult {
-  return {
-    session_id: args.sessionId,
-    status: args.workflow.status,
-    profile: args.profile,
-    state_root: args.stateRoot,
-    session_dir: args.store.sessionDir(args.sessionId),
-    repo_root: args.repoRoot,
-    current_stage: args.workflow.current_stage,
-    summary: args.workflow.summary,
-    blocked_reason: args.workflow.blocked_reason,
-  };
+}): Promise<RunResult> {
+  return args.store.loadDeliveryWorkflow(args.sessionId).then((delivery) => {
+    const blocker = delivery.blockers.find((item) => item.status === "open");
+    return {
+      session_id: args.sessionId,
+      status: delivery.status,
+      delivery_status: delivery.status,
+      execution_status: args.workflow.status,
+      profile: args.profile,
+      state_root: args.stateRoot,
+      session_dir: args.store.sessionDir(args.sessionId),
+      repo_root: args.repoRoot,
+      current_phase: delivery.current_phase,
+      current_stage: args.workflow.current_stage,
+      summary: delivery.summary || args.workflow.summary,
+      blocked_reason: blocker?.reason ?? args.workflow.blocked_reason,
+    };
+  });
 }
 
 function requiredRequest(value: string | undefined): string {

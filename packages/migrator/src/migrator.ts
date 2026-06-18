@@ -113,8 +113,12 @@ async function migrateOne(args: {
       schema_version: 1,
       session_id: targetSessionId,
       request,
+      request_sources: [],
       profile: "full",
+      delivery_status: status,
+      execution_status: status,
       status,
+      current_phase: status === "done" ? "handoff" : "requirement",
       project_root: String(legacySession.project_root ?? legacySession.repo_root ?? legacySession.worktree_path ?? args.sourceRoot),
       repo_root: String(legacySession.repo_root ?? legacySession.worktree_path ?? args.sourceRoot),
       state_root: args.store.stateRoot,
@@ -130,7 +134,51 @@ async function migrateOne(args: {
       },
     };
     await args.store.writeSession(session);
-    await args.store.writeWorkflow({
+    await args.store.writeDeliveryWorkflow({
+      schema_version: 1,
+      session_id: targetSessionId,
+      status,
+      current_phase: session.current_phase,
+      phases: [
+        {
+          phase: "requirement",
+          status: status === "done" ? "passed" : "in_progress",
+          summary: "Migrated requirement phase.",
+          blockers: [],
+          evidence_refs: [],
+          updated_at: session.updated_at,
+        },
+        {
+          phase: "development",
+          status: status === "done" ? "passed" : "pending",
+          summary: "Migrated development phase.",
+          blockers: [],
+          evidence_refs: [],
+          updated_at: session.updated_at,
+        },
+        {
+          phase: "verification",
+          status: status === "done" ? "passed" : "pending",
+          summary: "Migrated verification phase.",
+          blockers: [],
+          evidence_refs: [],
+          updated_at: session.updated_at,
+        },
+        {
+          phase: "handoff",
+          status: status === "done" ? "passed" : "pending",
+          summary: "Migrated handoff phase.",
+          blockers: [],
+          evidence_refs: [],
+          updated_at: session.updated_at,
+        },
+      ],
+      blockers: [],
+      evidence_refs: [],
+      summary: String(legacySummary.summary ?? legacySummary.blocked_reason ?? "Migrated legacy workflow."),
+      updated_at: session.updated_at,
+    });
+    await args.store.writeExecutionWorkflow({
       schema_version: 1,
       session_id: targetSessionId,
       profile: "full" satisfies RuntimeProfile,
@@ -143,6 +191,7 @@ async function migrateOne(args: {
       commands_run: [],
       updated_at: session.updated_at,
     });
+    await args.store.upsertSessionIndex(session);
     await writeJson(path.join(targetDir, "migration.json"), {
       source_root: args.sourceRoot,
       source_session_id: sourceSessionId,

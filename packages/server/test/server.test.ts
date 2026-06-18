@@ -52,6 +52,8 @@ describe("server", () => {
     const detail = await app.inject(`/api/sessions/${result.session_id}`);
     expect(detail.statusCode).toBe(200);
     const detailBody = detail.json();
+    expect(detailBody.delivery_workflow.status).toBe("done");
+    expect(detailBody.execution_workflow.steps).toHaveLength(5);
     expect(detailBody.prompts).toHaveLength(5);
     expect(detailBody.artifacts).toHaveLength(5);
     expect(detailBody.agent_runs).toHaveLength(5);

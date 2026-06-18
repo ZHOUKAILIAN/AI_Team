@@ -7,8 +7,13 @@ import {
   type AgentRole,
   type AgentRunRecord,
   AgentRunSchema,
+  type DeliveryWorkflowRecord,
+  DeliveryWorkflowSchema,
+  type ExecutionWorkflowRecord,
+  ExecutionWorkflowSchema,
   type PromptTraceRecord,
   PromptTraceSchema,
+  type RequestSourceRecord,
   type RuntimeEvent,
   RuntimeEventSchema,
   type RuntimeConfig,
@@ -22,11 +27,10 @@ import {
   type ToolCallRecord,
   ToolCallSchema,
   type WorktreeRecord,
-  type WorkflowRecord,
-  WorkflowSchema,
   nowIso,
 } from "./schema.js";
 import { createArtifactId, createPromptTraceId, createRunId, createSessionId, sha256Hex } from "./ids.js";
+import { createInitialDeliveryWorkflow, projectDeliveryWorkflow } from "./delivery-projector.js";
 
 export type CreateSessionOptions = {
   request: string;
@@ -35,6 +39,7 @@ export type CreateSessionOptions = {
   projectRoot?: string;
   stateRoot?: string;
   worktree?: WorktreeRecord;
+  requestSources?: RequestSourceRecord[];
   source?: SessionRecord["source"];
   migration?: SessionRecord["migration"];
 };
@@ -87,8 +92,12 @@ export class RuntimeStore {
       schema_version: 1,
       session_id: sessionId,
       request: options.request,
+      request_sources: options.requestSources ?? [],
       profile: options.profile,
+      delivery_status: "in_progress",
+      execution_status: "in_progress",
       status: "in_progress",
+      current_phase: "requirement",
       project_root: path.resolve(options.projectRoot ?? options.repoRoot),
       repo_root: path.resolve(options.repoRoot),
       state_root: this.stateRoot,
@@ -103,7 +112,7 @@ export class RuntimeStore {
     await mkdir(this.agentsDir(sessionId), { recursive: true });
     await mkdir(this.artifactsDir(sessionId), { recursive: true });
     await this.writeSession(session);
-    await this.writeWorkflow({
+    await this.writeExecutionWorkflow({
       schema_version: 1,
       session_id: sessionId,
       profile: options.profile,
@@ -116,6 +125,7 @@ export class RuntimeStore {
       commands_run: [],
       updated_at: createdAt,
     });
+    await this.writeDeliveryWorkflow(createInitialDeliveryWorkflow(sessionId, createdAt));
     await this.appendEvent({
       at: createdAt,
       session_id: sessionId,
@@ -138,32 +148,46 @@ export class RuntimeStore {
     return SessionSchema.parse(await readJson(path.join(this.sessionDir(sessionId), "session.json")));
   }
 
-  async writeWorkflow(workflow: WorkflowRecord): Promise<void> {
-    const parsed = WorkflowSchema.parse(workflow);
-    await writeJson(path.join(this.sessionDir(parsed.session_id), "workflow.json"), parsed);
+  async writeExecutionWorkflow(workflow: ExecutionWorkflowRecord): Promise<void> {
+    const parsed = ExecutionWorkflowSchema.parse(workflow);
+    await writeJson(path.join(this.sessionDir(parsed.session_id), "execution-workflow.json"), parsed);
   }
 
-  async loadWorkflow(sessionId: string): Promise<WorkflowRecord> {
-    return WorkflowSchema.parse(await readJson(path.join(this.sessionDir(sessionId), "workflow.json")));
+  async loadExecutionWorkflow(sessionId: string): Promise<ExecutionWorkflowRecord> {
+    return ExecutionWorkflowSchema.parse(await readJson(path.join(this.sessionDir(sessionId), "execution-workflow.json")));
   }
 
-  async updateWorkflow(sessionId: string, updater: (workflow: WorkflowRecord) => WorkflowRecord): Promise<WorkflowRecord> {
-    const updated = WorkflowSchema.parse(updater(await this.loadWorkflow(sessionId)));
-    await this.writeWorkflow(updated);
+  async updateExecutionWorkflow(
+    sessionId: string,
+    updater: (workflow: ExecutionWorkflowRecord) => ExecutionWorkflowRecord,
+  ): Promise<ExecutionWorkflowRecord> {
+    const updated = ExecutionWorkflowSchema.parse(updater(await this.loadExecutionWorkflow(sessionId)));
+    await this.writeExecutionWorkflow(updated);
+    const previousDelivery = await this.loadDeliveryWorkflow(sessionId).catch(() => undefined);
+    const delivery = projectDeliveryWorkflow(updated, previousDelivery);
+    await this.writeDeliveryWorkflow(delivery);
     const session = await this.loadSession(sessionId);
-    await this.writeSession({
+    const updatedSession = {
       ...session,
-      status: updated.status,
+      delivery_status: delivery.status,
+      execution_status: updated.status,
+      status: delivery.status,
+      current_phase: delivery.current_phase,
       current_stage: updated.current_stage,
       updated_at: updated.updated_at,
-    });
-    await this.upsertSessionIndex({
-      ...session,
-      status: updated.status,
-      current_stage: updated.current_stage,
-      updated_at: updated.updated_at,
-    });
+    };
+    await this.writeSession(updatedSession);
+    await this.upsertSessionIndex(updatedSession);
     return updated;
+  }
+
+  async writeDeliveryWorkflow(workflow: DeliveryWorkflowRecord): Promise<void> {
+    const parsed = DeliveryWorkflowSchema.parse(workflow);
+    await writeJson(path.join(this.sessionDir(parsed.session_id), "delivery-workflow.json"), parsed);
+  }
+
+  async loadDeliveryWorkflow(sessionId: string): Promise<DeliveryWorkflowRecord> {
+    return DeliveryWorkflowSchema.parse(await readJson(path.join(this.sessionDir(sessionId), "delivery-workflow.json")));
   }
 
   async appendEvent(event: RuntimeEvent): Promise<void> {
@@ -258,7 +282,7 @@ export class RuntimeStore {
       },
     });
     await this.writeAgentRun(updated);
-    await this.updateWorkflow(updated.session_id, (workflow) => ({
+    await this.updateExecutionWorkflow(updated.session_id, (workflow) => ({
       ...workflow,
       updated_at: heartbeatAt,
     }));
@@ -469,7 +493,10 @@ export class RuntimeStore {
     const entry: SessionIndexEntry = {
       session_id: session.session_id,
       request: session.request,
+      delivery_status: session.delivery_status,
+      execution_status: session.execution_status,
       status: session.status,
+      current_phase: session.current_phase,
       current_stage: session.current_stage,
       profile: session.profile,
       project_root: session.project_root || session.repo_root,
