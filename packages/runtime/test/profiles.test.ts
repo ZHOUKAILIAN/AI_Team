@@ -210,6 +210,42 @@ describe("profiles", () => {
     expect(status.active_run?.heartbeat_age_ms).toBe(59_000);
   });
 
+  it("keeps requirement, implementation, verification, and trace status separate", async () => {
+    const repoRoot = await mkdtemp(path.join(tmpdir(), "agt-runtime-"));
+    const stateRoot = path.join(repoRoot, ".agt-test");
+    const store = new RuntimeStore(stateRoot);
+    const session = await store.createSession({
+      request: "status layer separation",
+      profile: "quick",
+      repoRoot,
+    });
+    await store.updateWorkflow(session.session_id, (workflow) => ({
+      ...workflow,
+      status: "blocked",
+      current_stage: "writer",
+      blocked_reason: "Routing config gap: missing changed_files.json.",
+      files_changed: ["src/example.ts"],
+      steps: [
+        { role: "planner", status: "completed", prompt_trace_id: "prompt-planner", artifact_path: "planner.md", files_changed: [], commands_run: [], summary: "Requirement aligned." },
+        { role: "repo_scout", status: "completed", prompt_trace_id: "prompt-scout", artifact_path: "scout.md", files_changed: [], commands_run: [], summary: "Scope confirmed." },
+        { role: "writer", status: "completed", prompt_trace_id: "prompt-writer", artifact_path: "writer.md", files_changed: ["src/example.ts"], commands_run: ["npm test"], summary: "Implementation done." },
+        { role: "verifier", status: "completed", prompt_trace_id: "prompt-verifier", artifact_path: "verifier.md", files_changed: [], commands_run: ["npm test"], summary: "Verification passed." },
+        { role: "summarizer", status: "blocked", prompt_trace_id: "", artifact_path: "", files_changed: [], commands_run: [], summary: "Trace artifact missing." },
+      ],
+      updated_at: "2026-06-18T00:00:00.000Z",
+    }));
+
+    const status = await readSessionStatus(store, session.session_id);
+
+    expect(status.workflow_status).toBe("blocked");
+    expect(status.status_layers).toEqual({
+      requirement_status: "aligned",
+      implementation_status: "implemented",
+      verification_status: "passed",
+      trace_status: "blocked",
+    });
+  });
+
   it("stops at full-profile human gates and continues after approval", async () => {
     const repoRoot = await mkdtemp(path.join(tmpdir(), "agt-runtime-"));
     const stateRoot = path.join(repoRoot, ".agt-test");

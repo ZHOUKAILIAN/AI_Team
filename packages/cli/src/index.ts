@@ -390,6 +390,10 @@ function printStatus(snapshot: SessionStatusSnapshot): void {
   console.log(`session_id: ${snapshot.session_id}`);
   console.log(`profile: ${snapshot.profile}`);
   console.log(`status: ${snapshot.workflow_status}`);
+  console.log(`requirement_status: ${snapshot.status_layers.requirement_status}`);
+  console.log(`implementation_status: ${snapshot.status_layers.implementation_status}`);
+  console.log(`verification_status: ${snapshot.status_layers.verification_status}`);
+  console.log(`trace_status: ${snapshot.status_layers.trace_status}`);
   console.log(`runtime_status: ${snapshot.runtime_status}`);
   console.log(`current_stage: ${snapshot.current_stage}`);
   console.log(`repo_root: ${snapshot.repo_root}`);

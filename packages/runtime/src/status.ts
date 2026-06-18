@@ -4,6 +4,7 @@ import type {
   SessionRecord,
   ToolCallRecord,
   WorkflowRecord,
+  WorkflowStep,
 } from "./schema.js";
 import type { RuntimeStore } from "./store.js";
 
@@ -20,6 +21,18 @@ export type SessionRuntimeStatus =
   | "timeout"
   | "failed"
   | "done";
+
+export type RequirementStatus = "pending_alignment" | "aligned" | "changed" | "accepted";
+export type ImplementationStatus = "not_started" | "in_progress" | "implemented" | "blocked";
+export type VerificationStatus = "not_started" | "partial" | "passed" | "failed" | "skipped";
+export type TraceStatus = "in_progress" | "complete" | "partial" | "blocked";
+
+export type StatusLayers = {
+  requirement_status: RequirementStatus;
+  implementation_status: ImplementationStatus;
+  verification_status: VerificationStatus;
+  trace_status: TraceStatus;
+};
 
 export type AgentRunStatusSnapshot = {
   agent_run_id: string;
@@ -44,6 +57,7 @@ export type SessionStatusSnapshot = {
   request: string;
   profile: string;
   workflow_status: string;
+  status_layers: StatusLayers;
   runtime_status: SessionRuntimeStatus;
   current_stage: string;
   repo_root: string;
@@ -104,6 +118,7 @@ export function buildSessionStatusSnapshot(args: {
     request: args.session.request,
     profile: args.session.profile,
     workflow_status: args.workflow.status,
+    status_layers: buildStatusLayers(args.workflow),
     runtime_status: sessionRuntimeStatus(args.workflow, activeRunStatus, latestRunStatus),
     current_stage: args.workflow.current_stage,
     repo_root: args.session.repo_root,
@@ -116,6 +131,15 @@ export function buildSessionStatusSnapshot(args: {
     latest_event: args.events?.at(-1) ?? null,
     latest_tool_call: args.toolCalls?.at(-1) ?? null,
     updated_at: args.session.updated_at,
+  };
+}
+
+export function buildStatusLayers(workflow: WorkflowRecord): StatusLayers {
+  return {
+    requirement_status: requirementStatus(workflow),
+    implementation_status: implementationStatus(workflow),
+    verification_status: verificationStatus(workflow),
+    trace_status: traceStatus(workflow),
   };
 }
 
@@ -167,6 +191,76 @@ function sessionRuntimeStatus(
     return latestRun?.executor_status === "timeout" ? "timeout" : "blocked";
   }
   return "in_progress";
+}
+
+function requirementStatus(workflow: WorkflowRecord): RequirementStatus {
+  if (workflow.status === "done" || stepCompleted(workflow, ["acceptance", "session_handoff"])) {
+    return "accepted";
+  }
+  if (stepHasStatus(workflow, ["product_definition", "technical_design"], ["blocked"])) {
+    const changed = workflow.steps.some((step) => step.summary.toLowerCase().includes("rework"));
+    return changed ? "changed" : "pending_alignment";
+  }
+  if (stepCompleted(workflow, ["planner", "repo_scout", "route", "product_definition", "technical_design"])) {
+    return "aligned";
+  }
+  return "pending_alignment";
+}
+
+function implementationStatus(workflow: WorkflowRecord): ImplementationStatus {
+  if (stepHasStatus(workflow, ["writer", "implementation"], ["blocked"])) {
+    return "blocked";
+  }
+  if (stepHasStatus(workflow, ["writer", "implementation"], ["running"])) {
+    return "in_progress";
+  }
+  if (stepCompleted(workflow, ["writer", "implementation"]) || workflow.files_changed.length > 0) {
+    return "implemented";
+  }
+  return "not_started";
+}
+
+function verificationStatus(workflow: WorkflowRecord): VerificationStatus {
+  if (stepHasStatus(workflow, ["verifier", "verification", "acceptance"], ["blocked"])) {
+    return "failed";
+  }
+  if (stepHasStatus(workflow, ["verifier", "verification", "acceptance"], ["running"])) {
+    return "partial";
+  }
+  if (stepCompleted(workflow, ["verifier", "verification", "acceptance"])) {
+    return "passed";
+  }
+  if (workflow.status === "done" && implementationStatus(workflow) === "not_started") {
+    return "skipped";
+  }
+  return "not_started";
+}
+
+function traceStatus(workflow: WorkflowRecord): TraceStatus {
+  if (workflow.status === "done" && !workflow.blocked_reason) {
+    return "complete";
+  }
+  if (workflow.status === "blocked" || workflow.blocked_reason || stepHasStatus(workflow, [], ["blocked"])) {
+    return "blocked";
+  }
+  if (workflow.steps.some((step) => step.status === "pending" || step.status === "running")) {
+    return "partial";
+  }
+  return "in_progress";
+}
+
+function stepCompleted(workflow: WorkflowRecord, roles: WorkflowStep["role"][]): boolean {
+  return workflow.steps.some((step) => roles.includes(step.role) && step.status === "completed");
+}
+
+function stepHasStatus(
+  workflow: WorkflowRecord,
+  roles: WorkflowStep["role"][],
+  statuses: WorkflowStep["status"][],
+): boolean {
+  return workflow.steps.some(
+    (step) => (roles.length === 0 || roles.includes(step.role)) && statuses.includes(step.status),
+  );
 }
 
 function elapsedMs(startedAt: string, endedAt: Date): number {
