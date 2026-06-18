@@ -4,6 +4,7 @@ import websocket from "@fastify/websocket";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import {
+  buildStatusLayers,
   RuntimeStore,
   type AgentRunRecord,
   type ArtifactRecord,
@@ -299,6 +300,7 @@ function sessionSummary(item: HydratedSession, projectId: string) {
     current_state: workflow.status === "done" ? "Done" : workflow.current_stage,
     current_stage: workflow.current_stage,
     workflow_status: workflow.status,
+    status_layers: buildStatusLayers(workflow),
     blocked_reason: workflow.blocked_reason,
     active_run: item.agentRuns.find((run) => run.status === "running") ?? null,
     artifact_paths: artifactPaths(workflow),
@@ -313,11 +315,13 @@ function sessionSummary(item: HydratedSession, projectId: string) {
 
 function buildPanelSnapshot(item: HydratedSession) {
   const { session, workflow, events, artifacts, prompts, agentRuns, toolCalls } = item;
+  const statusLayers = buildStatusLayers(workflow);
   return {
     overview: {
       project: path.basename(session.project_root || session.repo_root),
       role: workflow.current_stage,
       status: workflow.status,
+      status_layers: statusLayers,
       text: workflow.summary || session.request,
       detail: workflow.blocked_reason,
     },
@@ -336,6 +340,7 @@ function buildPanelSnapshot(item: HydratedSession) {
       current_state: workflow.status === "done" ? "Done" : workflow.current_stage,
       current_stage: workflow.current_stage,
       workflow_status: workflow.status,
+      status_layers: statusLayers,
       blocked_reason: workflow.blocked_reason,
       artifact_paths: artifactPaths(workflow),
       steps: workflow.steps,

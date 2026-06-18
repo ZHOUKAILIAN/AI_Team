@@ -1,5 +1,12 @@
 export type WorkflowStatus = "in_progress" | "waiting_human" | "blocked" | "done" | string;
 
+export type StatusLayers = {
+  requirement_status: string;
+  implementation_status: string;
+  verification_status: string;
+  trace_status: string;
+};
+
 export type RuntimeEvent = {
   kind?: string;
   role?: string;
@@ -95,6 +102,7 @@ export type SessionSummary = {
   current_state: string;
   current_stage: string;
   workflow_status: WorkflowStatus;
+  status_layers?: StatusLayers;
   blocked_reason: string;
   active_run: unknown;
   artifact_paths: Record<string, string>;
@@ -138,6 +146,7 @@ export type PanelSnapshot = {
     project: string;
     role: string;
     status: string;
+    status_layers?: StatusLayers;
     text: string;
     detail: string;
   };
@@ -155,6 +164,8 @@ export type PanelSnapshot = {
   state: Record<string, unknown> & {
     current_state?: string;
     current_stage?: string;
+    workflow_status?: string;
+    status_layers?: StatusLayers;
     blocked_reason?: string;
     artifact_paths?: Record<string, string>;
     steps?: WorkflowStep[];

@@ -56,6 +56,12 @@ describe("server", () => {
     expect(detailBody.artifacts).toHaveLength(5);
     expect(detailBody.agent_runs).toHaveLength(5);
     expect(detailBody.snapshot.state.steps).toHaveLength(5);
+    expect(detailBody.snapshot.state.status_layers).toMatchObject({
+      requirement_status: "accepted",
+      implementation_status: "implemented",
+      verification_status: "passed",
+      trace_status: "complete",
+    });
 
     const prompts = await app.inject(`/api/sessions/${result.session_id}/prompts`);
     const promptList = prompts.json().prompts;
@@ -76,6 +82,12 @@ describe("server", () => {
 
     const snapshot = await app.inject("/api/console/snapshot");
     expect(snapshot.json().stats.sessions).toBe(1);
+    expect(snapshot.json().projects[0].sessions[0].status_layers).toMatchObject({
+      requirement_status: "accepted",
+      implementation_status: "implemented",
+      verification_status: "passed",
+      trace_status: "complete",
+    });
 
     await app.close();
   });
