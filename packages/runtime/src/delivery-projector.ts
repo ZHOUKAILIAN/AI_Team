@@ -83,9 +83,12 @@ function projectPhase(
   const steps = execution.steps.filter((step) => deliveryPhaseForRole(step.role) === phase);
   const previousPhase = previous?.phases.find((item) => item.phase === phase);
   const evidenceRefs = uniqueEvidence(steps.flatMap(evidenceRefsForStep));
-  const blockers = steps
+  const stepBlockers = steps
     .filter((step) => step.status === "blocked")
     .map((step) => blockerForStep(phase, step, execution, evidenceRefsForStep(step)));
+  const blockers = executionBlockedInPhase(execution, phase) && stepBlockers.length === 0
+    ? [blockerForExecution(phase, execution)]
+    : stepBlockers;
   const status = phaseStatus(phase, execution, steps);
   const startedAt = steps.map((step) => step.started_at).find(Boolean) ?? previousPhase?.started_at;
   const completedAt =
@@ -110,6 +113,9 @@ function phaseStatus(
   execution: ExecutionWorkflowRecord,
   steps: ExecutionWorkflowRecord["steps"],
 ): DeliveryPhaseStatus {
+  if (executionBlockedInPhase(execution, phase)) {
+    return "blocked";
+  }
   if (steps.length === 0) {
     return phase === "requirement" && execution.current_stage === "created" ? "in_progress" : "pending";
   }
@@ -191,6 +197,47 @@ function blockerForStep(
     evidence_refs: evidenceRefs,
     created_at: step.completed_at ?? execution.updated_at,
   };
+}
+
+function blockerForExecution(
+  phase: DeliveryPhase,
+  execution: ExecutionWorkflowRecord,
+): DeliveryBlocker {
+  return {
+    id: `${phase}:${execution.current_stage}:execution-blocked`,
+    phase,
+    source_role: sourceRoleForStage(execution.current_stage),
+    reason: execution.blocked_reason || `${execution.current_stage} blocked.`,
+    status: "open",
+    evidence_refs: [],
+    created_at: execution.updated_at,
+  };
+}
+
+function executionBlockedInPhase(execution: ExecutionWorkflowRecord, phase: DeliveryPhase): boolean {
+  return execution.status === "blocked" && deliveryPhaseForCurrentStage(execution.current_stage) === phase;
+}
+
+function sourceRoleForStage(stage: string): AgentRole | undefined {
+  const roles: AgentRole[] = [
+    "planner",
+    "repo_scout",
+    "test_scout",
+    "writer",
+    "verifier",
+    "summarizer",
+    "route",
+    "product_definition",
+    "project_runtime",
+    "technical_design",
+    "implementation",
+    "verification",
+    "governance_review",
+    "acceptance",
+    "session_handoff",
+    "migration",
+  ];
+  return roles.includes(stage as AgentRole) ? stage as AgentRole : undefined;
 }
 
 function evidenceRefsForStep(step: ExecutionWorkflowRecord["steps"][number]): EvidenceRef[] {

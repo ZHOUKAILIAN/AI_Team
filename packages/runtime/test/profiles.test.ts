@@ -218,6 +218,38 @@ describe("profiles", () => {
     expect(status.active_run?.heartbeat_age_ms).toBe(59_000);
   });
 
+  it("projects an execution-level blocker even when no step is blocked", async () => {
+    const repoRoot = await mkdtemp(path.join(tmpdir(), "agt-runtime-"));
+    const stateRoot = path.join(repoRoot, ".agt-test");
+    const store = new RuntimeStore(stateRoot);
+    const session = await store.createSession({
+      request: "project blocked execution",
+      profile: "full",
+      repoRoot,
+    });
+
+    await store.updateExecutionWorkflow(session.session_id, (workflow) => ({
+      ...workflow,
+      status: "blocked",
+      current_stage: "implementation",
+      blocked_reason: "Git worktree could not be created.",
+      steps: [],
+      updated_at: "2026-06-16T00:00:00.000Z",
+    }));
+
+    const delivery = await store.loadDeliveryWorkflow(session.session_id);
+    const updatedSession = await store.loadSession(session.session_id);
+    expect(delivery.status).toBe("blocked");
+    expect(delivery.current_phase).toBe("development");
+    expect(delivery.blockers[0]).toMatchObject({
+      phase: "development",
+      source_role: "implementation",
+      reason: "Git worktree could not be created.",
+    });
+    expect(updatedSession.delivery_status).toBe("blocked");
+    expect(updatedSession.current_phase).toBe("development");
+  });
+
   it("stops at full-profile human gates and continues after approval", async () => {
     const repoRoot = await mkdtemp(path.join(tmpdir(), "agt-runtime-"));
     const stateRoot = path.join(repoRoot, ".agt-test");

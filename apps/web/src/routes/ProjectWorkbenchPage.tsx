@@ -12,18 +12,7 @@ type Props = {
   onOpenSession: (sessionId: string) => void;
 };
 
-const laneStages = [
-  "Intake",
-  "Route",
-  "ProductDefinition",
-  "ProjectRuntime",
-  "TechnicalDesign",
-  "Implementation",
-  "Verification",
-  "GovernanceReview",
-  "Acceptance",
-  "SessionHandoff"
-];
+const deliveryPhases = ["requirement", "development", "verification", "handoff"];
 type SessionFilter = "all" | "waiting_human" | "blocked" | "in_progress";
 
 export function ProjectWorkbenchPage({ snapshot, projectId, language, searchQuery, onBack, onOpenSession }: Props) {
@@ -80,8 +69,8 @@ export function ProjectWorkbenchPage({ snapshot, projectId, language, searchQuer
               ))}
             </div>
           </div>
-          <div className="grid min-w-[132rem] grid-cols-10 gap-3 overflow-x-auto p-4">
-            {laneStages.map((stage) => (
+          <div className="grid min-w-[56rem] grid-cols-4 gap-3 overflow-x-auto p-4">
+            {deliveryPhases.map((stage) => (
               <StageLane
                 key={stage}
                 stage={stage}
@@ -148,14 +137,14 @@ function StageLane({
   const t = messages[language];
   const sessions = project.sessions.filter(
     (session) =>
-      normalizedStage(session.current_stage, session.current_state) === stage &&
+      deliveryPhaseForSession(session) === stage &&
       matchesSession(session, searchQuery) &&
       matchesSessionFilter(session, filter)
   );
   return (
     <section className="min-w-52 rounded-2xl border border-console-line bg-console-canvas p-3">
       <div className="mb-3 flex items-center justify-between gap-2">
-        <strong>{t.stages[stage as keyof typeof t.stages] ?? stage}</strong>
+        <strong>{deliveryPhaseLabel(stage, language)}</strong>
         <span className="rounded-full border border-console-line bg-white px-2 py-1 text-xs text-console-muted">{sessions.length}</span>
       </div>
       <div className="grid gap-2">
@@ -172,6 +161,7 @@ function matchesSession(session: SessionSummary, searchQuery: string) {
   if (!query) return true;
   return [
     session.request,
+    session.current_phase,
     session.current_stage,
     session.current_state,
     session.branch,
@@ -193,7 +183,8 @@ function SessionCard({ session, language, onOpen }: { session: SessionSummary; l
   return (
     <button type="button" className="rounded-2xl border border-console-line bg-white p-3 text-left transition hover:-translate-y-1 hover:border-console-blue/40 hover:shadow-lg" onClick={onOpen}>
       <strong className="block line-clamp-3 text-sm leading-5">{session.request}</strong>
-      <span className="mt-2 block text-xs text-console-muted">{session.current_state}</span>
+      <span className="mt-2 block text-xs text-console-muted">{deliveryPhaseLabel(deliveryPhaseForSession(session), language)}</span>
+      <span className="mt-1 block break-all text-[11px] text-console-muted">{session.current_stage}</span>
       <div className="mt-3 h-2 overflow-hidden rounded-full bg-console-canvas">
         <span className="block h-full rounded-full bg-gradient-to-r from-console-green via-console-blue to-console-amber" style={{ width: progressFor(session) }} />
       </div>
@@ -204,14 +195,28 @@ function SessionCard({ session, language, onOpen }: { session: SessionSummary; l
   );
 }
 
-function normalizedStage(stage: string, state: string) {
-  if (state === "Done") return "SessionHandoff";
-  if (state === "WaitForHumanDecision") return "SessionHandoff";
-  if (state === "WaitForProductDefinitionApproval") return "ProductDefinition";
-  if (state === "WaitForTechnicalDesignApproval") return "TechnicalDesign";
-  if (laneStages.includes(stage)) return stage;
-  if (["Intake"].includes(state)) return "Intake";
-  return "Implementation";
+function deliveryPhaseForSession(session: SessionSummary) {
+  if (session.workflow_status === "done") return "handoff";
+  if (session.current_phase && deliveryPhases.includes(session.current_phase)) return session.current_phase;
+  return "development";
+}
+
+function deliveryPhaseLabel(phase: string, language: Language) {
+  const labels = {
+    zh: {
+      requirement: "需求",
+      development: "开发",
+      verification: "验证",
+      handoff: "交接"
+    },
+    en: {
+      requirement: "Requirement",
+      development: "Development",
+      verification: "Verification",
+      handoff: "Handoff"
+    }
+  };
+  return labels[language][phase as keyof typeof labels.zh] ?? phase;
 }
 
 function statusLabel(status: string, t: typeof messages.zh | typeof messages.en) {
@@ -222,9 +227,8 @@ function statusLabel(status: string, t: typeof messages.zh | typeof messages.en)
 }
 
 function progressFor(session: SessionSummary) {
-  const stage = normalizedStage(session.current_stage, session.current_state);
-  const index = laneStages.indexOf(stage);
-  return `${Math.max(18, (index + 1) * 18)}%`;
+  const index = deliveryPhases.indexOf(deliveryPhaseForSession(session));
+  return `${Math.max(18, (index + 1) * 25)}%`;
 }
 
 function currentAction(project: ProjectSummary, language: Language) {
@@ -233,7 +237,10 @@ function currentAction(project: ProjectSummary, language: Language) {
   const waiting = project.sessions.find((session) => session.workflow_status === "waiting_human");
   if (waiting) return language === "zh" ? `等待人工决策：${waiting.request}` : `Waiting for human decision: ${waiting.request}`;
   const active = project.sessions.find((session) => session.workflow_status === "in_progress");
-  if (active) return language === "zh" ? `继续推进：${active.current_stage} / ${active.request}` : `Continue: ${active.current_stage} / ${active.request}`;
+  if (active) {
+    const phase = deliveryPhaseLabel(deliveryPhaseForSession(active), language);
+    return language === "zh" ? `继续推进：${phase} / ${active.request}` : `Continue: ${phase} / ${active.request}`;
+  }
   return language === "zh" ? "当前项目暂无待处理动作。" : "No current action for this project.";
 }
 
