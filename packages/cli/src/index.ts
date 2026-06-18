@@ -12,6 +12,7 @@ import {
   runWorkflow,
   type AgentRole,
   type RequestSourceRecord,
+  type RuntimeConfig,
   type SessionStatusSnapshot,
   type RuntimeProfile,
   RuntimeStore,
@@ -29,27 +30,35 @@ program
   .command("init")
   .option("--repo-root <path>", "repository root", process.cwd())
   .option("--state-root <path>", "state root; defaults to <repo>/.agt")
-  .option("--default-profile <profile>", "quick | investigate | full", "full")
-  .option("--default-model <model>", "OpenAI model", "gpt-5.4-mini")
+  .option("--default-profile <profile>", "quick | investigate | full")
+  .option("--default-model <model>", "OpenAI model")
   .option("--task-worktree", "enable isolated task worktrees by default")
   .option("--human-gates", "enable human gates by default")
   .action(async (options: InitOptions) => {
     const repoRoot = path.resolve(options.repoRoot);
+    const config: Partial<RuntimeConfig> = {};
+    if (options.defaultProfile) {
+      config.default_profile = parseProfile(options.defaultProfile);
+    }
+    if (options.defaultModel) {
+      config.default_model = options.defaultModel;
+    }
+    if (options.taskWorktree) {
+      config.task_worktree = {
+        enabled: true,
+        base_ref_candidates: ["origin/test", "origin/main", "test", "main"],
+        branch_prefix: "feature/",
+        worktree_root: ".worktrees",
+        slug_max_length: 40,
+      };
+    }
+    if (options.humanGates) {
+      config.human_gates = true;
+    }
     const result = await initRuntime({
       repoRoot,
       stateRoot: options.stateRoot ? path.resolve(options.stateRoot) : undefined,
-      config: {
-        default_profile: parseProfile(options.defaultProfile),
-        default_model: options.defaultModel,
-        task_worktree: {
-          enabled: Boolean(options.taskWorktree),
-          base_ref_candidates: ["origin/test", "origin/main", "test", "main"],
-          branch_prefix: "feature/",
-          worktree_root: ".worktrees",
-          slug_max_length: 40,
-        },
-        human_gates: Boolean(options.humanGates),
-      },
+      config,
     });
     console.log(`state_root: ${result.stateRoot}`);
     console.log(`config_path: ${result.configPath}`);
