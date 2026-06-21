@@ -10,7 +10,7 @@
 - `investigate` profile：面向只查问题不改代码，按 `planner -> repo_scout -> test_scout -> summarizer` 收敛证据。
 - `full` profile：面向大需求，保留五层九阶段：`route -> product_definition -> project_runtime -> technical_design -> implementation -> verification -> governance_review -> acceptance -> session_handoff`。
 - 每个 session 都写入结构化状态：`session.json`、`delivery-workflow.json`、`execution-workflow.json`、`events.jsonl`、`tool-calls.jsonl`、`agents/*.json`。
-- 旧 Python/Codex CLI runtime 的 session 可以迁移到新 `.agt/sessions/` schema，迁移不会修改旧目录。
+- 旧 runtime 的 session 可以迁移到新 `.agt/sessions/` schema，迁移不会修改旧目录。
 - 内置 Fastify API 和 web 静态资源服务，供控制台读取项目、session、事件和工具调用。
 
 ## 安装
@@ -155,7 +155,7 @@ agt init
 agt run "你的第一个需求"
 ```
 
-这条路径最适合从旧 Python/Codex CLI runtime 切到 JS runtime 的全新开始。删除 `.agt` 会永久丢弃旧运行历史；如果需要保留旧记录，先使用 `agt migrate --dry-run` 和 `agt migrate --apply`。
+这条路径最适合从旧 runtime 切到当前 JS runtime 的全新开始。删除 `.agt` 会永久丢弃旧运行历史；如果需要保留旧记录，先使用 `agt migrate --dry-run` 和 `agt migrate --apply`。
 
 每个 execution workflow step 会记录：
 

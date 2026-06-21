@@ -17,7 +17,7 @@
 2. 提供 `quick`、`investigate`、`full` 三种 profile，降低小需求成本，同时保留大需求治理链路。
 3. 每个 agent run 都有结构化记录，能回答“模型拿到了什么输入、跑到了哪个阶段、输出了什么、记录了哪些工具调用”。
 4. 旧 session 可以迁移到新 schema，迁移不修改旧运行态。
-5. 控制台通过 API 读取 `.agt/sessions`，不再依赖旧 Python runtime 的 summary shape。
+5. 控制台通过 API 读取 `.agt/sessions`，不再依赖旧 runtime 的 summary shape。
 
 ## 架构
 

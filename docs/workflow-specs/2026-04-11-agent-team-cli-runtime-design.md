@@ -2,6 +2,8 @@
 
 日期：2026-04-11
 
+> 归档说明：本文记录 2026-04-11 的早期 runtime 设计。当前实现已经收口为 JS/TypeScript runtime，现行架构以 `README.md`、`docs/workflow-specs/2026-06-06-js-runtime-rewrite.md` 和 `docs/workflow-specs/2026-06-18-delivery-execution-workflow.md` 为准。
+
 ## 设计目标
 
 `Agent Team` 的新目标不是继续强化 skill 提示词，而是成为一个通过 CLI 暴露、对 AI 友好的工程化团队运行时。
@@ -55,11 +57,7 @@
 agent-team ...
 ```
 
-来驱动流程，而不是长期依赖：
-
-```bash
-python3 -m ...
-```
+来驱动流程，而不是长期依赖早期模块直跑形式。
 
 ### 2. Runtime 持有流程控制权
 

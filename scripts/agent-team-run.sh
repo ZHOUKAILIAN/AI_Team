@@ -9,42 +9,35 @@ fi
 RAW_MESSAGE="$*"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-AGENT_TEAM_EXECUTOR="${AGENT_TEAM_EXECUTOR:-codex-exec}"
+AGT_BIN="${AGT_BIN:-${REPO_ROOT}/packages/cli/dist/index.js}"
 
-AGENT_TEAM_ARGS=(
+AGT_ARGS=(
+  run
+  "${RAW_MESSAGE}"
   --repo-root "${REPO_ROOT}"
-  run-requirement
-  --message "${RAW_MESSAGE}"
-  --executor "${AGENT_TEAM_EXECUTOR}"
 )
 
-if [[ -n "${AGENT_TEAM_EXECUTOR_COMMAND:-}" ]]; then
-  AGENT_TEAM_ARGS+=(--executor-command "${AGENT_TEAM_EXECUTOR_COMMAND}")
+if [[ -n "${AGENT_TEAM_PROFILE:-}" ]]; then
+  AGT_ARGS+=(--profile "${AGENT_TEAM_PROFILE}")
 fi
-if [[ -n "${AGENT_TEAM_AUTO_APPROVE_PRODUCT:-}" ]]; then
-  AGENT_TEAM_ARGS+=(--auto-approve-product)
+if [[ -n "${AGENT_TEAM_STATE_ROOT:-}" ]]; then
+  AGT_ARGS+=(--state-root "${AGENT_TEAM_STATE_ROOT}")
 fi
-if [[ -n "${AGENT_TEAM_AUTO_FINAL_DECISION:-}" ]]; then
-  AGENT_TEAM_ARGS+=(--auto-final-decision "${AGENT_TEAM_AUTO_FINAL_DECISION}")
+if [[ -n "${AGENT_TEAM_TASK_WORKTREE:-}" ]]; then
+  AGT_ARGS+=(--task-worktree)
 fi
-if [[ -n "${AGENT_TEAM_JUDGE:-}" ]]; then
-  AGENT_TEAM_ARGS+=(--judge "${AGENT_TEAM_JUDGE}")
-fi
-if [[ -n "${AGENT_TEAM_CODEX_MODEL:-}" ]]; then
-  AGENT_TEAM_ARGS+=(--codex-model "${AGENT_TEAM_CODEX_MODEL}")
-fi
-if [[ -n "${AGENT_TEAM_CODEX_SANDBOX:-}" ]]; then
-  AGENT_TEAM_ARGS+=(--codex-sandbox "${AGENT_TEAM_CODEX_SANDBOX}")
-fi
-if [[ -n "${AGENT_TEAM_CODEX_APPROVAL_POLICY:-}" ]]; then
-  AGENT_TEAM_ARGS+=(--codex-approval-policy "${AGENT_TEAM_CODEX_APPROVAL_POLICY}")
+if [[ -n "${AGENT_TEAM_HUMAN_GATES:-}" ]]; then
+  AGT_ARGS+=(--human-gates)
 fi
 
 cd "${REPO_ROOT}"
-if [[ -f "${REPO_ROOT}/agent_team/cli.py" ]]; then
-  python3 -m agent_team "${AGENT_TEAM_ARGS[@]}"
+if [[ -f "${AGT_BIN}" ]]; then
+  node "${AGT_BIN}" "${AGT_ARGS[@]}"
+elif command -v agt >/dev/null 2>&1; then
+  agt "${AGT_ARGS[@]}"
 elif command -v agent-team >/dev/null 2>&1; then
-  agent-team "${AGENT_TEAM_ARGS[@]}"
+  agent-team "${AGT_ARGS[@]}"
 else
-  python3 -m agent_team "${AGENT_TEAM_ARGS[@]}"
+  echo "agt is not built or installed. Run npm install && npm run build first." >&2
+  exit 1
 fi

@@ -2,6 +2,8 @@
 
 日期：2026-04-11
 
+> 归档说明：本文记录 2026-04-11 的早期 CLI 帮助形态。当前实现已经收口为 JS/TypeScript runtime，现行命令以 `agt --help` 和仓库根目录 `README.md` 为准。
+
 ## 这份文档是给谁看的
 
 这份 help 是给 `Codex App` 里的执行代理看的。

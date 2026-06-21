@@ -2,6 +2,8 @@
 
 日期：2026-04-11
 
+> 归档说明：本文记录 2026-04-11 的早期 CLI 设计和命令形态。当前实现已经收口为 JS/TypeScript runtime，现行入口、安装和状态目录以仓库根目录 `README.md` 与 `docs/workflow-specs/2026-06-06-js-runtime-rewrite.md` 为准。
+
 ## 安装
 
 正式安装方式：
@@ -255,5 +257,5 @@ React Console 按 `Project -> Worktree -> Session` 展示所有 workspace 的只
 ## 当前建议
 
 - 日常入口统一使用 `agent-team`
-- 不再把 `python3 -m agent_team ...` 当作主入口
+- 不再把早期模块直跑形式当作主入口
 - 当前最适合把它理解成一个“CLI runtime + 团队框架”，不是自动一键全跑的黑盒

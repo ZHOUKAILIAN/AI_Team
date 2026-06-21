@@ -2,6 +2,8 @@
 
 日期：2026-04-11
 
+> 归档说明：本文记录 2026-04-11 的早期流程命令。当前实现已经收口为 JS/TypeScript runtime，现行流程以 `agt run/status/inspect/decision/server/migrate` 和仓库根目录 `README.md` 为准。
+
 ## 当前流程本质
 
 当前流程已经不再依赖 skill 直接控制阶段推进，而是由 runtime 状态机控制。

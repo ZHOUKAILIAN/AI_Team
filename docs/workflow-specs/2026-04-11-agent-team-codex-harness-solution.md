@@ -2,6 +2,8 @@
 
 日期：2026-04-11
 
+> 归档说明：本文记录 2026-04-11 的早期 harness 方案。当前实现已经收口为 JS/TypeScript runtime，现行架构以 `README.md` 和 `docs/workflow-specs/2026-06-06-js-runtime-rewrite.md` 为准。
+
 ## 目标
 
 这份方案只关注 `Codex`。

@@ -3,11 +3,8 @@
 .venv/
 .superpowers/
 .worktrees/
-__pycache__/
-*.pyc
+docs/superpowers/
 node_modules/
-agent_team.egg-info/
-agent_team_runtime.egg-info/
 build/
 *.tsbuildinfo
 .codex/
