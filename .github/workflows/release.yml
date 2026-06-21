@@ -15,44 +15,46 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-node@v5
         with:
-          python-version: "3.13"
-      - run: python -m pip install --upgrade pip build
-      - run: python -m pip install -e ".[test]"
-      - run: python -m unittest discover -s tests
-      - run: python scripts/release/verify_release_version.py --tag "${GITHUB_REF_NAME}"
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+      - run: node scripts/release/release-tools.mjs verify-version --tag "${GITHUB_REF_NAME}"
       - id: release_type
         run: |
-          RELEASE_ARGS="$(python scripts/release/release_type.py --version "${GITHUB_REF_NAME#v}" --github-args)"
+          RELEASE_ARGS="$(node scripts/release/release-tools.mjs release-type --version "${GITHUB_REF_NAME#v}" --github-args)"
           echo "github_args=${RELEASE_ARGS}" >> "${GITHUB_OUTPUT}"
-      - run: python -m build
-      - run: python scripts/release/extract_release_changelog.py --version "${GITHUB_REF_NAME#v}" --changelog CHANGELOG.md > dist/CHANGELOG.md
+      - run: mkdir -p dist/release
+      - run: npm pack --pack-destination dist/release
+      - run: node scripts/release/release-tools.mjs extract-changelog --version "${GITHUB_REF_NAME#v}" --changelog CHANGELOG.md > dist/release/CHANGELOG.md
       - run: |
-          WHEEL_PATH=$(find dist -maxdepth 1 -name '*.whl' | head -n 1)
-          python scripts/release/render_install_script.py \
+          TARBALL_PATH=$(find dist/release -maxdepth 1 -name '*.tgz' | head -n 1)
+          node scripts/release/release-tools.mjs render-install \
             --repo "${GITHUB_REPOSITORY}" \
             --tag "${GITHUB_REF_NAME}" \
             --version "${GITHUB_REF_NAME#v}" \
-            --wheel "$(basename "${WHEEL_PATH}")" > dist/install.sh
-          chmod +x dist/install.sh
+            --tarball "$(basename "${TARBALL_PATH}")" > dist/release/install.sh
+          chmod +x dist/release/install.sh
       - run: |
-          cd dist
-          shasum -a 256 *.whl *.tar.gz install.sh CHANGELOG.md > SHA256SUMS
+          cd dist/release
+          shasum -a 256 *.tgz install.sh CHANGELOG.md > SHA256SUMS
       - run: |
-          test -f dist/CHANGELOG.md
-          test -f dist/install.sh
-          test -f dist/SHA256SUMS
-          ls dist/*.whl dist/*.tar.gz
+          test -f dist/release/CHANGELOG.md
+          test -f dist/release/install.sh
+          test -f dist/release/SHA256SUMS
+          ls dist/release/*.tgz
       - run: |
           gh release create "${GITHUB_REF_NAME}" \
-            dist/*.whl \
-            dist/*.tar.gz \
-            dist/install.sh \
-            dist/SHA256SUMS \
-            dist/CHANGELOG.md \
+            dist/release/*.tgz \
+            dist/release/install.sh \
+            dist/release/SHA256SUMS \
+            dist/release/CHANGELOG.md \
             --title "${GITHUB_REF_NAME}" \
-            --notes-file dist/CHANGELOG.md \
+            --notes-file dist/release/CHANGELOG.md \
             ${{ steps.release_type.outputs.github_args }} \
             --draft
       - run: gh release edit "${GITHUB_REF_NAME}" --draft=false

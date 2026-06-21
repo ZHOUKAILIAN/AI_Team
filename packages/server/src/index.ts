@@ -404,7 +404,6 @@ function resolveWebDist(explicit?: string): string | null {
   const candidates = [
     explicit,
     path.resolve(process.cwd(), "apps/web/dist"),
-    path.resolve(process.cwd(), "agent_team/web_dist"),
   ].filter(Boolean) as string[];
   return candidates.find((candidate) => existsSync(path.join(candidate, "index.html"))) ?? null;
 }

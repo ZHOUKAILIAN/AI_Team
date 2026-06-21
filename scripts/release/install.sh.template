@@ -4,9 +4,9 @@ set -eu
 AGENT_TEAM_REPO="${AGENT_TEAM_REPO:-{{ repo }}}"
 AGENT_TEAM_RELEASE_TAG="${AGENT_TEAM_RELEASE_TAG:-{{ tag }}}"
 AGENT_TEAM_VERSION="${AGENT_TEAM_VERSION:-{{ version }}}"
-AGENT_TEAM_WHEEL="${AGENT_TEAM_WHEEL:-{{ wheel }}}"
+AGENT_TEAM_TARBALL="${AGENT_TEAM_TARBALL:-{{ tarball }}}"
 AGENT_TEAM_RELEASE_BASE_URL="${AGENT_TEAM_RELEASE_BASE_URL:-https://github.com/${AGENT_TEAM_REPO}/releases/download/${AGENT_TEAM_RELEASE_TAG}}"
-AGENT_TEAM_INSTALL_DIR="${AGENT_TEAM_INSTALL_DIR:-${HOME}/.local/share/agent-team}"
+AGENT_TEAM_INSTALL_DIR="${AGENT_TEAM_INSTALL_DIR:-${HOME}/.local/share/agent-team-runtime}"
 AGENT_TEAM_BIN_DIR="${AGENT_TEAM_BIN_DIR:-${HOME}/.local/bin}"
 AGENT_TEAM_FORCE="${AGENT_TEAM_FORCE:-0}"
 
@@ -19,11 +19,8 @@ need_command() {
   command -v "$1" >/dev/null 2>&1 || fail "$1 is required"
 }
 
-check_python_version() {
-  python3 - <<'PY' || fail "Python 3.13+ is required"
-import sys
-raise SystemExit(0 if sys.version_info >= (3, 13) else 1)
-PY
+check_node_version() {
+  node -e 'const major = Number(process.versions.node.split(".")[0]); process.exit(major >= 22 ? 0 : 1)' || fail "Node.js 22+ is required"
 }
 
 sha256_file() {
@@ -56,9 +53,10 @@ current_version() {
   basename "$current_target"
 }
 
-need_command python3
+need_command node
+need_command npm
 need_command curl
-check_python_version
+check_node_version
 
 if [ "${AGENT_TEAM_FORCE}" != "1" ] && [ "$(current_version || true)" = "${AGENT_TEAM_VERSION}" ]; then
   printf '%s\n' "Agent Team ${AGENT_TEAM_VERSION} is already installed."
@@ -78,31 +76,31 @@ trap cleanup EXIT HUP INT TERM
 
 mkdir -p "${AGENT_TEAM_INSTALL_DIR}/versions" "${AGENT_TEAM_BIN_DIR}"
 
-curl -fsSL "${AGENT_TEAM_RELEASE_BASE_URL}/${AGENT_TEAM_WHEEL}" -o "${tmp_dir}/${AGENT_TEAM_WHEEL}" || fail "failed to download ${AGENT_TEAM_WHEEL}"
+curl -fsSL "${AGENT_TEAM_RELEASE_BASE_URL}/${AGENT_TEAM_TARBALL}" -o "${tmp_dir}/${AGENT_TEAM_TARBALL}" || fail "failed to download ${AGENT_TEAM_TARBALL}"
 curl -fsSL "${AGENT_TEAM_RELEASE_BASE_URL}/SHA256SUMS" -o "${tmp_dir}/SHA256SUMS" || fail "failed to download SHA256SUMS"
-verify_checksum "${tmp_dir}/${AGENT_TEAM_WHEEL}" "${tmp_dir}/SHA256SUMS"
+verify_checksum "${tmp_dir}/${AGENT_TEAM_TARBALL}" "${tmp_dir}/SHA256SUMS"
 
 version_dir="${AGENT_TEAM_INSTALL_DIR}/versions/${AGENT_TEAM_VERSION}"
 candidate_root="$version_dir"
 rm -rf "$candidate_root"
 mkdir -p "$candidate_root"
 
-python3 -m venv "${candidate_root}/venv" || fail "failed to create virtual environment"
-"${candidate_root}/venv/bin/python" -m pip install "${tmp_dir}/${AGENT_TEAM_WHEEL}" || fail "failed to install ${AGENT_TEAM_WHEEL}"
-"${candidate_root}/venv/bin/agent-team" --help >/dev/null || fail "candidate ${AGENT_TEAM_VERSION} failed smoke check"
+npm install --omit=dev --prefix "${candidate_root}" "${tmp_dir}/${AGENT_TEAM_TARBALL}" || fail "failed to install ${AGENT_TEAM_TARBALL}"
+"${candidate_root}/node_modules/.bin/agt" --help >/dev/null || fail "candidate ${AGENT_TEAM_VERSION} failed smoke check"
 
 cat > "${candidate_root}/install-manifest.json" <<EOF
 {
   "repo": "${AGENT_TEAM_REPO}",
   "release_tag": "${AGENT_TEAM_RELEASE_TAG}",
   "version": "${AGENT_TEAM_VERSION}",
-  "wheel": "${AGENT_TEAM_WHEEL}"
+  "tarball": "${AGENT_TEAM_TARBALL}"
 }
 EOF
 
 ln -sfn "$version_dir" "${AGENT_TEAM_INSTALL_DIR}/current"
-ln -sfn "${AGENT_TEAM_INSTALL_DIR}/current/venv/bin/agent-team" "${AGENT_TEAM_BIN_DIR}/agent-team"
+ln -sfn "${AGENT_TEAM_INSTALL_DIR}/current/node_modules/.bin/agt" "${AGENT_TEAM_BIN_DIR}/agt"
+ln -sfn "${AGENT_TEAM_INSTALL_DIR}/current/node_modules/.bin/agt" "${AGENT_TEAM_BIN_DIR}/agent-team"
 candidate_root=""
 
 printf '%s\n' "Installed Agent Team ${AGENT_TEAM_VERSION}."
-printf '%s\n' "Command: ${AGENT_TEAM_BIN_DIR}/agent-team"
+printf '%s\n' "Command: ${AGENT_TEAM_BIN_DIR}/agt"
