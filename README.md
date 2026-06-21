@@ -1,17 +1,90 @@
 # Agent Team Runtime
 
-`agent-team-runtime` 是一个 JS/TypeScript 的 agent workflow runtime。它的目标是把“小需求快速跑、复杂需求可追踪”做成同一套本地工具，而不是每次再启动一组黑盒的 `codex --yolo` 进程。
+`agent-team-runtime` 是一个 JS/TypeScript 的 AI 研发交付 workflow runtime。它不和 Codex `/goal`、Claude Code 或其他 coding agent 竞争单次执行速度；这些工具是执行器，AGT 是交付协议层。
+
+AGT 的目标是把“一个需求应该如何被交付”固化为可配置、可追踪、可审计、可恢复的 workflow：需求进入后，runtime 先让模型生成初始需求摘要，再负责创建隔离执行环境、组织角色、注入 skills、生成每阶段最小上下文包、调用执行器、保存产物和验证证据，最后给出本地是否完成的交付结论。
 
 新的入口是 `agt` CLI。runtime 自己负责 session、两层 workflow、agent run、tool call 和迁移记录；模型执行通过 OpenAI Agents SDK 的 `SandboxAgent` 完成。没有 OpenAI 环境变量时会自动使用 deterministic local fallback，方便测试和离线验证。
 
+## 产品定位
+
+AGT 是面向 AI 研发交付的可扩展 workflow runtime。
+
+它的核心用户是需要反复把需求推进到本地可验收状态的研发负责人或独立开发者。对这类用户来说，单个 coding agent 已经可以完成很多实现工作，但交付过程仍然需要稳定处理需求边界、隔离 worktree、上下文裁剪、角色分工、独立验证、证据保存和人工判断。
+
+AGT 的定位是把这些交付习惯变成 runtime 规则，而不是每次在聊天里重新说明。
+
+P0 的阶段交接不传完整聊天历史：Product 完成后把需求合同和交接摘要交给 Dev；Dev 完成后把实现报告、自测证据、实现歧义和 QA 交接摘要交给 QA。
+
+### 与 `/goal` 的关系
+
+`/goal` 是研发执行层：给一个目标，让一个强执行器在当前上下文里尽快完成。
+
+AGT 是 workflow 层：定义一个需求进入后应该经过哪些阶段、每个阶段使用什么角色和 skills、阶段之间传递哪些结构化产物、什么时候允许继续、什么时候必须停下来等人判断。
+
+因此 AGT 可以把 Codex `/goal`、Claude Code、OpenAI Agent、DeepSeek agent 或其他执行器作为某个 workflow 节点使用。AGT 负责流程、状态、证据和交付结论；执行器负责具体阶段内的推理、编辑和命令执行。
+
+### P0 完成定义
+
+P0 只要求把一个需求推进到“本地代码改完 + 测试/验证报告完整”。
+
+一次 AGT 需求交付完成，必须至少留下这些证据：
+
+- 需求边界：要做什么、暂不做什么、验收标准是什么。
+- 本地实现：在隔离 worktree/branch 中完成代码修改，并记录改动文件。
+- 自测记录：记录运行过的测试、检查命令、结果和失败原因。
+- QA 验证报告：独立复核需求是否满足，检查边界情况、兼容性、隐藏副作用、未验证项，并给出本地是否完成的结论。
+
+P0 不负责 PR、merge、发布、线上排障或 CST 闭环。这些可以作为后续 workflow 扩展，但不属于最小产品承诺。
+
+## Layer 1 产品定义
+
+按五层模型，Layer 1 只定义稳定产品语义，不描述当前实现细节。
+
+AGT 的产品定义如下：
+
+- AGT 是一个可扩展的 AI 研发交付 workflow runtime。
+- AGT 的核心对象是 `workflow`、`role`、`skill`、`context packet`、`artifact`、`executor`、`state` 和 `evidence`。
+- `workflow` 定义需求交付路径，例如 `Product -> Dev -> QA`。
+- `role` 是 workflow 节点的责任边界，例如产品澄清、开发实现、独立验证、交付验收。
+- `skill` 是 role 可注入的可维护能力说明，不是一次性聊天提示。
+- `context packet` 是 runtime 为某个 role 生成的最小输入包，用于避免把完整聊天历史传给下游阶段。
+- `artifact` 是阶段产物，例如需求边界、实现报告、测试记录和 QA 报告。
+- `executor` 是被 AGT 调用的具体执行工具，可以是 Codex `/goal`、Claude Code、OpenAI Agents SDK runner 或其他 agent runtime。
+- `state` 是 runtime 维护的机器可读流程状态，不由模型自由生成。
+- `evidence` 是支持交付结论的事实记录，包括命令、测试结果、文件变更、prompt trace、agent run 和人工决策。
+
+AGT 的稳定边界是：它负责把需求交付过程协议化、状态化和证据化；它不承诺替代某个 coding agent 的阶段内执行能力。
+
 ## 当前能力
 
-- `quick` profile：面向小需求，按 `planner -> repo_scout -> writer -> verifier -> summarizer` 快速跑完。
-- `investigate` profile：面向只查问题不改代码，按 `planner -> repo_scout -> test_scout -> summarizer` 收敛证据。
-- `full` profile：面向大需求，保留五层九阶段：`route -> product_definition -> project_runtime -> technical_design -> implementation -> verification -> governance_review -> acceptance -> session_handoff`。
+下面这一节描述的是当前仓库已经实现的 runtime 能力。V1 和 V2 在代码目录上分开，CLI 对外入口保持兼容。
+
+- `packages/runtime/src/V1/`：保留旧 runtime 能力，包括 `quick`、`investigate`、`full` profile，以及旧 delivery/execution projector。
+- `packages/runtime/src/V2/`：承载新的交付 workflow，目前包含 `product-dev-qa`。
+- V1 `quick` profile：面向小需求，按 `planner -> repo_scout -> writer -> verifier -> summarizer` 快速跑完。
+- V1 `investigate` profile：面向只查问题不改代码，按 `planner -> repo_scout -> test_scout -> summarizer` 收敛证据。
+- V1 `full` profile：面向大需求，保留五层九阶段：`route -> product_definition -> project_runtime -> technical_design -> implementation -> verification -> governance_review -> acceptance -> session_handoff`。
+- V2 `product-dev-qa` workflow：面向 P0 本地交付，按 `intake_summary -> product -> product_check -> dev:technical_plan -> dev_plan_check -> dev:implementation -> qa -> done` 执行。
 - 每个 session 都写入结构化状态：`session.json`、`delivery-workflow.json`、`execution-workflow.json`、`events.jsonl`、`tool-calls.jsonl`、`agents/*.json`。
+- `product-dev-qa` session 额外写入外层状态 `workflow-run.json` 和每阶段审计目录 `stages/*/attempt-*`。
 - 旧 runtime 的 session 可以迁移到新 `.agt/sessions/` schema，迁移不会修改旧目录。
 - 内置 Fastify API 和 web 静态资源服务，供控制台读取项目、session、事件和工具调用。
+
+源码分层也按 V1/V2 物理隔离：
+
+```text
+packages/runtime/src/
+  index.ts        # 对外兼容导出，不放实现
+  V1/             # 旧 quick / investigate / full runtime
+  V2/             # 新 product-dev-qa 交付 workflow
+
+packages/runtime/test/
+  V1/
+  V2/
+```
+
+V1 和 V2 各自保留 `schema`、`store`、`runner`、`skill-routing` 等基础文件；公共逻辑允许重复，优先保证分层边界清楚。
 
 ## 安装
 
@@ -63,12 +136,26 @@ agt run "做一个跨模块需求"
 
 `full` 是默认 profile；只有明确要快速小改或只调查时，才显式传 `--profile quick` 或 `--profile investigate`。
 
+P0 本地交付 workflow：
+
+```bash
+agt deliver "实现一个需求，完成本地验证报告"
+agt approve
+agt approve
+```
+
+第一次 `go` 通过 Product 需求合同检查，第二次 `go` 通过 Dev 技术方案检查。Dev 实现完成后会自动进入 QA；QA 失败会直接回到 `dev:implementation` 生成新 attempt。AGT 不会自动 commit、push、merge 或发 PR。
+
+`agt deliver` 等价于 `agt run "..." --workflow product-dev-qa --task-worktree`，默认会为需求创建隔离 worktree。`agt approve` 等价于对当前最新 session 执行 `go` 决策。
+
 常用参数：
 
 ```bash
 agt run "..." --repo-root /path/to/repo --state-root /path/to/repo/.agt
 agt run --from docs/requirement.md --repo-root /path/to/repo
 agt run --from-dir docs/requirement-folder --repo-root /path/to/repo
+agt deliver --from docs/requirement.md
+agt deliver "..." --no-task-worktree
 agt status
 agt status <session_id>
 agt inspect <session_id>
@@ -121,6 +208,7 @@ SDK runner 会创建 `SandboxAgent`，把当前仓库挂载到 sandbox 的 `/wor
   sessions/
     <session_id>/
       session.json
+      workflow-run.json        # product-dev-qa workflow only
       delivery-workflow.json
       execution-workflow.json
       events.jsonl
@@ -130,6 +218,16 @@ SDK runner 会创建 `SandboxAgent`，把当前仓库挂载到 sandbox 的 `/wor
       artifacts/
         index.jsonl
         <role-output>.md
+      stages/                  # product-dev-qa workflow only
+        <stage>/attempt-001/
+          context-packet.json
+          pre-state.json
+          prompt.md
+          prompt.meta.json
+          candidate.json
+          verdict.json
+          executor-run.json
+          post-state.json
   local/
     worktree-policy.json
   prompt_traces/
@@ -146,6 +244,8 @@ SDK runner 会创建 `SandboxAgent`，把当前仓库挂载到 sandbox 的 `/wor
 `delivery-workflow.json` 是外层业务交付状态，面向用户和 CLI 默认展示：`requirement -> development -> verification -> handoff`。它记录每个 phase 的状态、blockers 和 evidence_refs。
 
 `execution-workflow.json` 是 AGT 内部执行状态，面向调试和追踪：不同 profile 会展开成 `quick`、`investigate` 或 `full` 的执行 steps。execution 的变化会通过 runtime projector 更新 delivery；delivery 不会反向改 execution。
+
+`product-dev-qa` workflow 的外层循环以 `workflow-run.json` 为准。人主要看这个文件里的 `status`、`current_role`、`current_step` 和 `waiting_on`；`stages/*/attempt-*` 用于审计和调试阶段输入、prompt、候选输出、verdict 与 executor run。
 
 如果不需要保留旧 session、prompt trace、tool-call 记录和历史控制台数据，可以直接删除旧 `.agt` 后重新初始化：
 
@@ -169,10 +269,7 @@ agt run "你的第一个需求"
 ```bash
 agt decision <session_id> --decision go
 agt decision <session_id> --decision no-go
-agt decision <session_id> --decision rework --target-role implementation
 ```
-
-`rework` 会从目标阶段开始清空下游 step 的 `agent_run_id`、`prompt_trace_id`、`artifact_path`、`files_changed`、`commands_run` 和摘要，避免控制台继续展示旧 trace。
 
 ## 迁移旧状态
 
@@ -242,3 +339,4 @@ node packages/cli/dist/index.js server --state-root /tmp/agt-js-smoke-state --ho
 
 本次 JS rewrite 的详细方案在 [docs/workflow-specs/2026-06-06-js-runtime-rewrite.md](docs/workflow-specs/2026-06-06-js-runtime-rewrite.md)。
 两层 workflow 状态模型在 [docs/workflow-specs/2026-06-18-delivery-execution-workflow.md](docs/workflow-specs/2026-06-18-delivery-execution-workflow.md)。
+新的 `Product -> Dev -> QA` P0 workflow 方案在 [docs/workflow-specs/2026-06-21-product-dev-qa-workflow-runtime.md](docs/workflow-specs/2026-06-21-product-dev-qa-workflow-runtime.md)。

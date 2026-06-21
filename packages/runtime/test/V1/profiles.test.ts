@@ -12,7 +12,7 @@ import {
   runWorkflow,
   RuntimeStore,
   stepsForProfile,
-} from "../src/index.js";
+} from "../../src/index.js";
 
 class FakeRunner implements AgentRunner {
   readonly name = "local_fallback" as const;
