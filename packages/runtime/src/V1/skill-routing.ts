@@ -302,6 +302,10 @@ async function resolveSkill(requirement: SkillRequirement, skillDirs: string[]):
 
 function stageAliases(role: AgentRole): string[] {
   const aliases: Partial<Record<AgentRole, string[]>> = {
+    intake_summary: ["intake_summary", "story_intake", "route"],
+    product: ["product", "product_definition", "requirement_triage"],
+    dev: ["dev", "technical_design", "implementation", "implementation_planning"],
+    qa: ["qa", "verification", "backend_verification"],
     verification: ["verification"],
     verifier: ["verifier", "verification"],
     implementation: ["implementation"],

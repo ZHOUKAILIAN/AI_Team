@@ -135,6 +135,7 @@ async function migrateOne(args: {
       session_id: targetSessionId,
       request,
       request_sources: [],
+      workflow_id: "",
       profile: "full",
       delivery_status: delivery.status,
       execution_status: execution.status,

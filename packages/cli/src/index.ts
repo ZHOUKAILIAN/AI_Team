@@ -7,11 +7,16 @@ import { migrateLegacySessions } from "@agent-team-runtime/migrator";
 import {
   createTaskWorktree,
   initRuntime,
+  isProductDevQaSession,
+  PRODUCT_DEV_QA_WORKFLOW_ID,
+  recordProductDevQaHumanDecision,
   recordHumanDecision,
   readSessionStatus,
+  runProductDevQaWorkflow,
   runWorkflow,
   type AgentRole,
   type RequestSourceRecord,
+  type RunResult,
   type RuntimeConfig,
   type SessionStatusSnapshot,
   type RuntimeProfile,
@@ -74,6 +79,7 @@ program
   .option("--from-dir <path>", "read request context from all files under a directory")
   .option("--session-id <session-id>", "existing session to continue")
   .option("--continue", "continue latest unfinished session from session-index.json")
+  .option("--workflow <workflow>", "workflow id; currently product-dev-qa")
   .option("--task-worktree", "create an isolated git worktree for this run")
   .option("--no-task-worktree", "disable configured task worktree for this run")
   .option("--human-gates", "stop full profile at ProductDefinition, TechnicalDesign, and final handoff gates")
@@ -85,7 +91,7 @@ program
 
     if (options.continue || options.sessionId) {
       const target = await resolveContinuation(sourceStore, options.sessionId);
-      const result = await runWorkflow({
+      const result = await runExistingWorkflow({
         repoRoot: target.repoRoot,
         stateRoot: target.stateRoot,
         sessionId: target.sessionId,
@@ -120,16 +126,27 @@ program
       console.log(`branch: ${worktree.branch}`);
     }
 
-    const result = await runWorkflow({
-      request,
-      profile: options.profile ? parseProfile(options.profile) : config.default_profile,
-      repoRoot,
-      projectRoot: sourceRepoRoot,
-      stateRoot,
-      worktree,
-      requestSources: requestInput.sources,
-      humanGates: Boolean(options.humanGates || config.human_gates),
-    });
+    const workflowId = options.workflow ? parseWorkflowId(options.workflow) : "";
+    const result = workflowId === PRODUCT_DEV_QA_WORKFLOW_ID
+      ? await runProductDevQaWorkflow({
+          request,
+          profile: options.profile ? parseProfile(options.profile) : config.default_profile,
+          repoRoot,
+          projectRoot: sourceRepoRoot,
+          stateRoot,
+          worktree,
+          requestSources: requestInput.sources,
+        })
+      : await runWorkflow({
+          request,
+          profile: options.profile ? parseProfile(options.profile) : config.default_profile,
+          repoRoot,
+          projectRoot: sourceRepoRoot,
+          stateRoot,
+          worktree,
+          requestSources: requestInput.sources,
+          humanGates: Boolean(options.humanGates || config.human_gates),
+        });
     if (useTaskWorktree) {
       await mirrorSessionIndex(sourceStore, stateRoot, result.session_id);
     }
@@ -137,21 +154,53 @@ program
   });
 
 program
+  .command("deliver")
+  .argument("[message...]", "task request")
+  .description("start a product-dev-qa delivery run with an isolated task worktree by default")
+  .option("--repo-root <path>", "repository root", process.cwd())
+  .option("--state-root <path>", "state root; defaults to <repo>/.agt")
+  .option("--from <path>", "read request context from a file")
+  .option("--from-dir <path>", "read request context from all files under a directory")
+  .option("--no-task-worktree", "run in the current repository instead of an isolated task worktree")
+  .action(async (messageParts: string[], options: DeliverOptions) => {
+    const result = await startProductDevQaDelivery(messageParts, options);
+    printResult(result);
+  });
+
+program
   .command("decision")
   .argument("<session-id>", "session id")
-  .requiredOption("--decision <decision>", "go | no-go | rework")
+  .requiredOption("--decision <decision>", "go | no-go | rework; product-dev-qa supports go | no-go")
   .option("--target-role <role>", "role to reset to when --decision rework")
   .option("--state-root <path>", "state root", path.join(process.cwd(), ".agt"))
   .action(async (sessionId: string, options: DecisionOptions) => {
     const sourceStore = new RuntimeStore(path.resolve(options.stateRoot));
     const target = await resolveSessionStore(sourceStore, sessionId);
-    const result = await recordHumanDecision({
-      stateRoot: target.stateRoot,
-      sessionId: target.sessionId,
-      decision: parseDecision(options.decision),
-      targetRole: options.targetRole ? parseAgentRole(options.targetRole) : undefined,
-    });
+    const targetStore = new RuntimeStore(target.stateRoot);
+    const productDevQa = await isProductDevQaSession(targetStore, target.sessionId);
+    const result = productDevQa
+      ? await recordProductDevQaHumanDecision({
+          stateRoot: target.stateRoot,
+          sessionId: target.sessionId,
+          decision: parseProductDevQaDecision(options.decision),
+        })
+      : await recordHumanDecision({
+          stateRoot: target.stateRoot,
+          sessionId: target.sessionId,
+          decision: parseDecision(options.decision),
+          targetRole: options.targetRole ? parseAgentRole(options.targetRole) : undefined,
+        });
     await mirrorSessionIndex(sourceStore, target.stateRoot, result.session_id);
+    printResult(result);
+  });
+
+program
+  .command("approve")
+  .argument("[session-id]", "session id; defaults to latest session")
+  .description("approve the current product-dev-qa human gate")
+  .option("--state-root <path>", "state root", path.join(process.cwd(), ".agt"))
+  .action(async (sessionId: string | undefined, options: ApproveOptions) => {
+    const result = await approveProductDevQaGate(sessionId, options);
     printResult(result);
   });
 
@@ -195,12 +244,16 @@ program
     const session = await store.loadSession(target.sessionId);
     const deliveryWorkflow = await store.loadDeliveryWorkflow(target.sessionId);
     const executionWorkflow = await store.loadExecutionWorkflow(target.sessionId);
+    const productDevQaWorkflow = session.workflow_id === PRODUCT_DEV_QA_WORKFLOW_ID
+      ? await store.loadProductDevQaWorkflow(target.sessionId)
+      : null;
     const toolCalls = await store.readToolCalls(target.sessionId);
     const prompts = await store.readPromptTraces(target.sessionId);
     const artifacts = await store.readArtifacts(target.sessionId);
     const agentRuns = await store.listAgentRuns(target.sessionId);
     console.log(JSON.stringify({
       session,
+      workflow_run: productDevQaWorkflow,
       delivery_workflow: deliveryWorkflow,
       execution_workflow: executionWorkflow,
       prompts,
@@ -264,13 +317,26 @@ type RunOptions = {
   fromDir?: string;
   sessionId?: string;
   continue?: boolean;
+  workflow?: string;
   taskWorktree?: boolean;
   humanGates?: boolean;
+};
+
+type DeliverOptions = {
+  repoRoot: string;
+  stateRoot?: string;
+  from?: string;
+  fromDir?: string;
+  taskWorktree?: boolean;
 };
 
 type DecisionOptions = {
   decision: string;
   targetRole?: string;
+  stateRoot: string;
+};
+
+type ApproveOptions = {
   stateRoot: string;
 };
 
@@ -289,11 +355,25 @@ function parseProfile(value: string): RuntimeProfile {
   throw new Error(`Unsupported profile: ${value}`);
 }
 
+function parseWorkflowId(value: string): typeof PRODUCT_DEV_QA_WORKFLOW_ID {
+  if (value === PRODUCT_DEV_QA_WORKFLOW_ID) {
+    return value;
+  }
+  throw new Error(`Unsupported workflow: ${value}`);
+}
+
 function parseDecision(value: string): "go" | "no-go" | "rework" {
   if (value === "go" || value === "no-go" || value === "rework") {
     return value;
   }
   throw new Error(`Unsupported decision: ${value}`);
+}
+
+function parseProductDevQaDecision(value: string): "go" | "no-go" {
+  if (value === "go" || value === "no-go") {
+    return value;
+  }
+  throw new Error(`${PRODUCT_DEV_QA_WORKFLOW_ID} supports only go | no-go decisions.`);
 }
 
 function parseAgentRole(value: string): AgentRole {
@@ -305,6 +385,10 @@ function parseAgentRole(value: string): AgentRole {
     "verifier",
     "summarizer",
     "route",
+    "intake_summary",
+    "product",
+    "dev",
+    "qa",
     "product_definition",
     "project_runtime",
     "technical_design",
@@ -447,13 +531,104 @@ async function resolveLatestSessionStore(store: RuntimeStore): Promise<{
   throw new Error("No sessions found.");
 }
 
+async function startProductDevQaDelivery(
+  messageParts: string[],
+  options: DeliverOptions,
+): Promise<RunResult> {
+  const sourceRepoRoot = path.resolve(options.repoRoot);
+  const sourceStateRoot = path.resolve(options.stateRoot ?? path.join(sourceRepoRoot, ".agt"));
+  const sourceStore = new RuntimeStore(sourceStateRoot);
+  const config = await sourceStore.loadConfig();
+  const requestInput = await readRequestInput(messageParts, options);
+  const request = requestInput.request;
+  if (!request) {
+    throw new Error("agt deliver requires a request message, --from, or --from-dir.");
+  }
+
+  const useTaskWorktree = options.taskWorktree !== false;
+  let repoRoot = sourceRepoRoot;
+  let stateRoot = sourceStateRoot;
+  let worktree;
+  if (useTaskWorktree) {
+    const created = await createTaskWorktree({
+      projectRoot: sourceRepoRoot,
+      stateRoot: sourceStateRoot,
+      request,
+      config,
+    });
+    repoRoot = created.repoRoot;
+    stateRoot = created.stateRoot;
+    worktree = created.worktree;
+    console.log(`worktree_path: ${repoRoot}`);
+    console.log(`branch: ${worktree.branch}`);
+  }
+
+  const result = await runProductDevQaWorkflow({
+    request,
+    profile: config.default_profile,
+    repoRoot,
+    projectRoot: sourceRepoRoot,
+    stateRoot,
+    worktree,
+    requestSources: requestInput.sources,
+  });
+  if (useTaskWorktree) {
+    await mirrorSessionIndex(sourceStore, stateRoot, result.session_id);
+  }
+  return result;
+}
+
+async function approveProductDevQaGate(
+  sessionId: string | undefined,
+  options: ApproveOptions,
+): Promise<RunResult> {
+  const sourceStore = new RuntimeStore(path.resolve(options.stateRoot));
+  const target = sessionId
+    ? await resolveSessionStore(sourceStore, sessionId)
+    : await resolveLatestSessionStore(sourceStore);
+  const targetStore = new RuntimeStore(target.stateRoot);
+  const productDevQa = await isProductDevQaSession(targetStore, target.sessionId);
+  if (!productDevQa) {
+    throw new Error("agt approve only supports product-dev-qa sessions. Use `agt decision <session_id> --decision go` for other workflows.");
+  }
+  const result = await recordProductDevQaHumanDecision({
+    stateRoot: target.stateRoot,
+    sessionId: target.sessionId,
+    decision: "go",
+  });
+  await mirrorSessionIndex(sourceStore, target.stateRoot, result.session_id);
+  return result;
+}
+
 async function mirrorSessionIndex(sourceStore: RuntimeStore, targetStateRoot: string, sessionId: string): Promise<void> {
   const targetStore = new RuntimeStore(targetStateRoot);
   const session = await targetStore.loadSession(sessionId);
   await sourceStore.upsertSessionIndex(session);
 }
 
-function printResult(result: Awaited<ReturnType<typeof runWorkflow>>): void {
+async function runExistingWorkflow(args: {
+  repoRoot: string;
+  stateRoot: string;
+  sessionId: string;
+  humanGates: boolean;
+}): Promise<RunResult> {
+  const store = new RuntimeStore(args.stateRoot);
+  if (await isProductDevQaSession(store, args.sessionId)) {
+    return runProductDevQaWorkflow({
+      repoRoot: args.repoRoot,
+      stateRoot: args.stateRoot,
+      sessionId: args.sessionId,
+    });
+  }
+  return runWorkflow({
+    repoRoot: args.repoRoot,
+    stateRoot: args.stateRoot,
+    sessionId: args.sessionId,
+    humanGates: args.humanGates,
+  });
+}
+
+function printResult(result: RunResult): void {
   console.log(`session_id: ${result.session_id}`);
   console.log(`profile: ${result.profile}`);
   console.log(`delivery_status: ${result.delivery_status}`);

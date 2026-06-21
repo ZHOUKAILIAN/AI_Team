@@ -63,10 +63,10 @@ export function projectDeliveryWorkflow(
 }
 
 export function deliveryPhaseForRole(role: AgentRole): DeliveryPhase {
-  if (role === "implementation" || role === "writer") {
+  if (role === "implementation" || role === "writer" || role === "dev") {
     return "development";
   }
-  if (role === "verification" || role === "verifier" || role === "governance_review" || role === "acceptance") {
+  if (role === "verification" || role === "verifier" || role === "governance_review" || role === "acceptance" || role === "qa") {
     return "verification";
   }
   if (role === "session_handoff" || role === "summarizer") {
@@ -160,6 +160,7 @@ function currentDeliveryPhase(
 }
 
 function deliveryPhaseForCurrentStage(stage: string): DeliveryPhase | undefined {
+  const normalizedStage = stage.split(":")[0] ?? stage;
   const roles: AgentRole[] = [
     "planner",
     "repo_scout",
@@ -168,6 +169,10 @@ function deliveryPhaseForCurrentStage(stage: string): DeliveryPhase | undefined 
     "verifier",
     "summarizer",
     "route",
+    "intake_summary",
+    "product",
+    "dev",
+    "qa",
     "product_definition",
     "project_runtime",
     "technical_design",
@@ -178,7 +183,7 @@ function deliveryPhaseForCurrentStage(stage: string): DeliveryPhase | undefined 
     "session_handoff",
     "migration",
   ];
-  return roles.includes(stage as AgentRole) ? deliveryPhaseForRole(stage as AgentRole) : undefined;
+  return roles.includes(normalizedStage as AgentRole) ? deliveryPhaseForRole(normalizedStage as AgentRole) : undefined;
 }
 
 function blockerForStep(
@@ -219,6 +224,7 @@ function executionBlockedInPhase(execution: ExecutionWorkflowRecord, phase: Deli
 }
 
 function sourceRoleForStage(stage: string): AgentRole | undefined {
+  const normalizedStage = stage.split(":")[0] ?? stage;
   const roles: AgentRole[] = [
     "planner",
     "repo_scout",
@@ -227,6 +233,10 @@ function sourceRoleForStage(stage: string): AgentRole | undefined {
     "verifier",
     "summarizer",
     "route",
+    "intake_summary",
+    "product",
+    "dev",
+    "qa",
     "product_definition",
     "project_runtime",
     "technical_design",
@@ -237,7 +247,7 @@ function sourceRoleForStage(stage: string): AgentRole | undefined {
     "session_handoff",
     "migration",
   ];
-  return roles.includes(stage as AgentRole) ? stage as AgentRole : undefined;
+  return roles.includes(normalizedStage as AgentRole) ? normalizedStage as AgentRole : undefined;
 }
 
 function evidenceRefsForStep(step: ExecutionWorkflowRecord["steps"][number]): EvidenceRef[] {

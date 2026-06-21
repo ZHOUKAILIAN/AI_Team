@@ -9,6 +9,8 @@ import {
   type ArtifactRecord,
   type DeliveryWorkflowRecord,
   type ExecutionWorkflowRecord,
+  PRODUCT_DEV_QA_WORKFLOW_ID,
+  type ProductDevQaWorkflowRunRecord,
   type PromptTraceRecord,
   type RuntimeEvent,
   type SessionRecord,
@@ -24,6 +26,7 @@ type HydratedSession = {
   session: SessionRecord;
   deliveryWorkflow: DeliveryWorkflowRecord;
   executionWorkflow: ExecutionWorkflowRecord;
+  workflowRun: ProductDevQaWorkflowRunRecord | null;
   events: RuntimeEvent[];
   toolCalls: ToolCallRecord[];
   prompts: PromptTraceRecord[];
@@ -69,6 +72,7 @@ export async function createServer(options: CreateServerOptions) {
       const hydrated = await hydrateSession(store, request.params.sessionId);
       return {
         session: hydrated.session,
+        workflow_run: hydrated.workflowRun,
         delivery_workflow: hydrated.deliveryWorkflow,
         execution_workflow: hydrated.executionWorkflow,
         workflow: hydrated.executionWorkflow,
@@ -202,10 +206,14 @@ async function hydrateSession(store: RuntimeStore, sessionId: string): Promise<H
   const session = await store.loadSession(sessionId);
   const deliveryWorkflow = await store.loadDeliveryWorkflow(sessionId);
   const executionWorkflow = await store.loadExecutionWorkflow(sessionId);
+  const workflowRun = session.workflow_id === PRODUCT_DEV_QA_WORKFLOW_ID
+    ? await store.loadProductDevQaWorkflow(sessionId).catch(() => null)
+    : null;
   return {
     session,
     deliveryWorkflow,
     executionWorkflow,
+    workflowRun,
     events: await store.readEvents(sessionId),
     toolCalls: await store.readToolCalls(sessionId),
     prompts: await store.readPromptTraces(sessionId),
@@ -323,7 +331,7 @@ function sessionSummary(item: HydratedSession, projectId: string) {
 }
 
 function buildPanelSnapshot(item: HydratedSession) {
-  const { session, deliveryWorkflow, executionWorkflow, events, artifacts, prompts, agentRuns, toolCalls } = item;
+  const { session, deliveryWorkflow, executionWorkflow, workflowRun, events, artifacts, prompts, agentRuns, toolCalls } = item;
   const blocker = deliveryWorkflow.blockers.find((item) => item.status === "open");
   return {
     overview: {
@@ -351,6 +359,7 @@ function buildPanelSnapshot(item: HydratedSession) {
       workflow_status: deliveryWorkflow.status,
       delivery_status: deliveryWorkflow.status,
       execution_status: executionWorkflow.status,
+      workflow_run: workflowRun,
       blocked_reason: blocker?.reason ?? executionWorkflow.blocked_reason,
       artifact_paths: artifactPaths(executionWorkflow),
       phases: deliveryWorkflow.phases,
@@ -372,6 +381,7 @@ function buildPanelSnapshot(item: HydratedSession) {
     },
     artifacts: [
       { name: "session.json", path: path.join(session.state_root, "sessions", session.session_id, "session.json"), exists: true },
+      ...(workflowRun ? [{ name: "workflow-run.json", path: path.join(session.state_root, "sessions", session.session_id, "workflow-run.json"), exists: true }] : []),
       { name: "delivery-workflow.json", path: path.join(session.state_root, "sessions", session.session_id, "delivery-workflow.json"), exists: true },
       { name: "execution-workflow.json", path: path.join(session.state_root, "sessions", session.session_id, "execution-workflow.json"), exists: true },
       { name: "tool-calls.jsonl", path: path.join(session.state_root, "sessions", session.session_id, "tool-calls.jsonl"), exists: true },

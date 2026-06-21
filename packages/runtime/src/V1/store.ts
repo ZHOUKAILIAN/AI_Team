@@ -11,6 +11,8 @@ import {
   DeliveryWorkflowSchema,
   type ExecutionWorkflowRecord,
   ExecutionWorkflowSchema,
+  type ProductDevQaWorkflowRunRecord,
+  ProductDevQaWorkflowRunSchema,
   type PromptTraceRecord,
   PromptTraceSchema,
   type RequestSourceRecord,
@@ -38,6 +40,7 @@ export type CreateSessionOptions = {
   repoRoot: string;
   projectRoot?: string;
   stateRoot?: string;
+  workflowId?: string;
   worktree?: WorktreeRecord;
   requestSources?: RequestSourceRecord[];
   source?: SessionRecord["source"];
@@ -61,6 +64,10 @@ export class RuntimeStore {
 
   artifactsDir(sessionId: string): string {
     return path.join(this.sessionDir(sessionId), "artifacts");
+  }
+
+  stagesDir(sessionId: string): string {
+    return path.join(this.sessionDir(sessionId), "stages");
   }
 
   promptTracesDir(): string {
@@ -93,6 +100,7 @@ export class RuntimeStore {
       session_id: sessionId,
       request: options.request,
       request_sources: options.requestSources ?? [],
+      workflow_id: options.workflowId ?? "",
       profile: options.profile,
       delivery_status: "in_progress",
       execution_status: "in_progress",
@@ -155,6 +163,15 @@ export class RuntimeStore {
 
   async loadExecutionWorkflow(sessionId: string): Promise<ExecutionWorkflowRecord> {
     return ExecutionWorkflowSchema.parse(await readJson(path.join(this.sessionDir(sessionId), "execution-workflow.json")));
+  }
+
+  async writeProductDevQaWorkflow(workflow: ProductDevQaWorkflowRunRecord): Promise<void> {
+    const parsed = ProductDevQaWorkflowRunSchema.parse(workflow);
+    await writeJson(path.join(this.sessionDir(parsed.session_id), "workflow-run.json"), parsed);
+  }
+
+  async loadProductDevQaWorkflow(sessionId: string): Promise<ProductDevQaWorkflowRunRecord> {
+    return ProductDevQaWorkflowRunSchema.parse(await readJson(path.join(this.sessionDir(sessionId), "workflow-run.json")));
   }
 
   async updateExecutionWorkflow(
@@ -493,6 +510,7 @@ export class RuntimeStore {
     const entry: SessionIndexEntry = {
       session_id: session.session_id,
       request: session.request,
+      workflow_id: session.workflow_id ?? "",
       delivery_status: session.delivery_status,
       execution_status: session.execution_status,
       status: session.status,

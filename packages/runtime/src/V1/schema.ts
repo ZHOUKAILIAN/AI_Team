@@ -20,6 +20,10 @@ export const AgentRoleSchema = z.enum([
   "verifier",
   "summarizer",
   "route",
+  "intake_summary",
+  "product",
+  "dev",
+  "qa",
   "product_definition",
   "project_runtime",
   "technical_design",
@@ -66,6 +70,7 @@ export const SessionSchema = z.object({
   session_id: z.string(),
   request: z.string(),
   request_sources: z.array(RequestSourceSchema).default([]),
+  workflow_id: z.string().default(""),
   profile: ProfileSchema,
   delivery_status: WorkflowStatusSchema,
   execution_status: WorkflowStatusSchema,
@@ -252,6 +257,47 @@ export const RunResultSchema = z.object({
 });
 export type RunResult = z.infer<typeof RunResultSchema>;
 
+export const ProductDevQaStageRoleSchema = z.enum(["intake_summary", "product", "dev", "qa"]);
+export type ProductDevQaStageRole = z.infer<typeof ProductDevQaStageRoleSchema>;
+
+export const ProductDevQaStageStepSchema = z.enum(["technical_plan", "implementation"]);
+export type ProductDevQaStageStep = z.infer<typeof ProductDevQaStageStepSchema>;
+
+export const ProductDevQaWorkflowRunStatusSchema = z.enum([
+  "created",
+  "running",
+  "waiting_human",
+  "blocked",
+  "done",
+  "cancelled",
+]);
+export type ProductDevQaWorkflowRunStatus = z.infer<typeof ProductDevQaWorkflowRunStatusSchema>;
+
+export const ProductDevQaWorkflowRunSchema = z.object({
+  schema_version: z.literal(1),
+  workflow_id: z.literal("product-dev-qa"),
+  workflow_run_id: z.string(),
+  session_id: z.string(),
+  request: z.string(),
+  status: ProductDevQaWorkflowRunStatusSchema,
+  current_role: ProductDevQaStageRoleSchema.nullable().default(null),
+  current_step: ProductDevQaStageStepSchema.nullable().default(null),
+  current_stage: z.string(),
+  waiting_on: z.enum(["product_check", "dev_plan_check"]).nullable().default(null),
+  stage_attempt_counts: z.record(z.string(), z.number().int().nonnegative()).default({}),
+  summary: z.string().default(""),
+  blocked_reason: z.string().default(""),
+  last_stage_key: z.string().default(""),
+  last_stage_attempt: z.number().int().nonnegative().default(0),
+  last_stage_verdict: z.enum(["passed", "failed", "blocked"]).nullable().default(null),
+  last_stage_summary: z.string().default(""),
+  last_stage_artifacts: z.array(z.string()).default([]),
+  started_at: z.string(),
+  updated_at: z.string(),
+  completed_at: z.string().nullable().default(null),
+});
+export type ProductDevQaWorkflowRunRecord = z.infer<typeof ProductDevQaWorkflowRunSchema>;
+
 export const RuntimeConfigSchema = z.object({
   schema_version: z.literal(1),
   default_profile: ProfileSchema.default("full"),
@@ -299,6 +345,7 @@ export type RuntimeConfig = z.infer<typeof RuntimeConfigSchema>;
 export const SessionIndexEntrySchema = z.object({
   session_id: z.string(),
   request: z.string(),
+  workflow_id: z.string().default(""),
   delivery_status: WorkflowStatusSchema,
   execution_status: WorkflowStatusSchema,
   status: WorkflowStatusSchema,
