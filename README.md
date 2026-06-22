@@ -86,6 +86,14 @@ packages/runtime/test/
 
 V1 和 V2 各自保留 `schema`、`store`、`runner`、`skill-routing` 等基础文件；公共逻辑允许重复，优先保证分层边界清楚。
 
+Runtime package 的导入边界也按版本显式区分：
+
+- `@agent-team-runtime/runtime`：只保留 V1 兼容导出，供旧调用方继续使用。
+- `@agent-team-runtime/runtime/V1`：V1 runtime 的显式入口。
+- `@agent-team-runtime/runtime/V2`：V2 `product-dev-qa` workflow 的显式入口。
+
+V2 命令链路不能从 V1 `RuntimeStore`、V1 config 或 V1 worktree helper 读取状态。CLI 的 `agt deliver`、`agt approve`、`agt run --workflow product-dev-qa`、以及 product-dev-qa session 的 `status/inspect/continue` 都通过 V2 runtime 入口执行；跨 worktree 的 `session-index.json` 只是共享索引文件，不代表 V2 依赖 V1 runtime。
+
 ## 安装
 
 前提：
@@ -146,7 +154,7 @@ agt approve
 
 第一次 `go` 通过 Product 需求合同检查，第二次 `go` 通过 Dev 技术方案检查。Dev 实现完成后会自动进入 QA；QA 失败会直接回到 `dev:implementation` 生成新 attempt。AGT 不会自动 commit、push、merge 或发 PR。
 
-`agt deliver` 等价于 `agt run "..." --workflow product-dev-qa --task-worktree`，默认会为需求创建隔离 worktree。`agt approve` 等价于对当前最新 session 执行 `go` 决策。
+`agt deliver` 是 V2 `product-dev-qa` 的简化入口，默认会为需求创建隔离 worktree。`agt run "..." --workflow product-dev-qa` 也会走 V2 runtime，但仍遵守 `run` 的 worktree 语义：只有显式传 `--task-worktree` 或项目配置启用 task worktree 时才创建 worktree。`agt approve` 等价于对当前最新 V2 session 执行 `go` 决策。
 
 常用参数：
 

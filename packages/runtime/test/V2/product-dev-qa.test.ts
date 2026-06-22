@@ -10,7 +10,7 @@ import {
   recordProductDevQaHumanDecision,
   runProductDevQaWorkflow,
   RuntimeStore,
-} from "../../src/index.js";
+} from "../../src/V2/index.js";
 
 class ProductDevQaRunner implements AgentRunner {
   readonly name = "local_fallback" as const;

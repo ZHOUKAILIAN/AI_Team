@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.3.0-alpha.2] - 2026-06-21
+
+- Split V1 and V2 runtime entrypoints so `product-dev-qa` uses the V2 store, config, worktree, status, and session routing paths without falling back to V1 runtime exports.
+- Added explicit `@agent-team-runtime/runtime/V1` and `@agent-team-runtime/runtime/V2` subpath exports for versioned runtime consumers.
+- Added the simplified V2 `deliver`/`approve` CLI path with isolated task worktrees by default and source session-index mirroring.
+- Preserved cleaner V2 execution workflow summaries by leaving pending stage summaries empty until a stage actually runs.
+
 ## [0.3.0-alpha.1] - 2026-06-16
 
 - Added agent run heartbeats and reusable runtime status snapshots for observing long-running JS workflow stages.

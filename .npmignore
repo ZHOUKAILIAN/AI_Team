@@ -1,10 +1,14 @@
 .test_tmp/
 .DS_Store
+.claude/
 .venv/
 .superpowers/
 .worktrees/
 docs/superpowers/
 node_modules/
+__pycache__/
+*.py[cod]
+.pytest_cache/
 build/
 *.tsbuildinfo
 .codex/

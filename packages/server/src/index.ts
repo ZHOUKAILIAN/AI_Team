@@ -2,20 +2,25 @@ import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
 import websocket from "@fastify/websocket";
 import { existsSync } from "node:fs";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import {
-  RuntimeStore,
   type AgentRunRecord,
   type ArtifactRecord,
   type DeliveryWorkflowRecord,
   type ExecutionWorkflowRecord,
-  PRODUCT_DEV_QA_WORKFLOW_ID,
   type ProductDevQaWorkflowRunRecord,
   type PromptTraceRecord,
   type RuntimeEvent,
-  type SessionRecord,
+  type SessionRecord as V1SessionRecord,
   type ToolCallRecord,
-} from "@agent-team-runtime/runtime";
+  RuntimeStore as V1RuntimeStore,
+} from "@agent-team-runtime/runtime/V1";
+import {
+  PRODUCT_DEV_QA_WORKFLOW_ID,
+  RuntimeStore as V2RuntimeStore,
+  type SessionRecord as V2SessionRecord,
+} from "@agent-team-runtime/runtime/V2";
 
 export type CreateServerOptions = {
   stateRoot: string;
@@ -23,7 +28,7 @@ export type CreateServerOptions = {
 };
 
 type HydratedSession = {
-  session: SessionRecord;
+  session: AnySessionRecord;
   deliveryWorkflow: DeliveryWorkflowRecord;
   executionWorkflow: ExecutionWorkflowRecord;
   workflowRun: ProductDevQaWorkflowRunRecord | null;
@@ -34,9 +39,12 @@ type HydratedSession = {
   agentRuns: AgentRunRecord[];
 };
 
+type RuntimeStoreLike = V1RuntimeStore | V2RuntimeStore;
+type AnySessionRecord = V1SessionRecord | V2SessionRecord;
+
 export async function createServer(options: CreateServerOptions) {
   const app = Fastify({ logger: false });
-  const store = new RuntimeStore(options.stateRoot);
+  const stateRoot = path.resolve(options.stateRoot);
   await app.register(websocket);
 
   const webDist = resolveWebDist(options.webDist);
@@ -48,28 +56,29 @@ export async function createServer(options: CreateServerOptions) {
   }
 
   app.get("/api/config", async () => {
-    return { config: await store.loadConfig(), state_root: store.stateRoot };
+    const store = await latestRuntimeStore(stateRoot);
+    return { config: await store.loadConfig(), state_root: stateRoot };
   });
 
   app.get("/api/session-index", async () => {
-    return await store.loadSessionIndex();
+    return await readSessionIndex(stateRoot);
   });
 
   app.get("/api/console/snapshot", async () => {
-    return buildConsoleSnapshot(await hydrateSessions(store));
+    return buildConsoleSnapshot(await hydrateSessions(stateRoot));
   });
 
   app.get("/api/projects", async () => {
-    return { projects: buildConsoleSnapshot(await hydrateSessions(store)).projects };
+    return { projects: buildConsoleSnapshot(await hydrateSessions(stateRoot)).projects };
   });
 
   app.get("/api/sessions", async () => {
-    return { sessions: await store.listSessions() };
+    return { sessions: await listSessions(stateRoot) };
   });
 
   app.get<{ Params: { sessionId: string } }>("/api/sessions/:sessionId", async (request, reply) => {
     try {
-      const hydrated = await hydrateSession(store, request.params.sessionId);
+      const hydrated = await hydrateSession(stateRoot, request.params.sessionId);
       return {
         session: hydrated.session,
         workflow_run: hydrated.workflowRun,
@@ -90,6 +99,7 @@ export async function createServer(options: CreateServerOptions) {
 
   app.get<{ Params: { sessionId: string } }>("/api/sessions/:sessionId/events", async (request, reply) => {
     try {
+      const store = await runtimeStoreForSession(stateRoot, request.params.sessionId);
       return { events: await store.readEvents(request.params.sessionId) };
     } catch (error) {
       return reply.status(404).send({ error: error instanceof Error ? error.message : String(error) });
@@ -98,6 +108,7 @@ export async function createServer(options: CreateServerOptions) {
 
   app.get<{ Params: { sessionId: string } }>("/api/sessions/:sessionId/tool-calls", async (request, reply) => {
     try {
+      const store = await runtimeStoreForSession(stateRoot, request.params.sessionId);
       return { tool_calls: await store.readToolCalls(request.params.sessionId) };
     } catch (error) {
       return reply.status(404).send({ error: error instanceof Error ? error.message : String(error) });
@@ -106,6 +117,7 @@ export async function createServer(options: CreateServerOptions) {
 
   app.get<{ Params: { sessionId: string } }>("/api/sessions/:sessionId/prompts", async (request, reply) => {
     try {
+      const store = await runtimeStoreForSession(stateRoot, request.params.sessionId);
       return { prompts: await store.readPromptTraces(request.params.sessionId) };
     } catch (error) {
       return reply.status(404).send({ error: error instanceof Error ? error.message : String(error) });
@@ -116,6 +128,7 @@ export async function createServer(options: CreateServerOptions) {
     "/api/sessions/:sessionId/prompts/:promptId",
     async (request, reply) => {
       try {
+        const store = await runtimeStoreForSession(stateRoot, request.params.sessionId);
         const payload = await store.readPromptContent(request.params.promptId);
         if (payload.prompt.session_id !== request.params.sessionId) {
           return reply.status(404).send({ error: "Prompt does not belong to this session." });
@@ -129,6 +142,7 @@ export async function createServer(options: CreateServerOptions) {
 
   app.get<{ Params: { sessionId: string } }>("/api/sessions/:sessionId/artifacts", async (request, reply) => {
     try {
+      const store = await runtimeStoreForSession(stateRoot, request.params.sessionId);
       return { artifacts: await store.readArtifacts(request.params.sessionId) };
     } catch (error) {
       return reply.status(404).send({ error: error instanceof Error ? error.message : String(error) });
@@ -139,6 +153,7 @@ export async function createServer(options: CreateServerOptions) {
     "/api/sessions/:sessionId/artifacts/:artifactName",
     async (request, reply) => {
       try {
+        const store = await runtimeStoreForSession(stateRoot, request.params.sessionId);
         return await store.readArtifactContent(request.params.sessionId, decodeURIComponent(request.params.artifactName));
       } catch (error) {
         return reply.status(404).send({ error: error instanceof Error ? error.message : String(error) });
@@ -148,6 +163,7 @@ export async function createServer(options: CreateServerOptions) {
 
   app.get<{ Params: { sessionId: string } }>("/api/sessions/:sessionId/agent-runs", async (request, reply) => {
     try {
+      const store = await runtimeStoreForSession(stateRoot, request.params.sessionId);
       return { agent_runs: await store.listAgentRuns(request.params.sessionId) };
     } catch (error) {
       return reply.status(404).send({ error: error instanceof Error ? error.message : String(error) });
@@ -156,19 +172,19 @@ export async function createServer(options: CreateServerOptions) {
 
   app.get("/api/session", async (request, reply) => {
     const query = request.query as { session_id?: string };
-    const sessionId = query.session_id ?? (await store.listSessions())[0]?.session_id;
+    const sessionId = query.session_id ?? (await listSessions(stateRoot))[0]?.session_id;
     if (!sessionId) {
       return reply.status(404).send({ error: "No workflow session exists yet." });
     }
     try {
-      return buildPanelSnapshot(await hydrateSession(store, sessionId));
+      return buildPanelSnapshot(await hydrateSession(stateRoot, sessionId));
     } catch (error) {
       return reply.status(404).send({ error: error instanceof Error ? error.message : String(error) });
     }
   });
 
   app.get("/ws/runtime", { websocket: true }, async (socket) => {
-    socket.send(JSON.stringify({ type: "hello", state_root: store.stateRoot }));
+    socket.send(JSON.stringify({ type: "hello", state_root: stateRoot }));
   });
 
   if (webDist) {
@@ -189,12 +205,12 @@ export async function runServer(options: CreateServerOptions & { host: string; p
   return `http://${options.host}:${options.port}`;
 }
 
-async function hydrateSessions(store: RuntimeStore): Promise<HydratedSession[]> {
-  const sessions = await store.listSessions();
+async function hydrateSessions(stateRoot: string): Promise<HydratedSession[]> {
+  const sessions = await listSessions(stateRoot);
   const hydrated: HydratedSession[] = [];
   for (const session of sessions) {
     try {
-      hydrated.push(await hydrateSession(store, session.session_id));
+      hydrated.push(await hydrateSession(stateRoot, session.session_id));
     } catch {
       // Skip malformed sessions in the aggregate view; detail endpoint reports the error.
     }
@@ -202,7 +218,8 @@ async function hydrateSessions(store: RuntimeStore): Promise<HydratedSession[]> 
   return hydrated;
 }
 
-async function hydrateSession(store: RuntimeStore, sessionId: string): Promise<HydratedSession> {
+async function hydrateSession(sourceStateRoot: string, sessionId: string): Promise<HydratedSession> {
+  const store = await runtimeStoreForSession(sourceStateRoot, sessionId);
   const session = await store.loadSession(sessionId);
   const deliveryWorkflow = await store.loadDeliveryWorkflow(sessionId);
   const executionWorkflow = await store.loadExecutionWorkflow(sessionId);
@@ -220,6 +237,100 @@ async function hydrateSession(store: RuntimeStore, sessionId: string): Promise<H
     artifacts: await store.readArtifacts(sessionId),
     agentRuns: await store.listAgentRuns(sessionId),
   };
+}
+
+async function runtimeStoreForSession(sourceStateRoot: string, sessionId: string): Promise<RuntimeStoreLike> {
+  const target = await resolveSessionTarget(sourceStateRoot, sessionId);
+  return target.workflowId === PRODUCT_DEV_QA_WORKFLOW_ID
+    ? new V2RuntimeStore(target.stateRoot)
+    : new V1RuntimeStore(target.stateRoot);
+}
+
+async function latestRuntimeStore(stateRoot: string): Promise<RuntimeStoreLike> {
+  const latest = await latestSession(stateRoot);
+  if (!latest) {
+    return new V1RuntimeStore(stateRoot);
+  }
+  return latest.workflowId === PRODUCT_DEV_QA_WORKFLOW_ID
+    ? new V2RuntimeStore(latest.stateRoot)
+    : new V1RuntimeStore(latest.stateRoot);
+}
+
+async function listSessions(stateRoot: string): Promise<AnySessionRecord[]> {
+  const index = await readSessionIndex(stateRoot);
+  if (index.sessions.length > 0) {
+    const sessions = await Promise.all(
+      index.sessions.map((entry) => readSessionRecord(entry.state_root, entry.session_id).catch(() => null)),
+    );
+    return sessions.filter((session): session is AnySessionRecord => session !== null);
+  }
+  const sessionsDir = path.join(stateRoot, "sessions");
+  if (!existsSync(sessionsDir)) {
+    return [];
+  }
+  const entries = await readdir(sessionsDir, { withFileTypes: true });
+  const sessions = await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => readSessionRecord(stateRoot, entry.name).catch(() => null)),
+  );
+  return sessions
+    .filter((session): session is AnySessionRecord => session !== null)
+    .sort((left, right) => right.updated_at.localeCompare(left.updated_at));
+}
+
+async function latestSession(stateRoot: string): Promise<{ sessionId: string; stateRoot: string; workflowId: string } | null> {
+  const sessions = await listSessions(stateRoot);
+  const latest = sessions[0];
+  if (!latest) {
+    return null;
+  }
+  return {
+    sessionId: latest.session_id,
+    stateRoot: latest.state_root,
+    workflowId: latest.workflow_id ?? "",
+  };
+}
+
+async function resolveSessionTarget(
+  sourceStateRoot: string,
+  sessionId: string,
+): Promise<{ sessionId: string; stateRoot: string; workflowId: string }> {
+  const local = await readSessionRecord(sourceStateRoot, sessionId).catch(() => null);
+  if (local) {
+    return { sessionId: local.session_id, stateRoot: local.state_root, workflowId: local.workflow_id ?? "" };
+  }
+  const index = await readSessionIndex(sourceStateRoot);
+  const entry = index.sessions.find((item) => item.session_id === sessionId);
+  if (!entry) {
+    throw new Error(`Session not found: ${sessionId}`);
+  }
+  const session = await readSessionRecord(entry.state_root, sessionId).catch(() => null);
+  return {
+    sessionId,
+    stateRoot: session?.state_root ?? entry.state_root,
+    workflowId: session?.workflow_id ?? entry.workflow_id ?? "",
+  };
+}
+
+async function readSessionRecord(stateRoot: string, sessionId: string): Promise<AnySessionRecord> {
+  return JSON.parse(await readFile(path.join(stateRoot, "sessions", sessionId, "session.json"), "utf8")) as AnySessionRecord;
+}
+
+async function readSessionIndex(stateRoot: string): Promise<{ schema_version: 1; sessions: Array<{
+  session_id: string;
+  workflow_id: string;
+  state_root: string;
+}> }> {
+  const indexPath = path.join(stateRoot, "session-index.json");
+  if (!existsSync(indexPath)) {
+    return { schema_version: 1, sessions: [] };
+  }
+  return JSON.parse(await readFile(indexPath, "utf8")) as { schema_version: 1; sessions: Array<{
+    session_id: string;
+    workflow_id: string;
+    state_root: string;
+  }> };
 }
 
 function buildConsoleSnapshot(items: HydratedSession[]) {
@@ -280,7 +391,7 @@ function buildConsoleSnapshot(items: HydratedSession[]) {
   };
 }
 
-function ensureWorktreeSummary(project: any, session: SessionRecord) {
+function ensureWorktreeSummary(project: any, session: AnySessionRecord) {
   let worktree = project.worktrees.find((item: any) => item.worktree_path === session.repo_root);
   if (!worktree) {
     worktree = {

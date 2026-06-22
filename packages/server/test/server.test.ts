@@ -9,7 +9,7 @@ import {
   type AgentTaskResult,
   runWorkflow,
   RuntimeStore,
-} from "@agent-team-runtime/runtime";
+} from "@agent-team-runtime/runtime/V1";
 import { createServer } from "../src/index.js";
 
 class FakeRunner implements AgentRunner {

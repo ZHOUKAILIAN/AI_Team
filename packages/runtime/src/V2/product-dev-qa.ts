@@ -344,7 +344,7 @@ async function ensureProductDevQaExecutionWorkflow(
       artifact_path: "",
       files_changed: [],
       commands_run: [],
-      summary: STAGES[key].currentStage,
+      summary: "",
     })),
     updated_at: updatedAt,
   }));
@@ -1001,7 +1001,7 @@ async function resetExecutionFromStage(
             files_changed: [],
             commands_run: [],
             completed_at: undefined,
-            summary: STAGES[EXECUTION_STAGE_ORDER[index] as StageKey].currentStage,
+            summary: "",
           }
         : step,
     ),
