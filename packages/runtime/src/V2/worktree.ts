@@ -19,7 +19,7 @@ export type TaskWorktreeResult = {
 
 export async function initRuntime(options: InitRuntimeOptions): Promise<{ stateRoot: string; configPath: string }> {
   const repoRoot = path.resolve(options.repoRoot);
-  const stateRoot = path.resolve(options.stateRoot ?? path.join(repoRoot, ".agt"));
+  const stateRoot = path.resolve(options.stateRoot ?? path.join(repoRoot, ".agt2"));
   const store = new RuntimeStore(stateRoot);
   await store.ensureLayout();
   const config = await store.ensureConfig(options.config);
@@ -54,7 +54,7 @@ export async function createTaskWorktree(options: {
     worktreePath = path.join(worktreeRoot, name);
   }
   await execa("git", ["worktree", "add", "-b", branch, worktreePath, base.ref], { cwd: projectRoot });
-  const targetStateRoot = path.join(worktreePath, ".agt");
+  const targetStateRoot = path.join(worktreePath, ".agt2");
   const targetStore = new RuntimeStore(targetStateRoot);
   await targetStore.ensureConfig(config);
   return {

@@ -161,7 +161,7 @@ const EXECUTION_STAGE_ORDER: StageKey[] = [
 
 export async function runProductDevQaWorkflow(options: RunProductDevQaWorkflowOptions): Promise<RunResult> {
   const repoRoot = path.resolve(options.repoRoot);
-  const stateRoot = path.resolve(options.stateRoot ?? path.join(repoRoot, ".agt"));
+  const stateRoot = path.resolve(options.stateRoot ?? path.join(repoRoot, ".agt2"));
   const store = new RuntimeStore(stateRoot);
   const session = options.sessionId
     ? await store.loadSession(options.sessionId)

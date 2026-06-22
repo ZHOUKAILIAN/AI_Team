@@ -149,7 +149,7 @@ async function routingConfigCandidates(repoRoot: string, projectRoot: string): P
   const projectConfigs = projectConfigRoot
     ? names.map((name) => path.join(projectConfigRoot, name, "skill-routing.yaml"))
     : [];
-  const repoLocal = roots.map((root) => path.join(root, ".agt", "skill-routing.yaml"));
+  const repoLocal = roots.map((root) => path.join(root, ".agt2", "skill-routing.yaml"));
   const discoverable = await discoverProjectRoutingConfigs(projectConfigRoot);
   return [...new Set([...explicit, ...projectConfigs, ...repoLocal, ...discoverable])];
 }
