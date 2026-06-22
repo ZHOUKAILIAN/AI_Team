@@ -4,41 +4,46 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { migrateLegacySessions } from "@agent-team-runtime/migrator";
 import {
-  recordHumanDecision,
-  runWorkflow,
-  initRuntime,
   createTaskWorktree,
+  initRuntime,
+  isProductDevQaSession,
+  PRODUCT_DEV_QA_WORKFLOW_ID,
+  recordProductDevQaHumanDecision,
   readSessionStatus,
-  type AgentRole,
+  runProductDevQaWorkflow,
+  RuntimeStore,
   type RequestSourceRecord,
   type RunResult,
   type RuntimeConfig,
-  type SessionStatusSnapshot,
   type RuntimeProfile,
-  RuntimeStore,
-} from "@agent-team-runtime/runtime/V1";
+  type SessionStatusSnapshot,
+} from "@agent-team-runtime/runtime/V2";
 import { runServer } from "@agent-team-runtime/server";
+
+const VERSION = "0.3.0-alpha.2";
+const DEFAULT_STATE_DIR = ".agt2";
 
 const program = new Command();
 
 program
-  .name("agt")
-  .description("Agent Team Runtime JS CLI")
-  .version("0.3.0-alpha.2");
+  .name("agt2")
+  .description("Agent Team Runtime V2 CLI")
+  .version(VERSION);
 
 program
   .command("init")
   .option("--repo-root <path>", "repository root", process.cwd())
-  .option("--state-root <path>", "state root; defaults to <repo>/.agt")
+  .option("--state-root <path>", "state root; defaults to <repo>/.agt2")
   .option("--default-profile <profile>", "quick | investigate | full")
   .option("--default-model <model>", "OpenAI model")
   .option("--task-worktree", "enable isolated task worktrees by default")
-  .option("--human-gates", "enable human gates by default")
   .action(async (options: InitOptions) => {
     const repoRoot = path.resolve(options.repoRoot);
-    const config: Partial<RuntimeConfig> = {};
+    const stateRoot = options.stateRoot ? path.resolve(options.stateRoot) : path.join(repoRoot, DEFAULT_STATE_DIR);
+    const config: Partial<RuntimeConfig> = {
+      state_root: options.stateRoot ?? DEFAULT_STATE_DIR,
+    };
     if (options.defaultProfile) {
       config.default_profile = parseProfile(options.defaultProfile);
     }
@@ -54,111 +59,74 @@ program
         slug_max_length: 40,
       };
     }
-    if (options.humanGates) {
-      config.human_gates = true;
-    }
-    const result = await initRuntime({
-      repoRoot,
-      stateRoot: options.stateRoot ? path.resolve(options.stateRoot) : undefined,
-      config,
-    });
+    const result = await initRuntime({ repoRoot, stateRoot, config });
     console.log(`state_root: ${result.stateRoot}`);
     console.log(`config_path: ${result.configPath}`);
   });
 
 program
-  .command("run")
+  .command("deliver")
   .argument("[message...]", "task request")
+  .description("start a product-dev-qa delivery run with an isolated task worktree by default")
   .option("--profile <profile>", "quick | investigate | full")
   .option("--repo-root <path>", "repository root", process.cwd())
-  .option("--state-root <path>", "state root; defaults to <repo>/.agt")
+  .option("--state-root <path>", "state root; defaults to <repo>/.agt2")
   .option("--from <path>", "read request context from a file")
   .option("--from-dir <path>", "read request context from all files under a directory")
-  .option("--session-id <session-id>", "existing session to continue")
-  .option("--continue", "continue latest unfinished session from session-index.json")
+  .option("--no-task-worktree", "run in the current repository instead of an isolated task worktree")
+  .action(async (messageParts: string[], options: DeliverOptions) => {
+    const result = await startProductDevQaDelivery(messageParts, options, true);
+    printResult(result);
+  });
+
+program
+  .command("run")
+  .argument("[message...]", "task request")
+  .description("alias for deliver; starts product-dev-qa")
+  .option("--profile <profile>", "quick | investigate | full")
+  .option("--repo-root <path>", "repository root", process.cwd())
+  .option("--state-root <path>", "state root; defaults to <repo>/.agt2")
+  .option("--from <path>", "read request context from a file")
+  .option("--from-dir <path>", "read request context from all files under a directory")
   .option("--task-worktree", "create an isolated git worktree for this run")
   .option("--no-task-worktree", "disable configured task worktree for this run")
-  .option("--human-gates", "stop full profile at ProductDefinition, TechnicalDesign, and final handoff gates")
-  .action(async (messageParts: string[], options: RunOptions) => {
-    const sourceRepoRoot = path.resolve(options.repoRoot);
-    const sourceStateRoot = path.resolve(options.stateRoot ?? path.join(sourceRepoRoot, ".agt"));
-
-    if (options.continue || options.sessionId) {
-      const target = await resolveContinuation(sourceStateRoot, options.sessionId);
-      const result = await runExistingWorkflow({
-        target,
-        humanGates: options.humanGates,
-      });
-      await mirrorSessionIndex(sourceStateRoot, target.stateRoot, result.session_id);
-      printResult(result);
-      return;
-    }
-
-    const requestInput = await readRequestInput(messageParts, options);
-    const request = requestInput.request;
-    if (!request) {
-      throw new Error("agt run requires a request message, --from, or --from-dir.");
-    }
-
-    const sourceStore = new RuntimeStore(sourceStateRoot);
-    const config = await sourceStore.loadConfig();
-    const useTaskWorktree = options.taskWorktree || (config.task_worktree.enabled && options.taskWorktree !== false);
-    let repoRoot = sourceRepoRoot;
-    let stateRoot = sourceStateRoot;
-    let worktree;
-    if (useTaskWorktree) {
-      const created = await createTaskWorktree({
-        projectRoot: sourceRepoRoot,
-        stateRoot: sourceStateRoot,
-        request,
-        config,
-      });
-      repoRoot = created.repoRoot;
-      stateRoot = created.stateRoot;
-      worktree = created.worktree;
-      console.log(`worktree_path: ${repoRoot}`);
-      console.log(`branch: ${worktree.branch}`);
-    }
-
-    const result = await runWorkflow({
-      request,
-      profile: options.profile ? parseProfile(options.profile) : config.default_profile,
-      repoRoot,
-      projectRoot: sourceRepoRoot,
-      stateRoot,
-      worktree,
-      requestSources: requestInput.sources,
-      humanGates: Boolean(options.humanGates || config.human_gates),
-    });
-    if (useTaskWorktree) {
-      await mirrorSessionIndex(sourceStateRoot, stateRoot, result.session_id);
-    }
+  .action(async (messageParts: string[], options: DeliverOptions) => {
+    const result = await startProductDevQaDelivery(messageParts, options, false);
     printResult(result);
   });
 
 program
   .command("decision")
   .argument("<session-id>", "session id")
-  .requiredOption("--decision <decision>", "go | no-go | rework")
-  .option("--target-role <role>", "role to reset to when --decision rework")
-  .option("--state-root <path>", "state root", path.join(process.cwd(), ".agt"))
+  .requiredOption("--decision <decision>", "go | no-go")
+  .option("--state-root <path>", "state root", path.join(process.cwd(), DEFAULT_STATE_DIR))
   .action(async (sessionId: string, options: DecisionOptions) => {
     const sourceStateRoot = path.resolve(options.stateRoot);
     const target = await resolveSessionTarget(sourceStateRoot, sessionId);
-    const result = await recordHumanDecision({
+    await assertProductDevQaSession(target);
+    const result = await recordProductDevQaHumanDecision({
       stateRoot: target.stateRoot,
       sessionId: target.sessionId,
-      decision: parseDecision(options.decision),
-      targetRole: options.targetRole ? parseAgentRole(options.targetRole) : undefined,
+      decision: parseProductDevQaDecision(options.decision),
     });
     await mirrorSessionIndex(sourceStateRoot, target.stateRoot, result.session_id);
     printResult(result);
   });
 
 program
+  .command("approve")
+  .argument("[session-id]", "session id; defaults to latest session")
+  .description("approve the current product-dev-qa human gate")
+  .option("--state-root <path>", "state root", path.join(process.cwd(), DEFAULT_STATE_DIR))
+  .action(async (sessionId: string | undefined, options: ApproveOptions) => {
+    const result = await approveProductDevQaGate(sessionId, options);
+    printResult(result);
+  });
+
+program
   .command("status")
   .argument("[session-id]", "session id")
-  .option("--state-root <path>", "state root", path.join(process.cwd(), ".agt"))
+  .option("--state-root <path>", "state root", path.join(process.cwd(), DEFAULT_STATE_DIR))
   .option("--watch", "poll status until the session leaves running/in_progress")
   .option("--interval <seconds>", "poll interval for --watch", "5")
   .option("--stalled-after <seconds>", "mark running agent runs as stalled after this many seconds without heartbeat", "120")
@@ -168,16 +136,17 @@ program
     const target = sessionId
       ? await resolveSessionTarget(sourceStateRoot, sessionId)
       : await resolveLatestSessionTarget(sourceStateRoot);
-    const targetStore = new RuntimeStore(target.stateRoot);
+    await assertProductDevQaSession(target);
+    const store = new RuntimeStore(target.stateRoot);
     const intervalMs = parsePositiveSeconds(options.interval, "--interval") * 1000;
     const stalledAfterMs = parsePositiveSeconds(options.stalledAfter, "--stalled-after") * 1000;
-    await printStatusOnce(targetStore, target.sessionId, { ...options, stalledAfterMs });
+    await printStatusOnce(store, target.sessionId, { ...options, stalledAfterMs });
     if (!options.watch) {
       return;
     }
     while (true) {
       await sleep(intervalMs);
-      const snapshot = await printStatusOnce(targetStore, target.sessionId, { ...options, stalledAfterMs });
+      const snapshot = await printStatusOnce(store, target.sessionId, { ...options, stalledAfterMs });
       if (!isWatchableRuntimeStatus(snapshot.runtime_status)) {
         break;
       }
@@ -187,19 +156,22 @@ program
 program
   .command("inspect")
   .argument("<session-id>", "session id")
-  .option("--state-root <path>", "state root", path.join(process.cwd(), ".agt"))
+  .option("--state-root <path>", "state root", path.join(process.cwd(), DEFAULT_STATE_DIR))
   .action(async (sessionId: string, options: { stateRoot: string }) => {
     const target = await resolveSessionTarget(path.resolve(options.stateRoot), sessionId);
+    await assertProductDevQaSession(target);
     const store = new RuntimeStore(target.stateRoot);
     const session = await store.loadSession(target.sessionId);
     const deliveryWorkflow = await store.loadDeliveryWorkflow(target.sessionId);
     const executionWorkflow = await store.loadExecutionWorkflow(target.sessionId);
+    const productDevQaWorkflow = await store.loadProductDevQaWorkflow(target.sessionId);
     const toolCalls = await store.readToolCalls(target.sessionId);
     const prompts = await store.readPromptTraces(target.sessionId);
     const artifacts = await store.readArtifacts(target.sessionId);
     const agentRuns = await store.listAgentRuns(target.sessionId);
     console.log(JSON.stringify({
       session,
+      workflow_run: productDevQaWorkflow,
       delivery_workflow: deliveryWorkflow,
       execution_workflow: executionWorkflow,
       prompts,
@@ -210,26 +182,8 @@ program
   });
 
 program
-  .command("migrate")
-  .requiredOption("--from <path>", "legacy .agt or .agent-team root")
-  .option("--state-root <path>", "target state root", path.join(process.cwd(), ".agt"))
-  .option("--dry-run", "scan without writing")
-  .option("--apply", "write migrated sessions")
-  .action(async (options: { from: string; stateRoot: string; dryRun?: boolean; apply?: boolean }) => {
-    if (!options.dryRun && !options.apply) {
-      throw new Error("Use --dry-run or --apply.");
-    }
-    const report = await migrateLegacySessions({
-      sourceRoot: path.resolve(options.from),
-      targetStateRoot: path.resolve(options.stateRoot),
-      apply: Boolean(options.apply),
-    });
-    console.log(JSON.stringify(report, null, 2));
-  });
-
-program
   .command("server")
-  .option("--state-root <path>", "state root", path.join(process.cwd(), ".agt"))
+  .option("--state-root <path>", "state root", path.join(process.cwd(), DEFAULT_STATE_DIR))
   .option("--host <host>", "host", "127.0.0.1")
   .option("--port <port>", "port", "8765")
   .action(async (options: { stateRoot: string; host: string; port: string }) => {
@@ -249,27 +203,26 @@ program.parseAsync().catch((error: unknown) => {
 type InitOptions = {
   repoRoot: string;
   stateRoot?: string;
-  defaultProfile: string;
-  defaultModel: string;
+  defaultProfile?: string;
+  defaultModel?: string;
   taskWorktree?: boolean;
-  humanGates?: boolean;
 };
 
-type RunOptions = {
+type DeliverOptions = {
   profile?: string;
   repoRoot: string;
   stateRoot?: string;
   from?: string;
   fromDir?: string;
-  sessionId?: string;
-  continue?: boolean;
   taskWorktree?: boolean;
-  humanGates?: boolean;
 };
 
 type DecisionOptions = {
   decision: string;
-  targetRole?: string;
+  stateRoot: string;
+};
+
+type ApproveOptions = {
   stateRoot: string;
 };
 
@@ -288,8 +241,6 @@ type SessionTarget = {
   workflowId: string;
 };
 
-type AnyRunResult = RunResult;
-type AnySessionStatusSnapshot = SessionStatusSnapshot;
 type RequestInput = { request: string; sources: RequestSourceRecord[] };
 
 type SessionMeta = {
@@ -341,46 +292,17 @@ function parseProfile(value: string): RuntimeProfile {
   throw new Error(`Unsupported profile: ${value}`);
 }
 
-function parseDecision(value: string): "go" | "no-go" | "rework" {
-  if (value === "go" || value === "no-go" || value === "rework") {
+function parseProductDevQaDecision(value: string): "go" | "no-go" {
+  if (value === "go" || value === "no-go") {
     return value;
   }
-  throw new Error(`Unsupported decision: ${value}`);
-}
-
-function parseAgentRole(value: string): AgentRole {
-  const allowed = new Set<AgentRole>([
-    "planner",
-    "repo_scout",
-    "test_scout",
-    "writer",
-    "verifier",
-    "summarizer",
-    "route",
-    "intake_summary",
-    "product",
-    "dev",
-    "qa",
-    "product_definition",
-    "project_runtime",
-    "technical_design",
-    "implementation",
-    "verification",
-    "governance_review",
-    "acceptance",
-    "session_handoff",
-    "migration",
-  ]);
-  if (allowed.has(value as AgentRole)) {
-    return value as AgentRole;
-  }
-  throw new Error(`Unsupported role: ${value}`);
+  throw new Error(`${PRODUCT_DEV_QA_WORKFLOW_ID} supports only go | no-go decisions.`);
 }
 
 async function readRequestInput(
   messageParts: string[],
-  options: Pick<RunOptions, "from" | "fromDir">,
-): Promise<{ request: string; sources: RequestSourceRecord[] }> {
+  options: Pick<DeliverOptions, "from" | "fromDir">,
+): Promise<RequestInput> {
   const message = messageParts.join(" ").trim();
   const sourceBlocks: string[] = [];
   const sources: RequestSourceRecord[] = [];
@@ -413,7 +335,7 @@ async function collectRequestFiles(root: string): Promise<string[]> {
   if (!rootStat.isDirectory()) {
     throw new Error(`--from-dir is not a directory: ${root}`);
   }
-  const ignored = new Set([".git", ".agt", "node_modules", "dist", "build"]);
+  const ignored = new Set([".git", ".agt", ".agt2", "node_modules", "dist", "build"]);
   const files: string[] = [];
   async function visit(dir: string): Promise<void> {
     const entries = await readdir(dir, { withFileTypes: true });
@@ -444,25 +366,6 @@ function sourceRecord(type: RequestSourceRecord["type"], filePath: string, conte
     sha256: createHash("sha256").update(content).digest("hex"),
     bytes: Buffer.byteLength(content, "utf8"),
   };
-}
-
-async function resolveContinuation(sourceStateRoot: string, requestedSessionId?: string): Promise<SessionTarget> {
-  if (requestedSessionId) {
-    return resolveSessionTarget(sourceStateRoot, requestedSessionId);
-  }
-  const index = await readSessionIndex(sourceStateRoot);
-  const entry = index.sessions.find((item) => item.status === "in_progress" || item.status === "waiting_human");
-  if (entry) {
-    return hydrateSessionTarget(entry.state_root, entry.session_id, {
-      repoRoot: entry.worktree_path,
-      workflowId: entry.workflow_id,
-    });
-  }
-  const latest = await latestSessionInStateRoot(sourceStateRoot);
-  if (!latest) {
-    throw new Error("No unfinished session found.");
-  }
-  return latest;
 }
 
 async function resolveSessionTarget(sourceStateRoot: string, requestedSessionId: string): Promise<SessionTarget> {
@@ -511,12 +414,12 @@ async function latestSessionInStateRoot(stateRoot: string): Promise<(SessionTarg
   }
   const sessions = await listLocalSessionMetas(stateRoot);
   const candidates = sessions.map((session) => ({
-      sessionId: session.session_id,
-      repoRoot: session.repo_root,
-      stateRoot: session.state_root,
-      workflowId: session.workflow_id ?? "",
-      updatedAt: session.updated_at,
-    }));
+    sessionId: session.session_id,
+    repoRoot: session.repo_root,
+    stateRoot: session.state_root,
+    workflowId: session.workflow_id ?? "",
+    updatedAt: session.updated_at,
+  }));
   candidates.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   return candidates[0] ?? null;
 }
@@ -548,6 +451,101 @@ async function hydrateSessionTarget(
   }
 
   throw new Error(`Session not found: ${sessionId}`);
+}
+
+async function startProductDevQaDelivery(
+  messageParts: string[],
+  options: DeliverOptions,
+  defaultTaskWorktree: boolean,
+): Promise<RunResult> {
+  const sourceRepoRoot = path.resolve(options.repoRoot);
+  const sourceStateRoot = path.resolve(options.stateRoot ?? path.join(sourceRepoRoot, DEFAULT_STATE_DIR));
+  const requestInput = await readRequestInput(messageParts, options);
+  const request = requestInput.request;
+  if (!request) {
+    throw new Error("agt2 deliver requires a request message, --from, or --from-dir.");
+  }
+
+  return startProductDevQaRun({
+    sourceRepoRoot,
+    sourceStateRoot,
+    request,
+    requestInput,
+    profile: options.profile ? parseProfile(options.profile) : undefined,
+    taskWorktree: options.taskWorktree,
+    defaultTaskWorktree,
+  });
+}
+
+async function startProductDevQaRun(args: {
+  sourceRepoRoot: string;
+  sourceStateRoot: string;
+  request: string;
+  requestInput: RequestInput;
+  profile?: RuntimeProfile;
+  taskWorktree?: boolean;
+  defaultTaskWorktree: boolean;
+}): Promise<RunResult> {
+  const sourceStore = new RuntimeStore(args.sourceStateRoot);
+  const config = await sourceStore.loadConfig();
+  const useTaskWorktree = args.taskWorktree ?? (args.defaultTaskWorktree || config.task_worktree.enabled);
+  let repoRoot = args.sourceRepoRoot;
+  let stateRoot = args.sourceStateRoot;
+  let worktree;
+  if (useTaskWorktree) {
+    const created = await createTaskWorktree({
+      projectRoot: args.sourceRepoRoot,
+      stateRoot: args.sourceStateRoot,
+      request: args.request,
+      config,
+    });
+    repoRoot = created.repoRoot;
+    stateRoot = created.stateRoot;
+    worktree = created.worktree;
+    console.log(`worktree_path: ${repoRoot}`);
+    console.log(`branch: ${worktree.branch}`);
+  }
+
+  const result = await runProductDevQaWorkflow({
+    request: args.request,
+    profile: args.profile ?? config.default_profile,
+    repoRoot,
+    projectRoot: args.sourceRepoRoot,
+    stateRoot,
+    worktree,
+    requestSources: args.requestInput.sources,
+  });
+  if (useTaskWorktree) {
+    await mirrorSessionIndex(args.sourceStateRoot, stateRoot, result.session_id);
+  }
+  return result;
+}
+
+async function approveProductDevQaGate(
+  sessionId: string | undefined,
+  options: ApproveOptions,
+): Promise<RunResult> {
+  const sourceStateRoot = path.resolve(options.stateRoot);
+  const target = sessionId
+    ? await resolveSessionTarget(sourceStateRoot, sessionId)
+    : await resolveLatestSessionTarget(sourceStateRoot);
+  await assertProductDevQaSession(target);
+  const result = await recordProductDevQaHumanDecision({
+    stateRoot: target.stateRoot,
+    sessionId: target.sessionId,
+    decision: "go",
+  });
+  await mirrorSessionIndex(sourceStateRoot, target.stateRoot, result.session_id);
+  return result;
+}
+
+async function assertProductDevQaSession(target: SessionTarget): Promise<void> {
+  const store = new RuntimeStore(target.stateRoot);
+  const productDevQa = target.workflowId === PRODUCT_DEV_QA_WORKFLOW_ID
+    || await isProductDevQaSession(store, target.sessionId).catch(() => false);
+  if (!productDevQa) {
+    throw new Error(`agt2 only supports ${PRODUCT_DEV_QA_WORKFLOW_ID} sessions.`);
+  }
 }
 
 async function mirrorSessionIndex(sourceStateRoot: string, targetStateRoot: string, sessionId: string): Promise<void> {
@@ -583,20 +581,7 @@ async function mirrorSessionIndex(sourceStateRoot: string, targetStateRoot: stri
   await writeSessionIndex(sourceStateRoot, index);
 }
 
-async function runExistingWorkflow(args: {
-  target: SessionTarget;
-  humanGates?: boolean;
-}): Promise<AnyRunResult> {
-  const config = await new RuntimeStore(args.target.stateRoot).loadConfig();
-  return runWorkflow({
-    repoRoot: args.target.repoRoot,
-    stateRoot: args.target.stateRoot,
-    sessionId: args.target.sessionId,
-    humanGates: Boolean(args.humanGates || config.human_gates),
-  });
-}
-
-function printResult(result: AnyRunResult): void {
+function printResult(result: RunResult): void {
   console.log(`session_id: ${result.session_id}`);
   console.log(`profile: ${result.profile}`);
   console.log(`delivery_status: ${result.delivery_status}`);
@@ -616,7 +601,7 @@ async function printStatusOnce(
   store: RuntimeStore,
   sessionId: string,
   options: StatusOptions & { stalledAfterMs: number },
-): Promise<AnySessionStatusSnapshot> {
+): Promise<SessionStatusSnapshot> {
   const snapshot = await readSessionStatus(store, sessionId, { stalledAfterMs: options.stalledAfterMs });
   if (options.json) {
     console.log(JSON.stringify(snapshot, null, 2));
@@ -626,7 +611,7 @@ async function printStatusOnce(
   return snapshot;
 }
 
-function printStatus(snapshot: AnySessionStatusSnapshot): void {
+function printStatus(snapshot: SessionStatusSnapshot): void {
   console.log(`generated_at: ${snapshot.generated_at}`);
   console.log(`session_id: ${snapshot.session_id}`);
   console.log(`profile: ${snapshot.profile}`);
@@ -727,7 +712,7 @@ async function writeSessionIndex(stateRoot: string, index: { schema_version: 1; 
   await writeFile(path.join(stateRoot, "session-index.json"), `${JSON.stringify(index, null, 2)}\n`);
 }
 
-function isWatchableRuntimeStatus(status: AnySessionStatusSnapshot["runtime_status"]): boolean {
+function isWatchableRuntimeStatus(status: SessionStatusSnapshot["runtime_status"]): boolean {
   return status === "running" || status === "stalled" || status === "in_progress";
 }
 
@@ -745,10 +730,10 @@ function sleep(ms: number): Promise<void> {
 
 function formatDuration(ms: number): string {
   const seconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  if (minutes === 0) {
-    return `${remainingSeconds}s`;
+  if (seconds < 60) {
+    return `${seconds}s`;
   }
-  return `${minutes}m${remainingSeconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return `${minutes}m${remainder}s`;
 }

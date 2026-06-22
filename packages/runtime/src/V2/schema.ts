@@ -302,7 +302,7 @@ export const RuntimeConfigSchema = z.object({
   schema_version: z.literal(1),
   default_profile: ProfileSchema.default("full"),
   default_model: z.string().default("gpt-5.4-mini"),
-  state_root: z.string().default(".agt"),
+  state_root: z.string().default(".agt2"),
   max_turns: z
     .object({
       quick: z.number().int().positive().default(4),

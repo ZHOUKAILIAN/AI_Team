@@ -4,7 +4,7 @@
 
 AGT 的目标是把“一个需求应该如何被交付”固化为可配置、可追踪、可审计、可恢复的 workflow：需求进入后，runtime 先让模型生成初始需求摘要，再负责创建隔离执行环境、组织角色、注入 skills、生成每阶段最小上下文包、调用执行器、保存产物和验证证据，最后给出本地是否完成的交付结论。
 
-新的入口是 `agt` CLI。runtime 自己负责 session、两层 workflow、agent run、tool call 和迁移记录；模型执行通过 OpenAI Agents SDK 的 `SandboxAgent` 完成。没有 OpenAI 环境变量时会自动使用 deterministic local fallback，方便测试和离线验证。
+CLI 入口按 runtime 版本分开：`agt` 保留 V1/legacy workflow，`agt2`/`agtv2` 只运行 V2 `product-dev-qa` workflow。runtime 自己负责 session、两层 workflow、agent run、tool call 和迁移记录；模型执行通过 OpenAI Agents SDK 的 `SandboxAgent` 完成。没有 OpenAI 环境变量时会自动使用 deterministic local fallback，方便测试和离线验证。
 
 ## 产品定位
 
@@ -58,7 +58,7 @@ AGT 的稳定边界是：它负责把需求交付过程协议化、状态化和�
 
 ## 当前能力
 
-下面这一节描述的是当前仓库已经实现的 runtime 能力。V1 和 V2 在代码目录上分开，CLI 对外入口保持兼容。
+下面这一节描述的是当前仓库已经实现的 runtime 能力。V1 和 V2 在代码目录和 CLI 入口上都分开：`agt` 对应 V1，`agt2`/`agtv2` 对应 V2。
 
 - `packages/runtime/src/V1/`：保留旧 runtime 能力，包括 `quick`、`investigate`、`full` profile，以及旧 delivery/execution projector。
 - `packages/runtime/src/V2/`：承载新的交付 workflow，目前包含 `product-dev-qa`。
@@ -92,7 +92,7 @@ Runtime package 的导入边界也按版本显式区分：
 - `@agent-team-runtime/runtime/V1`：V1 runtime 的显式入口。
 - `@agent-team-runtime/runtime/V2`：V2 `product-dev-qa` workflow 的显式入口。
 
-V2 命令链路不能从 V1 `RuntimeStore`、V1 config 或 V1 worktree helper 读取状态。CLI 的 `agt deliver`、`agt approve`、`agt run --workflow product-dev-qa`、以及 product-dev-qa session 的 `status/inspect/continue` 都通过 V2 runtime 入口执行；跨 worktree 的 `session-index.json` 只是共享索引文件，不代表 V2 依赖 V1 runtime。
+V2 命令链路不能从 V1 `RuntimeStore`、V1 config 或 V1 worktree helper 读取状态。CLI 的 V2 入口是 `agt2`/`agtv2`，默认状态目录是 `.agt2`；V1 入口 `agt` 默认状态目录仍然是 `.agt`。跨 worktree 的 `session-index.json` 只是同一版本 runtime 内部的索引文件，不代表 V2 依赖 V1 runtime。
 
 ## 安装
 
@@ -112,6 +112,7 @@ npm run build
 
 ```bash
 node packages/cli/dist/index.js --help
+node packages/cli/dist/V2/index.js --help
 node packages/cli/dist/index.js run "整理这个仓库的测试入口"
 ```
 
@@ -147,14 +148,14 @@ agt run "做一个跨模块需求"
 P0 本地交付 workflow：
 
 ```bash
-agt deliver "实现一个需求，完成本地验证报告"
-agt approve
-agt approve
+agt2 deliver "实现一个需求，完成本地验证报告"
+agt2 approve
+agt2 approve
 ```
 
 第一次 `go` 通过 Product 需求合同检查，第二次 `go` 通过 Dev 技术方案检查。Dev 实现完成后会自动进入 QA；QA 失败会直接回到 `dev:implementation` 生成新 attempt。AGT 不会自动 commit、push、merge 或发 PR。
 
-`agt deliver` 是 V2 `product-dev-qa` 的简化入口，默认会为需求创建隔离 worktree。`agt run "..." --workflow product-dev-qa` 也会走 V2 runtime，但仍遵守 `run` 的 worktree 语义：只有显式传 `--task-worktree` 或项目配置启用 task worktree 时才创建 worktree。`agt approve` 等价于对当前最新 V2 session 执行 `go` 决策。
+`agt2 deliver` 是 V2 `product-dev-qa` 的简化入口，默认会为需求创建隔离 worktree。`agt2 run` 是 `deliver` 的别名，但遵守 `run` 的 worktree 语义：只有显式传 `--task-worktree` 或 V2 项目配置启用 task worktree 时才创建 worktree。`agt2 approve` 等价于对当前最新 V2 session 执行 `go` 决策。
 
 常用参数：
 
@@ -162,8 +163,10 @@ agt approve
 agt run "..." --repo-root /path/to/repo --state-root /path/to/repo/.agt
 agt run --from docs/requirement.md --repo-root /path/to/repo
 agt run --from-dir docs/requirement-folder --repo-root /path/to/repo
-agt deliver --from docs/requirement.md
-agt deliver "..." --no-task-worktree
+agt2 deliver --from docs/requirement.md
+agt2 deliver "..." --no-task-worktree
+agt2 status
+agt2 inspect <session_id>
 agt status
 agt status <session_id>
 agt inspect <session_id>
@@ -189,14 +192,14 @@ SDK runner 会创建 `SandboxAgent`，把当前仓库挂载到 sandbox 的 `/wor
 - SDK 返回的 tool-like run item 会落到 `tool-calls.jsonl`。
 - 每次 SDK run 会额外写一个 `<agent_run_id>-sdk-trace.json` artifact，记录 raw response 数量、new item 数量、last response id 和压缩后的 run item 摘要。
 
-默认模型和每个 profile 的最大 turns 可以写在 `.agt/config.json`：
+默认模型和每个 profile 的最大 turns 可以写在 `.agt/config.json`；V2 则写在 `.agt2/config.json`。下面是 V2 示例：
 
 ```json
 {
   "schema_version": 1,
   "default_profile": "full",
   "default_model": "gpt-5.4-mini",
-  "state_root": ".agt",
+  "state_root": ".agt2",
   "max_turns": {
     "quick": 4,
     "investigate": 5,
@@ -209,7 +212,7 @@ SDK runner 会创建 `SandboxAgent`，把当前仓库挂载到 sandbox 的 `/wor
 
 ## 状态目录
 
-默认状态目录是 `<repo>/.agt`：
+V1 默认状态目录是 `<repo>/.agt`，V2 默认状态目录是 `<repo>/.agt2`。V1 目录结构示例：
 
 ```text
 .agt/
@@ -246,8 +249,8 @@ SDK runner 会创建 `SandboxAgent`，把当前仓库挂载到 sandbox 的 `/wor
   session-index.json
 ```
 
-这些文件是 runtime 的事实来源。控制台和 CLI 都从这里读取，不再从模型摘要反推状态。
-`agt init` 也会写入 `.agt/local/worktree-policy.json`，用于记录 task worktree 的默认策略。
+这些文件是 runtime 的事实来源。控制台和 CLI 都从这里读取，不再从模型摘要反推状态。V2 使用同样结构，但根目录是 `.agt2/`。
+`agt init` 会写入 `.agt/local/worktree-policy.json`，`agt2 init` 会写入 `.agt2/local/worktree-policy.json`，用于记录 task worktree 的默认策略。
 
 `delivery-workflow.json` 是外层业务交付状态，面向用户和 CLI 默认展示：`requirement -> development -> verification -> handoff`。它记录每个 phase 的状态、blockers 和 evidence_refs。
 
@@ -307,6 +310,7 @@ migrator 会扫描：
 
 ```bash
 agt server --state-root /path/to/repo/.agt --host 127.0.0.1 --port 8765
+agt2 server --state-root /path/to/repo/.agt2 --host 127.0.0.1 --port 8766
 ```
 
 主要接口：
@@ -339,6 +343,7 @@ CLI smoke：
 
 ```bash
 node packages/cli/dist/index.js run "smoke quick js runtime" --repo-root . --state-root /tmp/agt-js-smoke-state
+node packages/cli/dist/V2/index.js deliver "smoke product dev qa runtime" --repo-root . --state-root /tmp/agt2-js-smoke-state --no-task-worktree
 node packages/cli/dist/index.js migrate --from . --state-root /tmp/agt-js-migrate-state --dry-run
 node packages/cli/dist/index.js server --state-root /tmp/agt-js-smoke-state --host 127.0.0.1 --port 8765
 ```

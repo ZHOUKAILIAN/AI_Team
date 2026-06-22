@@ -266,10 +266,10 @@ flowchart TD
   "role": "dev",
   "attempt": 2,
   "status": "validated",
-  "context_packet_path": ".agt/sessions/.../stages/dev/attempt-002/context-packet.json",
-  "prompt_trace_path": ".agt/sessions/.../stages/dev/attempt-002/prompt.md",
-  "candidate_path": ".agt/sessions/.../stages/dev/attempt-002/candidate.json",
-  "verdict_path": ".agt/sessions/.../stages/dev/attempt-002/verdict.json"
+  "context_packet_path": ".agt2/sessions/.../stages/dev/attempt-002/context-packet.json",
+  "prompt_trace_path": ".agt2/sessions/.../stages/dev/attempt-002/prompt.md",
+  "candidate_path": ".agt2/sessions/.../stages/dev/attempt-002/candidate.json",
+  "verdict_path": ".agt2/sessions/.../stages/dev/attempt-002/verdict.json"
 }
 ```
 
@@ -499,7 +499,7 @@ P0 先不把 skill 注入做成每次执行的细颗粒度产物，而是以项�
 建议 source of truth：
 
 ```text
-.agt/project/skill-manifest.yaml
+.agt2/project/skill-manifest.yaml
 ```
 
 它定义项目默认 workflow，以及每个 role 默认使用哪些 global skill 和项目角色 markdown：
@@ -513,19 +513,19 @@ roles:
       - id: product-core
         source: builtin://roles/product-core
         version: "2026-06-21"
-    project_role_md: .agt/project/roles/product.md
+    project_role_md: .agt2/project/roles/product.md
   dev:
     global_skills:
       - id: dev-core
         source: builtin://roles/dev-core
         version: "2026-06-21"
-    project_role_md: .agt/project/roles/dev.md
+    project_role_md: .agt2/project/roles/dev.md
   qa:
     global_skills:
       - id: qa-core
         source: builtin://roles/qa-core
         version: "2026-06-21"
-    project_role_md: .agt/project/roles/qa.md
+    project_role_md: .agt2/project/roles/qa.md
 ```
 
 这样维护角色能力时，优先改项目级 manifest 和 role markdown，而不是改每次 run 的注入清单。
@@ -535,14 +535,14 @@ roles:
 建议每个 stage 的最终提示输入由四层组成：
 
 1. **项目级 skill manifest**
-   - 例如 `.agt/project/skill-manifest.yaml`，定义本项目每个 role 的默认能力组合。
+   - 例如 `.agt2/project/skill-manifest.yaml`，定义本项目每个 role 的默认能力组合。
 2. **全局角色 skill**
    - 例如 `product`, `dev`, `qa` 的稳定职责定义。
 3. **项目角色 markdown**
-   - 例如 `.agt/project/roles/product.md`
+   - 例如 `.agt2/project/roles/product.md`
    - 用来放该项目重复出现的边界、坑点、约束。
 4. **项目级 workflow contract**
-   - 例如 `.agt/project/workflows/product-dev-qa.yaml`，定义状态机、阶段输入输出和失败回路。
+   - 例如 `.agt2/project/workflows/product-dev-qa.yaml`，定义状态机、阶段输入输出和失败回路。
 5. **runtime 生成的 context packet**
    - 当前任务的最小上下文、输入产物、允许动作、必须输出。
 
@@ -554,19 +554,19 @@ roles:
 {
   "role": "qa",
   "skill_manifest_ref": {
-    "path": ".agt/project/skill-manifest.yaml",
+    "path": ".agt2/project/skill-manifest.yaml",
     "content_sha256": "...",
     "role": "qa"
   },
   "role_context_refs": [
     {
       "kind": "project_role_md",
-      "path": ".agt/project/roles/qa.md",
+      "path": ".agt2/project/roles/qa.md",
       "content_sha256": "..."
     },
     {
       "kind": "workflow_contract",
-      "path": ".agt/project/workflows/product-dev-qa.yaml",
+      "path": ".agt2/project/workflows/product-dev-qa.yaml",
       "selector": "stages.qa",
       "content_sha256": "..."
     }
@@ -579,7 +579,7 @@ roles:
 ### 8.3 建议目录
 
 ```text
-.agt/
+.agt2/
   project/
     skill-manifest.yaml
     roles/
@@ -598,7 +598,7 @@ P0 不做重型 memory 系统，只做轻量 project memory：
 
 - QA 发现某类项目级问题反复发生；
 - runtime 在报告里给出“建议写入角色文件”的条目；
-- 人工确认后，把经验补到 `.agt/project/roles/*.md`。
+- 人工确认后，把经验补到 `.agt2/project/roles/*.md`。
 
 例如：
 
@@ -906,7 +906,7 @@ runtime 负责：
     "artifacts/qa-handoff.md"
   ],
   "skill_manifest_ref": {
-    "path": ".agt/project/skill-manifest.yaml",
+    "path": ".agt2/project/skill-manifest.yaml",
     "content_sha256": "...",
     "role": "qa"
   },
@@ -1051,7 +1051,7 @@ completion:
 - `acceptance_criteria_defined`：验收标准已定义。
 - `qa_focus_defined`：QA 重点验证点已定义，也就是 Product 明确告诉 QA 后续要重点验证哪些边界、运行态或副作用。
 
-这个配置只管流程契约。Dev 的长期行为准则仍然放在 `.agt/project/roles/dev.md`，QA 的深验证习惯仍然放在 `.agt/project/roles/qa.md`。
+这个配置只管流程契约。Dev 的长期行为准则仍然放在 `.agt2/project/roles/dev.md`，QA 的深验证习惯仍然放在 `.agt2/project/roles/qa.md`。
 
 ### 13.2 `ContextPacket`
 
@@ -1071,12 +1071,12 @@ completion:
     "qa-handoff.md"
   ],
   "skill_manifest_ref": {
-    "path": ".agt/project/skill-manifest.yaml",
+    "path": ".agt2/project/skill-manifest.yaml",
     "content_sha256": "...",
     "role": "qa"
   },
   "workflow_contract_ref": {
-    "path": ".agt/project/workflows/product-dev-qa.yaml",
+    "path": ".agt2/project/workflows/product-dev-qa.yaml",
     "content_sha256": "...",
     "stage": "qa"
   },
@@ -1089,10 +1089,10 @@ completion:
 
 ## 14. 目录与落盘布局
 
-建议在当前 `.agt` 基础上收敛到更明确的 session 结构：
+建议在当前 `.agt2` 基础上收敛到更明确的 session 结构：
 
 ```text
-.agt/
+.agt2/
   project/
     skill-manifest.yaml
     roles/
@@ -1181,7 +1181,7 @@ completion:
 如果要支持真正的全环节可审计，建议再补一个统一事件账本：
 
 ```text
-.agt/sessions/<workflow_run_id>/events.jsonl
+.agt2/sessions/<workflow_run_id>/events.jsonl
 ```
 
 每条事件至少包含：
@@ -1302,8 +1302,8 @@ P0 可以先继续复用当前的 OpenAI Agents SDK / local fallback runner，�
 
 ### 第 5 步：补 project role markdown
 
-- 支持 `.agt/project/skill-manifest.yaml`
-- 支持 `.agt/project/roles/*.md`
+- 支持 `.agt2/project/skill-manifest.yaml`
+- 支持 `.agt2/project/roles/*.md`
 - 支持人工把重复问题沉淀进去
 
 ### 第 6 步：补控制台视图

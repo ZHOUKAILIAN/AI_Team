@@ -5,7 +5,9 @@
   "type": "module",
   "description": "Traceable JS agent workflow runtime for software tasks.",
   "bin": {
-    "agt": "packages/cli/dist/index.js"
+    "agt": "packages/cli/dist/index.js",
+    "agt2": "packages/cli/dist/V2/index.js",
+    "agtv2": "packages/cli/dist/V2/index.js"
   },
   "workspaces": [
     "apps/web",
