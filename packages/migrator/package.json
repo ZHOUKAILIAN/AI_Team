@@ -1,6 +1,6 @@
 {
   "name": "@agent-team-runtime/migrator",
-  "version": "0.3.0-alpha.1",
+  "version": "0.3.0-alpha.2",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -10,7 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@agent-team-runtime/runtime": "0.3.0-alpha.1",
+    "@agent-team-runtime/runtime": "0.3.0-alpha.2",
     "zod": "^4.1.12"
   },
   "devDependencies": {

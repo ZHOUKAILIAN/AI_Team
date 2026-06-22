@@ -1,27 +1,36 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { createHash } from "node:crypto";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { migrateLegacySessions } from "@agent-team-runtime/migrator";
 import {
-  createTaskWorktree,
-  initRuntime,
-  isProductDevQaSession,
-  PRODUCT_DEV_QA_WORKFLOW_ID,
-  recordProductDevQaHumanDecision,
   recordHumanDecision,
-  readSessionStatus,
-  runProductDevQaWorkflow,
   runWorkflow,
+  initRuntime,
+  createTaskWorktree,
+  readSessionStatus,
   type AgentRole,
   type RequestSourceRecord,
   type RunResult,
   type RuntimeConfig,
   type SessionStatusSnapshot,
   type RuntimeProfile,
-  RuntimeStore,
-} from "@agent-team-runtime/runtime";
+  RuntimeStore as V1RuntimeStore,
+} from "@agent-team-runtime/runtime/V1";
+import {
+  createTaskWorktree as createV2TaskWorktree,
+  isProductDevQaSession,
+  PRODUCT_DEV_QA_WORKFLOW_ID,
+  recordProductDevQaHumanDecision,
+  readSessionStatus as readV2SessionStatus,
+  runProductDevQaWorkflow,
+  RuntimeStore as V2RuntimeStore,
+  type RunResult as V2RunResult,
+  type RuntimeProfile as V2RuntimeProfile,
+  type SessionStatusSnapshot as V2SessionStatusSnapshot,
+} from "@agent-team-runtime/runtime/V2";
 import { runServer } from "@agent-team-runtime/server";
 
 const program = new Command();
@@ -29,7 +38,7 @@ const program = new Command();
 program
   .name("agt")
   .description("Agent Team Runtime JS CLI")
-  .version("0.3.0-alpha.1");
+  .version("0.3.0-alpha.2");
 
 program
   .command("init")
@@ -86,18 +95,14 @@ program
   .action(async (messageParts: string[], options: RunOptions) => {
     const sourceRepoRoot = path.resolve(options.repoRoot);
     const sourceStateRoot = path.resolve(options.stateRoot ?? path.join(sourceRepoRoot, ".agt"));
-    const sourceStore = new RuntimeStore(sourceStateRoot);
-    const config = await sourceStore.loadConfig();
 
     if (options.continue || options.sessionId) {
-      const target = await resolveContinuation(sourceStore, options.sessionId);
+      const target = await resolveContinuation(sourceStateRoot, options.sessionId);
       const result = await runExistingWorkflow({
-        repoRoot: target.repoRoot,
-        stateRoot: target.stateRoot,
-        sessionId: target.sessionId,
-        humanGates: Boolean(options.humanGates || config.human_gates),
+        target,
+        humanGates: options.humanGates,
       });
-      await mirrorSessionIndex(sourceStore, target.stateRoot, result.session_id);
+      await mirrorSessionIndex(sourceStateRoot, target.stateRoot, result.session_id);
       printResult(result);
       return;
     }
@@ -108,6 +113,23 @@ program
       throw new Error("agt run requires a request message, --from, or --from-dir.");
     }
 
+    const workflowId = options.workflow ? parseWorkflowId(options.workflow) : "";
+    if (workflowId === PRODUCT_DEV_QA_WORKFLOW_ID) {
+      const result = await startProductDevQaRun({
+        sourceRepoRoot,
+        sourceStateRoot,
+        request,
+        requestInput,
+        profile: options.profile ? (parseProfile(options.profile) as V2RuntimeProfile) : undefined,
+        taskWorktree: options.taskWorktree,
+        defaultTaskWorktree: false,
+      });
+      printResult(result);
+      return;
+    }
+
+    const sourceStore = new V1RuntimeStore(sourceStateRoot);
+    const config = await sourceStore.loadConfig();
     const useTaskWorktree = options.taskWorktree || (config.task_worktree.enabled && options.taskWorktree !== false);
     let repoRoot = sourceRepoRoot;
     let stateRoot = sourceStateRoot;
@@ -126,29 +148,18 @@ program
       console.log(`branch: ${worktree.branch}`);
     }
 
-    const workflowId = options.workflow ? parseWorkflowId(options.workflow) : "";
-    const result = workflowId === PRODUCT_DEV_QA_WORKFLOW_ID
-      ? await runProductDevQaWorkflow({
-          request,
-          profile: options.profile ? parseProfile(options.profile) : config.default_profile,
-          repoRoot,
-          projectRoot: sourceRepoRoot,
-          stateRoot,
-          worktree,
-          requestSources: requestInput.sources,
-        })
-      : await runWorkflow({
-          request,
-          profile: options.profile ? parseProfile(options.profile) : config.default_profile,
-          repoRoot,
-          projectRoot: sourceRepoRoot,
-          stateRoot,
-          worktree,
-          requestSources: requestInput.sources,
-          humanGates: Boolean(options.humanGates || config.human_gates),
-        });
+    const result = await runWorkflow({
+      request,
+      profile: options.profile ? parseProfile(options.profile) : config.default_profile,
+      repoRoot,
+      projectRoot: sourceRepoRoot,
+      stateRoot,
+      worktree,
+      requestSources: requestInput.sources,
+      humanGates: Boolean(options.humanGates || config.human_gates),
+    });
     if (useTaskWorktree) {
-      await mirrorSessionIndex(sourceStore, stateRoot, result.session_id);
+      await mirrorSessionIndex(sourceStateRoot, stateRoot, result.session_id);
     }
     printResult(result);
   });
@@ -174,11 +185,9 @@ program
   .option("--target-role <role>", "role to reset to when --decision rework")
   .option("--state-root <path>", "state root", path.join(process.cwd(), ".agt"))
   .action(async (sessionId: string, options: DecisionOptions) => {
-    const sourceStore = new RuntimeStore(path.resolve(options.stateRoot));
-    const target = await resolveSessionStore(sourceStore, sessionId);
-    const targetStore = new RuntimeStore(target.stateRoot);
-    const productDevQa = await isProductDevQaSession(targetStore, target.sessionId);
-    const result = productDevQa
+    const sourceStateRoot = path.resolve(options.stateRoot);
+    const target = await resolveSessionTarget(sourceStateRoot, sessionId);
+    const result = target.workflowId === PRODUCT_DEV_QA_WORKFLOW_ID
       ? await recordProductDevQaHumanDecision({
           stateRoot: target.stateRoot,
           sessionId: target.sessionId,
@@ -190,7 +199,7 @@ program
           decision: parseDecision(options.decision),
           targetRole: options.targetRole ? parseAgentRole(options.targetRole) : undefined,
         });
-    await mirrorSessionIndex(sourceStore, target.stateRoot, result.session_id);
+    await mirrorSessionIndex(sourceStateRoot, target.stateRoot, result.session_id);
     printResult(result);
   });
 
@@ -213,11 +222,11 @@ program
   .option("--stalled-after <seconds>", "mark running agent runs as stalled after this many seconds without heartbeat", "120")
   .option("--json", "print JSON status")
   .action(async (sessionId: string | undefined, options: StatusOptions) => {
-    const store = new RuntimeStore(path.resolve(options.stateRoot));
+    const sourceStateRoot = path.resolve(options.stateRoot);
     const target = sessionId
-      ? await resolveSessionStore(store, sessionId)
-      : await resolveLatestSessionStore(store);
-    const targetStore = new RuntimeStore(target.stateRoot);
+      ? await resolveSessionTarget(sourceStateRoot, sessionId)
+      : await resolveLatestSessionTarget(sourceStateRoot);
+    const targetStore = runtimeStoreForSession(target);
     const intervalMs = parsePositiveSeconds(options.interval, "--interval") * 1000;
     const stalledAfterMs = parsePositiveSeconds(options.stalledAfter, "--stalled-after") * 1000;
     await printStatusOnce(targetStore, target.sessionId, { ...options, stalledAfterMs });
@@ -238,9 +247,8 @@ program
   .argument("<session-id>", "session id")
   .option("--state-root <path>", "state root", path.join(process.cwd(), ".agt"))
   .action(async (sessionId: string, options: { stateRoot: string }) => {
-    const sourceStore = new RuntimeStore(path.resolve(options.stateRoot));
-    const target = await resolveSessionStore(sourceStore, sessionId);
-    const store = new RuntimeStore(target.stateRoot);
+    const target = await resolveSessionTarget(path.resolve(options.stateRoot), sessionId);
+    const store = runtimeStoreForSession(target);
     const session = await store.loadSession(target.sessionId);
     const deliveryWorkflow = await store.loadDeliveryWorkflow(target.sessionId);
     const executionWorkflow = await store.loadExecutionWorkflow(target.sessionId);
@@ -346,6 +354,60 @@ type StatusOptions = {
   interval: string;
   stalledAfter: string;
   json?: boolean;
+};
+
+type SessionTarget = {
+  sessionId: string;
+  repoRoot: string;
+  stateRoot: string;
+  workflowId: string;
+};
+
+type RuntimeStoreLike = V1RuntimeStore | V2RuntimeStore;
+type AnyRunResult = RunResult | V2RunResult;
+type AnySessionStatusSnapshot = SessionStatusSnapshot | V2SessionStatusSnapshot;
+type RequestInput = { request: string; sources: RequestSourceRecord[] };
+
+type SessionMeta = {
+  session_id: string;
+  request: string;
+  workflow_id: string;
+  delivery_status: "in_progress" | "waiting_human" | "blocked" | "done";
+  execution_status: "in_progress" | "waiting_human" | "blocked" | "done";
+  status: "in_progress" | "waiting_human" | "blocked" | "done";
+  current_phase: "requirement" | "development" | "verification" | "handoff";
+  current_stage: string;
+  profile: "quick" | "investigate" | "full";
+  project_root: string;
+  repo_root: string;
+  state_root: string;
+  created_at: string;
+  updated_at: string;
+  worktree?: {
+    branch?: string;
+    base_ref?: string;
+    base_commit?: string;
+  };
+};
+
+type SessionIndexEntry = {
+  session_id: string;
+  request: string;
+  workflow_id: string;
+  delivery_status: SessionMeta["delivery_status"];
+  execution_status: SessionMeta["execution_status"];
+  status: SessionMeta["status"];
+  current_phase: SessionMeta["current_phase"];
+  current_stage: string;
+  profile: SessionMeta["profile"];
+  project_root: string;
+  worktree_path: string;
+  state_root: string;
+  branch: string;
+  base_ref: string;
+  base_commit: string;
+  updated_at: string;
+  created_at: string;
 };
 
 function parseProfile(value: string): RuntimeProfile {
@@ -474,86 +536,152 @@ function sourceRecord(type: RequestSourceRecord["type"], filePath: string, conte
   };
 }
 
-async function resolveContinuation(store: RuntimeStore, requestedSessionId?: string): Promise<{
-  sessionId: string;
-  repoRoot: string;
-  stateRoot: string;
-}> {
+async function resolveContinuation(sourceStateRoot: string, requestedSessionId?: string): Promise<SessionTarget> {
   if (requestedSessionId) {
-    return resolveSessionStore(store, requestedSessionId);
+    return resolveSessionTarget(sourceStateRoot, requestedSessionId);
   }
-  const index = await store.loadSessionIndex();
+  const index = await readSessionIndex(sourceStateRoot);
   const entry = index.sessions.find((item) => item.status === "in_progress" || item.status === "waiting_human");
   if (entry) {
-    return { sessionId: entry.session_id, repoRoot: entry.worktree_path, stateRoot: entry.state_root };
+    return hydrateSessionTarget(entry.state_root, entry.session_id, {
+      repoRoot: entry.worktree_path,
+      workflowId: entry.workflow_id,
+    });
   }
-  const latest = await store.latestSession();
+  const latest = await latestSessionInStateRoot(sourceStateRoot);
   if (!latest) {
     throw new Error("No unfinished session found.");
   }
-  return { sessionId: latest.session_id, repoRoot: latest.repo_root, stateRoot: latest.state_root };
+  return latest;
 }
 
-async function resolveSessionStore(store: RuntimeStore, requestedSessionId: string): Promise<{
-  sessionId: string;
-  repoRoot: string;
-  stateRoot: string;
-}> {
-  try {
-    const session = await store.loadSession(requestedSessionId);
-    return { sessionId: session.session_id, repoRoot: session.repo_root, stateRoot: session.state_root };
-  } catch {
-    const index = await store.loadSessionIndex();
-    const entry = index.sessions.find((item) => item.session_id === requestedSessionId);
-    if (!entry) {
-      throw new Error(`Session not found: ${requestedSessionId}`);
-    }
-    const targetStore = new RuntimeStore(entry.state_root);
-    const session = await targetStore.loadSession(requestedSessionId);
-    return { sessionId: session.session_id, repoRoot: session.repo_root, stateRoot: session.state_root };
+async function resolveSessionTarget(sourceStateRoot: string, requestedSessionId: string): Promise<SessionTarget> {
+  const local = await hydrateSessionTarget(sourceStateRoot, requestedSessionId).catch(() => null);
+  if (local) {
+    return local;
   }
+
+  const index = await readSessionIndex(sourceStateRoot);
+  const entry = index.sessions.find((item) => item.session_id === requestedSessionId);
+  if (!entry) {
+    throw new Error(`Session not found: ${requestedSessionId}`);
+  }
+  return hydrateSessionTarget(entry.state_root, requestedSessionId, {
+    repoRoot: entry.worktree_path,
+    workflowId: entry.workflow_id,
+  });
 }
 
-async function resolveLatestSessionStore(store: RuntimeStore): Promise<{
-  sessionId: string;
-  repoRoot: string;
-  stateRoot: string;
-}> {
-  const latest = await store.latestSession();
-  const index = await store.loadSessionIndex();
+async function resolveLatestSessionTarget(sourceStateRoot: string): Promise<SessionTarget> {
+  const latest = await latestSessionInStateRoot(sourceStateRoot);
+  const index = await readSessionIndex(sourceStateRoot);
   const indexed = index.sessions[0];
-  if (indexed && (!latest || indexed.updated_at.localeCompare(latest.updated_at) >= 0)) {
-    return { sessionId: indexed.session_id, repoRoot: indexed.worktree_path, stateRoot: indexed.state_root };
+  if (indexed && (!latest || indexed.updated_at.localeCompare(latest.updatedAt) >= 0)) {
+    return hydrateSessionTarget(indexed.state_root, indexed.session_id, {
+      repoRoot: indexed.worktree_path,
+      workflowId: indexed.workflow_id,
+    });
   }
   if (latest) {
-    return { sessionId: latest.session_id, repoRoot: latest.repo_root, stateRoot: latest.state_root };
+    return latest;
   }
   throw new Error("No sessions found.");
+}
+
+async function latestSessionInStateRoot(stateRoot: string): Promise<(SessionTarget & { updatedAt: string }) | null> {
+  const index = await readSessionIndex(stateRoot);
+  if (index.sessions.length > 0) {
+    const indexed = index.sessions[0]!;
+    const target = await hydrateSessionTarget(indexed.state_root, indexed.session_id, {
+      repoRoot: indexed.worktree_path,
+      workflowId: indexed.workflow_id,
+      updatedAt: indexed.updated_at,
+    });
+    return { ...target, updatedAt: target.updatedAt ?? indexed.updated_at };
+  }
+  const sessions = await listLocalSessionMetas(stateRoot);
+  const candidates = sessions.map((session) => ({
+      sessionId: session.session_id,
+      repoRoot: session.repo_root,
+      stateRoot: session.state_root,
+      workflowId: session.workflow_id ?? "",
+      updatedAt: session.updated_at,
+    }));
+  candidates.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  return candidates[0] ?? null;
+}
+
+async function hydrateSessionTarget(
+  stateRoot: string,
+  sessionId: string,
+  fallback?: { repoRoot?: string; workflowId?: string; updatedAt?: string },
+): Promise<SessionTarget & { updatedAt?: string }> {
+  const session = await readSessionMeta(stateRoot, sessionId).catch(() => null);
+  if (session) {
+    return {
+      sessionId: session.session_id,
+      repoRoot: session.repo_root,
+      stateRoot: session.state_root,
+      workflowId: session.workflow_id ?? "",
+      updatedAt: session.updated_at,
+    };
+  }
+
+  if (fallback) {
+    return {
+      sessionId,
+      repoRoot: fallback.repoRoot ?? "",
+      stateRoot,
+      workflowId: fallback.workflowId ?? "",
+      updatedAt: fallback.updatedAt,
+    };
+  }
+
+  throw new Error(`Session not found: ${sessionId}`);
 }
 
 async function startProductDevQaDelivery(
   messageParts: string[],
   options: DeliverOptions,
-): Promise<RunResult> {
+): Promise<V2RunResult> {
   const sourceRepoRoot = path.resolve(options.repoRoot);
   const sourceStateRoot = path.resolve(options.stateRoot ?? path.join(sourceRepoRoot, ".agt"));
-  const sourceStore = new RuntimeStore(sourceStateRoot);
-  const config = await sourceStore.loadConfig();
   const requestInput = await readRequestInput(messageParts, options);
   const request = requestInput.request;
   if (!request) {
     throw new Error("agt deliver requires a request message, --from, or --from-dir.");
   }
 
-  const useTaskWorktree = options.taskWorktree !== false;
-  let repoRoot = sourceRepoRoot;
-  let stateRoot = sourceStateRoot;
+  return startProductDevQaRun({
+    sourceRepoRoot,
+    sourceStateRoot,
+    request,
+    requestInput,
+    taskWorktree: options.taskWorktree,
+    defaultTaskWorktree: true,
+  });
+}
+
+async function startProductDevQaRun(args: {
+  sourceRepoRoot: string;
+  sourceStateRoot: string;
+  request: string;
+  requestInput: RequestInput;
+  profile?: V2RuntimeProfile;
+  taskWorktree?: boolean;
+  defaultTaskWorktree: boolean;
+}): Promise<V2RunResult> {
+  const sourceStore = new V2RuntimeStore(args.sourceStateRoot);
+  const config = await sourceStore.loadConfig();
+  const useTaskWorktree = args.taskWorktree ?? (args.defaultTaskWorktree || config.task_worktree.enabled);
+  let repoRoot = args.sourceRepoRoot;
+  let stateRoot = args.sourceStateRoot;
   let worktree;
   if (useTaskWorktree) {
-    const created = await createTaskWorktree({
-      projectRoot: sourceRepoRoot,
-      stateRoot: sourceStateRoot,
-      request,
+    const created = await createV2TaskWorktree({
+      projectRoot: args.sourceRepoRoot,
+      stateRoot: args.sourceStateRoot,
+      request: args.request,
       config,
     });
     repoRoot = created.repoRoot;
@@ -564,16 +692,16 @@ async function startProductDevQaDelivery(
   }
 
   const result = await runProductDevQaWorkflow({
-    request,
-    profile: config.default_profile,
+    request: args.request,
+    profile: args.profile ?? config.default_profile,
     repoRoot,
-    projectRoot: sourceRepoRoot,
+    projectRoot: args.sourceRepoRoot,
     stateRoot,
     worktree,
-    requestSources: requestInput.sources,
+    requestSources: args.requestInput.sources,
   });
   if (useTaskWorktree) {
-    await mirrorSessionIndex(sourceStore, stateRoot, result.session_id);
+    await mirrorSessionIndex(args.sourceStateRoot, stateRoot, result.session_id);
   }
   return result;
 }
@@ -581,12 +709,12 @@ async function startProductDevQaDelivery(
 async function approveProductDevQaGate(
   sessionId: string | undefined,
   options: ApproveOptions,
-): Promise<RunResult> {
-  const sourceStore = new RuntimeStore(path.resolve(options.stateRoot));
+): Promise<V2RunResult> {
+  const sourceStateRoot = path.resolve(options.stateRoot);
   const target = sessionId
-    ? await resolveSessionStore(sourceStore, sessionId)
-    : await resolveLatestSessionStore(sourceStore);
-  const targetStore = new RuntimeStore(target.stateRoot);
+    ? await resolveSessionTarget(sourceStateRoot, sessionId)
+    : await resolveLatestSessionTarget(sourceStateRoot);
+  const targetStore = new V2RuntimeStore(target.stateRoot);
   const productDevQa = await isProductDevQaSession(targetStore, target.sessionId);
   if (!productDevQa) {
     throw new Error("agt approve only supports product-dev-qa sessions. Use `agt decision <session_id> --decision go` for other workflows.");
@@ -596,39 +724,64 @@ async function approveProductDevQaGate(
     sessionId: target.sessionId,
     decision: "go",
   });
-  await mirrorSessionIndex(sourceStore, target.stateRoot, result.session_id);
+  await mirrorSessionIndex(sourceStateRoot, target.stateRoot, result.session_id);
   return result;
 }
 
-async function mirrorSessionIndex(sourceStore: RuntimeStore, targetStateRoot: string, sessionId: string): Promise<void> {
-  const targetStore = new RuntimeStore(targetStateRoot);
-  const session = await targetStore.loadSession(sessionId);
-  await sourceStore.upsertSessionIndex(session);
+async function mirrorSessionIndex(sourceStateRoot: string, targetStateRoot: string, sessionId: string): Promise<void> {
+  const target = await hydrateSessionTarget(targetStateRoot, sessionId);
+  const session = await readSessionMeta(target.stateRoot, target.sessionId);
+  const index = await readSessionIndex(sourceStateRoot);
+  const entry: SessionIndexEntry = {
+    session_id: session.session_id,
+    request: session.request,
+    workflow_id: session.workflow_id ?? "",
+    delivery_status: session.delivery_status,
+    execution_status: session.execution_status,
+    status: session.status,
+    current_phase: session.current_phase,
+    current_stage: session.current_stage,
+    profile: session.profile,
+    project_root: session.project_root || session.repo_root,
+    worktree_path: session.repo_root,
+    state_root: session.state_root,
+    branch: session.worktree?.branch ?? "",
+    base_ref: session.worktree?.base_ref ?? "",
+    base_commit: session.worktree?.base_commit ?? "",
+    created_at: session.created_at,
+    updated_at: session.updated_at,
+  };
+  const existing = index.sessions.findIndex((item) => item.session_id === session.session_id);
+  if (existing >= 0) {
+    index.sessions[existing] = { ...index.sessions[existing], ...entry, created_at: index.sessions[existing].created_at };
+  } else {
+    index.sessions.push(entry);
+  }
+  index.sessions.sort((left, right) => right.updated_at.localeCompare(left.updated_at));
+  await writeSessionIndex(sourceStateRoot, index);
 }
 
 async function runExistingWorkflow(args: {
-  repoRoot: string;
-  stateRoot: string;
-  sessionId: string;
-  humanGates: boolean;
-}): Promise<RunResult> {
-  const store = new RuntimeStore(args.stateRoot);
-  if (await isProductDevQaSession(store, args.sessionId)) {
+  target: SessionTarget;
+  humanGates?: boolean;
+}): Promise<AnyRunResult> {
+  if (args.target.workflowId === PRODUCT_DEV_QA_WORKFLOW_ID) {
     return runProductDevQaWorkflow({
-      repoRoot: args.repoRoot,
-      stateRoot: args.stateRoot,
-      sessionId: args.sessionId,
+      repoRoot: args.target.repoRoot,
+      stateRoot: args.target.stateRoot,
+      sessionId: args.target.sessionId,
     });
   }
+  const config = await new V1RuntimeStore(args.target.stateRoot).loadConfig();
   return runWorkflow({
-    repoRoot: args.repoRoot,
-    stateRoot: args.stateRoot,
-    sessionId: args.sessionId,
-    humanGates: args.humanGates,
+    repoRoot: args.target.repoRoot,
+    stateRoot: args.target.stateRoot,
+    sessionId: args.target.sessionId,
+    humanGates: Boolean(args.humanGates || config.human_gates),
   });
 }
 
-function printResult(result: RunResult): void {
+function printResult(result: AnyRunResult): void {
   console.log(`session_id: ${result.session_id}`);
   console.log(`profile: ${result.profile}`);
   console.log(`delivery_status: ${result.delivery_status}`);
@@ -645,11 +798,13 @@ function printResult(result: RunResult): void {
 }
 
 async function printStatusOnce(
-  store: RuntimeStore,
+  store: RuntimeStoreLike,
   sessionId: string,
   options: StatusOptions & { stalledAfterMs: number },
-): Promise<SessionStatusSnapshot> {
-  const snapshot = await readSessionStatus(store, sessionId, { stalledAfterMs: options.stalledAfterMs });
+): Promise<AnySessionStatusSnapshot> {
+  const snapshot = store instanceof V2RuntimeStore
+    ? await readV2SessionStatus(store, sessionId, { stalledAfterMs: options.stalledAfterMs })
+    : await readSessionStatus(store, sessionId, { stalledAfterMs: options.stalledAfterMs });
   if (options.json) {
     console.log(JSON.stringify(snapshot, null, 2));
   } else {
@@ -658,7 +813,7 @@ async function printStatusOnce(
   return snapshot;
 }
 
-function printStatus(snapshot: SessionStatusSnapshot): void {
+function printStatus(snapshot: AnySessionStatusSnapshot): void {
   console.log(`generated_at: ${snapshot.generated_at}`);
   console.log(`session_id: ${snapshot.session_id}`);
   console.log(`profile: ${snapshot.profile}`);
@@ -725,7 +880,47 @@ function printIndentedValue(label: string, value: string, continuationIndent: st
   }
 }
 
-function isWatchableRuntimeStatus(status: SessionStatusSnapshot["runtime_status"]): boolean {
+function runtimeStoreForSession(target: SessionTarget): RuntimeStoreLike {
+  return target.workflowId === PRODUCT_DEV_QA_WORKFLOW_ID
+    ? new V2RuntimeStore(target.stateRoot)
+    : new V1RuntimeStore(target.stateRoot);
+}
+
+async function readSessionMeta(stateRoot: string, sessionId: string): Promise<SessionMeta> {
+  const sessionPath = path.join(stateRoot, "sessions", sessionId, "session.json");
+  return JSON.parse(await readFile(sessionPath, "utf8")) as SessionMeta;
+}
+
+async function readSessionIndex(stateRoot: string): Promise<{ schema_version: 1; sessions: SessionIndexEntry[] }> {
+  const indexPath = path.join(stateRoot, "session-index.json");
+  if (!existsSync(indexPath)) {
+    return { schema_version: 1, sessions: [] };
+  }
+  return JSON.parse(await readFile(indexPath, "utf8")) as { schema_version: 1; sessions: SessionIndexEntry[] };
+}
+
+async function listLocalSessionMetas(stateRoot: string): Promise<SessionMeta[]> {
+  const sessionsDir = path.join(stateRoot, "sessions");
+  if (!existsSync(sessionsDir)) {
+    return [];
+  }
+  const entries = await readdir(sessionsDir, { withFileTypes: true });
+  const sessions = await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => readSessionMeta(stateRoot, entry.name).catch(() => null)),
+  );
+  return sessions
+    .filter((session): session is SessionMeta => session !== null)
+    .sort((left, right) => right.updated_at.localeCompare(left.updated_at));
+}
+
+async function writeSessionIndex(stateRoot: string, index: { schema_version: 1; sessions: SessionIndexEntry[] }): Promise<void> {
+  await mkdir(stateRoot, { recursive: true });
+  await writeFile(path.join(stateRoot, "session-index.json"), `${JSON.stringify(index, null, 2)}\n`);
+}
+
+function isWatchableRuntimeStatus(status: AnySessionStatusSnapshot["runtime_status"]): boolean {
   return status === "running" || status === "stalled" || status === "in_progress";
 }
 

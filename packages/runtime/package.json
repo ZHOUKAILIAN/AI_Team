@@ -1,9 +1,23 @@
 {
   "name": "@agent-team-runtime/runtime",
-  "version": "0.3.0-alpha.1",
+  "version": "0.3.0-alpha.2",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./V1": {
+      "types": "./dist/V1/index.d.ts",
+      "default": "./dist/V1/index.js"
+    },
+    "./V2": {
+      "types": "./dist/V2/index.d.ts",
+      "default": "./dist/V2/index.js"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

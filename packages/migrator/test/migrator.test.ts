@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { RuntimeStore } from "@agent-team-runtime/runtime";
+import { RuntimeStore } from "@agent-team-runtime/runtime/V1";
 import { migrateLegacySessions } from "../src/index.js";
 
 describe("migrator", () => {

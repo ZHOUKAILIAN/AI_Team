@@ -1,6 +1,6 @@
 {
   "name": "@agent-team-runtime/cli",
-  "version": "0.3.0-alpha.1",
+  "version": "0.3.0-alpha.2",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -12,9 +12,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@agent-team-runtime/migrator": "0.3.0-alpha.1",
-    "@agent-team-runtime/runtime": "0.3.0-alpha.1",
-    "@agent-team-runtime/server": "0.3.0-alpha.1",
+    "@agent-team-runtime/migrator": "0.3.0-alpha.2",
+    "@agent-team-runtime/runtime": "0.3.0-alpha.2",
+    "@agent-team-runtime/server": "0.3.0-alpha.2",
     "commander": "^14.0.2"
   },
   "devDependencies": {
