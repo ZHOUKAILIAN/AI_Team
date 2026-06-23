@@ -16,7 +16,6 @@ import {
   type RequestSourceRecord,
   type RunResult,
   type RuntimeConfig,
-  type RuntimeProfile,
   type SessionStatusSnapshot,
 } from "@agent-team-runtime/runtime/V2";
 import { runServer } from "@agent-team-runtime/server";
@@ -35,7 +34,6 @@ program
   .command("init")
   .option("--repo-root <path>", "repository root", process.cwd())
   .option("--state-root <path>", "state root; defaults to <repo>/.agt2")
-  .option("--default-profile <profile>", "quick | investigate | full")
   .option("--default-model <model>", "OpenAI model")
   .option("--task-worktree", "enable isolated task worktrees by default")
   .action(async (options: InitOptions) => {
@@ -44,9 +42,6 @@ program
     const config: Partial<RuntimeConfig> = {
       state_root: options.stateRoot ?? DEFAULT_STATE_DIR,
     };
-    if (options.defaultProfile) {
-      config.default_profile = parseProfile(options.defaultProfile);
-    }
     if (options.defaultModel) {
       config.default_model = options.defaultModel;
     }
@@ -68,7 +63,6 @@ program
   .command("deliver")
   .argument("[message...]", "task request")
   .description("start a product-dev-qa delivery run with an isolated task worktree by default")
-  .option("--profile <profile>", "quick | investigate | full")
   .option("--repo-root <path>", "repository root", process.cwd())
   .option("--state-root <path>", "state root; defaults to <repo>/.agt2")
   .option("--from <path>", "read request context from a file")
@@ -83,7 +77,6 @@ program
   .command("run")
   .argument("[message...]", "task request")
   .description("alias for deliver; starts product-dev-qa")
-  .option("--profile <profile>", "quick | investigate | full")
   .option("--repo-root <path>", "repository root", process.cwd())
   .option("--state-root <path>", "state root; defaults to <repo>/.agt2")
   .option("--from <path>", "read request context from a file")
@@ -203,13 +196,11 @@ program.parseAsync().catch((error: unknown) => {
 type InitOptions = {
   repoRoot: string;
   stateRoot?: string;
-  defaultProfile?: string;
   defaultModel?: string;
   taskWorktree?: boolean;
 };
 
 type DeliverOptions = {
-  profile?: string;
   repoRoot: string;
   stateRoot?: string;
   from?: string;
@@ -252,7 +243,6 @@ type SessionMeta = {
   status: "in_progress" | "waiting_human" | "blocked" | "done";
   current_phase: "requirement" | "development" | "verification" | "handoff";
   current_stage: string;
-  profile: "quick" | "investigate" | "full";
   project_root: string;
   repo_root: string;
   state_root: string;
@@ -274,7 +264,6 @@ type SessionIndexEntry = {
   status: SessionMeta["status"];
   current_phase: SessionMeta["current_phase"];
   current_stage: string;
-  profile: SessionMeta["profile"];
   project_root: string;
   worktree_path: string;
   state_root: string;
@@ -284,13 +273,6 @@ type SessionIndexEntry = {
   updated_at: string;
   created_at: string;
 };
-
-function parseProfile(value: string): RuntimeProfile {
-  if (value === "quick" || value === "investigate" || value === "full") {
-    return value;
-  }
-  throw new Error(`Unsupported profile: ${value}`);
-}
 
 function parseProductDevQaDecision(value: string): "go" | "no-go" {
   if (value === "go" || value === "no-go") {
@@ -471,7 +453,6 @@ async function startProductDevQaDelivery(
     sourceStateRoot,
     request,
     requestInput,
-    profile: options.profile ? parseProfile(options.profile) : undefined,
     taskWorktree: options.taskWorktree,
     defaultTaskWorktree,
   });
@@ -482,7 +463,6 @@ async function startProductDevQaRun(args: {
   sourceStateRoot: string;
   request: string;
   requestInput: RequestInput;
-  profile?: RuntimeProfile;
   taskWorktree?: boolean;
   defaultTaskWorktree: boolean;
 }): Promise<RunResult> {
@@ -508,7 +488,6 @@ async function startProductDevQaRun(args: {
 
   const result = await runProductDevQaWorkflow({
     request: args.request,
-    profile: args.profile ?? config.default_profile,
     repoRoot,
     projectRoot: args.sourceRepoRoot,
     stateRoot,
@@ -561,7 +540,6 @@ async function mirrorSessionIndex(sourceStateRoot: string, targetStateRoot: stri
     status: session.status,
     current_phase: session.current_phase,
     current_stage: session.current_stage,
-    profile: session.profile,
     project_root: session.project_root || session.repo_root,
     worktree_path: session.repo_root,
     state_root: session.state_root,
@@ -583,7 +561,6 @@ async function mirrorSessionIndex(sourceStateRoot: string, targetStateRoot: stri
 
 function printResult(result: RunResult): void {
   console.log(`session_id: ${result.session_id}`);
-  console.log(`profile: ${result.profile}`);
   console.log(`delivery_status: ${result.delivery_status}`);
   console.log(`current_phase: ${result.current_phase}`);
   console.log(`execution_status: ${result.execution_status}`);
@@ -614,7 +591,6 @@ async function printStatusOnce(
 function printStatus(snapshot: SessionStatusSnapshot): void {
   console.log(`generated_at: ${snapshot.generated_at}`);
   console.log(`session_id: ${snapshot.session_id}`);
-  console.log(`profile: ${snapshot.profile}`);
   console.log(`delivery_status: ${snapshot.delivery_status}`);
   console.log(`current_phase: ${snapshot.current_phase}`);
   console.log("phases:");

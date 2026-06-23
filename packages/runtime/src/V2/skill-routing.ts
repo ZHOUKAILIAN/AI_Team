@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-import { type AgentRole, type RuntimeProfile } from "./schema.js";
+import { type AgentRole } from "./schema.js";
 
 export type ResolvedSkill = {
   name: string;
@@ -21,8 +21,9 @@ export type ResolvedSkill = {
 export type SkillRoutingDecision = {
   config_path: string;
   project_name: string;
+  workflow_id: string;
+  stage: string;
   role: AgentRole;
-  profile: RuntimeProfile;
   matched: boolean;
   selected_skills: ResolvedSkill[];
   missing_skills: string[];
@@ -46,8 +47,9 @@ type RoutingConfig = {
 export async function resolveSkillRouting(args: {
   repoRoot: string;
   projectRoot: string;
+  workflowId: string;
+  stage: string;
   role: AgentRole;
-  profile: RuntimeProfile;
 }): Promise<SkillRoutingDecision> {
   const candidates = await routingConfigCandidates(args.repoRoot, args.projectRoot);
   const reasons: string[] = [];
@@ -61,13 +63,14 @@ export async function resolveSkillRouting(args: {
       reasons.push(`config did not match repo: ${candidate}`);
       continue;
     }
-    const skillRequirements = skillRequirementsForRole(config, args.role);
+    const skillRequirements = skillRequirementsForStage(config, args.stage, args.role);
     const selected = await Promise.all(skillRequirements.map((requirement) => resolveSkill(requirement, config.skillDirs)));
     return {
       config_path: candidate,
       project_name: config.projectName,
+      workflow_id: args.workflowId,
+      stage: args.stage,
       role: args.role,
-      profile: args.profile,
       matched: true,
       selected_skills: selected,
       missing_skills: selected.filter((skill) => !skill.included_in_prompt).map((skill) => skill.name),
@@ -83,8 +86,9 @@ export async function resolveSkillRouting(args: {
   return {
     config_path: "",
     project_name: projectNameFromPath(args.projectRoot || args.repoRoot),
+    workflow_id: args.workflowId,
+    stage: args.stage,
     role: args.role,
-    profile: args.profile,
     matched: false,
     selected_skills: [],
     missing_skills: [],
@@ -95,13 +99,29 @@ export async function resolveSkillRouting(args: {
 
 export function skillRoutingMetadata(decision: SkillRoutingDecision): Record<string, unknown> {
   return {
+    project_name: decision.project_name,
+    workflow_id: decision.workflow_id,
+    stage: decision.stage,
+    role: decision.role,
+    matched: decision.matched,
+    skills: decision.selected_skills
+      .filter((skill) => skill.included_in_prompt)
+      .map((skill) => skill.name),
+    missing_skills: decision.missing_skills,
+    missing_required_skills: decision.missing_required_skills,
+  };
+}
+
+export function skillRoutingAuditMetadata(decision: SkillRoutingDecision): Record<string, unknown> {
+  return {
     config_path: decision.config_path,
     project_name: decision.project_name,
+    workflow_id: decision.workflow_id,
+    stage: decision.stage,
     role: decision.role,
-    profile: decision.profile,
     matched: decision.matched,
     selected_skill_count: decision.selected_skills.length,
-    included_skill_count: decision.selected_skills.filter((skill) => skill.included_in_prompt).length,
+    injected_skill_count: decision.selected_skills.filter((skill) => skill.included_in_prompt).length,
     missing_skills: decision.missing_skills,
     missing_required_skills: decision.missing_required_skills,
     reasons: decision.reasons,
@@ -115,10 +135,9 @@ export function renderSkillInjection(decision: SkillRoutingDecision): string {
   }
   const sections = [
     "# Routed Skills",
-    `Routing config: ${decision.config_path || "not found"}`,
-    `Project: ${decision.project_name}`,
-    `Role: ${decision.role}`,
-    `Selected skills: ${decision.selected_skills.length}`,
+    decision.selected_skills.length
+      ? `Injected skills: ${decision.selected_skills.filter((skill) => skill.included_in_prompt).map((skill) => skill.name).join(", ")}`
+      : "Injected skills: none",
   ];
   if (decision.missing_skills.length) {
     sections.push(`Missing skills: ${decision.missing_skills.join(", ")}`);
@@ -130,10 +149,6 @@ export function renderSkillInjection(decision: SkillRoutingDecision): string {
     sections.push(
       [
         `## Skill: ${skill.name}`,
-        `Required: ${skill.required}`,
-        `Source: ${skill.source}`,
-        `Path: ${skill.path || "not found"}`,
-        `Included in prompt: ${skill.included_in_prompt}`,
         skill.content ? skill.content.trim() : `Skill content was not found: ${skill.reason}`,
       ].join("\n"),
     );
@@ -253,8 +268,8 @@ function configMatchesRepo(config: RoutingConfig, repoRoot: string, projectRoot:
   return config.repoFamily.some((pattern) => roots.some((root) => globMatch(expandHome(pattern), root)));
 }
 
-function skillRequirementsForRole(config: RoutingConfig, role: AgentRole): SkillRequirement[] {
-  const aliases = stageAliases(role);
+function skillRequirementsForStage(config: RoutingConfig, stage: string, role: AgentRole): SkillRequirement[] {
+  const aliases = stageAliases(stage, role);
   const requirements = aliases.flatMap((alias) => config.stageRoutes[alias] ?? []);
   const byName = new Map<string, SkillRequirement>();
   for (const requirement of requirements) {
@@ -300,11 +315,18 @@ async function resolveSkill(requirement: SkillRequirement, skillDirs: string[]):
   };
 }
 
-function stageAliases(role: AgentRole): string[] {
-  const aliases: Partial<Record<AgentRole, string[]>> = {
-    intake_summary: ["intake_summary", "story_intake", "route"],
+function stageAliases(stage: string, role: AgentRole): string[] {
+  const stageSpecific: Record<string, string[]> = {
+    intake_summary: ["intake_summary", "story_intake"],
     product: ["product", "product_definition", "requirement_triage"],
-    dev: ["dev", "technical_design", "implementation", "implementation_planning"],
+    "dev.technical_plan": ["dev.technical_plan", "dev:technical_plan", "technical_design", "implementation_planning"],
+    "dev.implementation": ["dev.implementation", "dev:implementation", "implementation"],
+    qa: ["qa", "verification", "backend_verification"],
+  };
+  const roleFallback: Partial<Record<AgentRole, string[]>> = {
+    intake_summary: ["intake_summary", "story_intake"],
+    product: ["product", "product_definition", "requirement_triage"],
+    dev: ["dev"],
     qa: ["qa", "verification", "backend_verification"],
     verification: ["verification"],
     verifier: ["verifier", "verification"],
@@ -317,7 +339,7 @@ function stageAliases(role: AgentRole): string[] {
     acceptance: ["acceptance"],
     session_handoff: ["session_handoff", "wiki_publish"],
   };
-  return aliases[role] ?? [role];
+  return [...new Set([stage, stage.replace(/\./g, ":"), ...(stageSpecific[stage] ?? roleFallback[role] ?? [role])])];
 }
 
 function projectNameFromPath(value: string): string {

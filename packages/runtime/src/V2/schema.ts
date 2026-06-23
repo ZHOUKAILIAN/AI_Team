@@ -1,8 +1,5 @@
 import { z } from "zod";
 
-export const ProfileSchema = z.enum(["quick", "investigate", "full"]);
-export type RuntimeProfile = z.infer<typeof ProfileSchema>;
-
 export const WorkflowStatusSchema = z.enum(["in_progress", "waiting_human", "blocked", "done"]);
 export type WorkflowStatus = z.infer<typeof WorkflowStatusSchema>;
 
@@ -71,7 +68,6 @@ export const SessionSchema = z.object({
   request: z.string(),
   request_sources: z.array(RequestSourceSchema).default([]),
   workflow_id: z.string().default(""),
-  profile: ProfileSchema,
   delivery_status: WorkflowStatusSchema,
   execution_status: WorkflowStatusSchema,
   status: WorkflowStatusSchema,
@@ -157,7 +153,6 @@ export type ExecutionWorkflowStep = z.infer<typeof ExecutionWorkflowStepSchema>;
 export const ExecutionWorkflowSchema = z.object({
   schema_version: z.literal(1),
   session_id: z.string(),
-  profile: ProfileSchema,
   status: WorkflowStatusSchema,
   current_stage: z.string(),
   steps: z.array(ExecutionWorkflowStepSchema),
@@ -241,12 +236,46 @@ export const ToolCallSchema = z.object({
 });
 export type ToolCallRecord = z.infer<typeof ToolCallSchema>;
 
+export const TokenUsageSchema = z.object({
+  input_tokens: z.number().int().nonnegative().default(0),
+  output_tokens: z.number().int().nonnegative().default(0),
+  total_tokens: z.number().int().nonnegative().default(0),
+  reasoning_tokens: z.number().int().nonnegative().default(0),
+  raw: z.unknown().optional(),
+});
+export type TokenUsage = z.infer<typeof TokenUsageSchema>;
+
+export const MetricRecordSchema = z.object({
+  schema_version: z.literal(1),
+  at: z.string(),
+  session_id: z.string(),
+  workflow_id: z.string(),
+  workflow_run_id: z.string(),
+  kind: z.string(),
+  stage: z.string(),
+  role: AgentRoleSchema,
+  attempt: z.number().int().positive(),
+  stage_started_at: z.string(),
+  stage_completed_at: z.string(),
+  stage_duration_ms: z.number().int().nonnegative(),
+  executor_duration_ms: z.number().int().nonnegative().optional(),
+  runner: z.string().optional(),
+  agent_run_id: z.string().optional(),
+  executor_status: z.string().optional(),
+  verdict: z.string().optional(),
+  files_changed_count: z.number().int().nonnegative().default(0),
+  commands_run_count: z.number().int().nonnegative().default(0),
+  artifacts_count: z.number().int().nonnegative().default(0),
+  token_usage: TokenUsageSchema.optional(),
+  details: z.record(z.string(), z.unknown()).default({}),
+});
+export type MetricRecord = z.infer<typeof MetricRecordSchema>;
+
 export const RunResultSchema = z.object({
   session_id: z.string(),
   status: WorkflowStatusSchema,
   delivery_status: WorkflowStatusSchema,
   execution_status: WorkflowStatusSchema,
-  profile: ProfileSchema,
   state_root: z.string(),
   session_dir: z.string(),
   repo_root: z.string(),
@@ -300,19 +329,14 @@ export type ProductDevQaWorkflowRunRecord = z.infer<typeof ProductDevQaWorkflowR
 
 export const RuntimeConfigSchema = z.object({
   schema_version: z.literal(1),
-  default_profile: ProfileSchema.default("full"),
   default_model: z.string().default("gpt-5.4-mini"),
   state_root: z.string().default(".agt2"),
-  max_turns: z
+  executor: z
     .object({
-      quick: z.number().int().positive().default(4),
-      investigate: z.number().int().positive().default(5),
-      full: z.number().int().positive().default(8),
+      default_max_turns: z.number().int().positive().default(8),
     })
     .default({
-      quick: 4,
-      investigate: 5,
-      full: 8,
+      default_max_turns: 8,
     }),
   task_worktree: z
     .object({
@@ -351,7 +375,6 @@ export const SessionIndexEntrySchema = z.object({
   status: WorkflowStatusSchema,
   current_phase: DeliveryPhaseSchema,
   current_stage: z.string(),
-  profile: ProfileSchema,
   project_root: z.string(),
   worktree_path: z.string(),
   state_root: z.string(),
