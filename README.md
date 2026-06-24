@@ -192,23 +192,20 @@ SDK runner 会创建 `SandboxAgent`，把当前仓库挂载到 sandbox 的 `/wor
 - SDK 返回的 tool-like run item 会落到 `tool-calls.jsonl`。
 - 每次 SDK run 会额外写一个 `<agent_run_id>-sdk-trace.json` artifact，记录 raw response 数量、new item 数量、last response id 和压缩后的 run item 摘要。
 
-默认模型和每个 profile 的最大 turns 可以写在 `.agt/config.json`；V2 则写在 `.agt2/config.json`。下面是 V2 示例：
+V1 的默认模型和每个 profile 的最大 turns 可以写在 `.agt/config.json`。V2 不再使用 profile，`.agt2/config.json` 只保留模型、executor 默认参数和 task worktree 策略。下面是 V2 示例：
 
 ```json
 {
   "schema_version": 1,
-  "default_profile": "full",
   "default_model": "gpt-5.4-mini",
   "state_root": ".agt2",
-  "max_turns": {
-    "quick": 4,
-    "investigate": 5,
-    "full": 8
+  "executor": {
+    "default_max_turns": 8
   }
 }
 ```
 
-如果没有 OpenAI 环境变量，runtime 会走 `local_fallback`，只执行确定性的本地检查并写入同样的状态文件。这样 `npm test`、CLI smoke 和迁移验证不依赖外部模型。
+V2 executor 优先读取 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`AGT_OPENAI_MODEL` / `OPENAI_MODEL`。如果这些环境变量没有设置，会尝试读取 `~/.codex/config.toml` 的 `model` / `model_provider` / provider `base_url`，以及 `~/.codex/auth.json` 的 `OPENAI_API_KEY`。环境变量和 Codex 配置都不可用时，runtime 才会走 `local_fallback`，只执行确定性的本地检查并写入同样的状态文件。这样 `npm test`、CLI smoke 和迁移验证不依赖外部模型。
 
 ## 状态目录
 
@@ -254,7 +251,7 @@ V1 默认状态目录是 `<repo>/.agt`，V2 默认状态目录是 `<repo>/.agt2`
 
 `delivery-workflow.json` 是外层业务交付状态，面向用户和 CLI 默认展示：`requirement -> development -> verification -> handoff`。它记录每个 phase 的状态、blockers 和 evidence_refs。
 
-`execution-workflow.json` 是 AGT 内部执行状态，面向调试和追踪：不同 profile 会展开成 `quick`、`investigate` 或 `full` 的执行 steps。execution 的变化会通过 runtime projector 更新 delivery；delivery 不会反向改 execution。
+`execution-workflow.json` 是 AGT 内部执行状态，面向调试和追踪。V1 会按 profile 展开 steps；V2 `product-dev-qa` 固定展开为 `intake_summary -> product -> dev.technical_plan -> dev.implementation -> qa`。execution 的变化会通过 runtime projector 更新 delivery；delivery 不会反向改 execution。
 
 `product-dev-qa` workflow 的外层循环以 `workflow-run.json` 为准。人主要看这个文件里的 `status`、`current_role`、`current_step` 和 `waiting_on`；`stages/*/attempt-*` 用于审计和调试阶段输入、prompt、候选输出、verdict 与 executor run。
 

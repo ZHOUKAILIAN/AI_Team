@@ -1,6 +1,12 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import {
+  createDefaultV2HookManager,
+  type V2ExecutorHookContext,
+  type V2HookManager,
+  type V2StageHookContext,
+} from "./hooks.js";
 import { buildAgentRunner, type AgentRunner, type AgentTaskResult } from "./runner.js";
 import {
   type AgentRole,
@@ -14,13 +20,20 @@ import {
   type ProductDevQaWorkflowRunRecord,
   type RequestSourceRecord,
   type RunResult,
-  type RuntimeProfile,
+  type TokenUsage,
   type WorkflowStatus,
   type WorktreeRecord,
   nowIso,
 } from "./schema.js";
-import { renderSkillInjection, resolveSkillRouting, skillRoutingMetadata } from "./skill-routing.js";
+import {
+  renderSkillInjection,
+  resolveSkillRouting,
+  skillsForExecutor,
+  skillRoutingAuditMetadata,
+  skillRoutingMetadata,
+} from "./skill-routing.js";
 import { RuntimeStore, writeJson } from "./store.js";
+import { emptyTokenUsage } from "./usage.js";
 
 export const PRODUCT_DEV_QA_WORKFLOW_ID = "product-dev-qa" as const;
 
@@ -41,6 +54,33 @@ type ProductDevQaStagePlan = {
   requiredInputs: string[];
   requiredOutputs: string[];
   requiredEvidence: string[];
+  executor: {
+    maxTurns: number;
+  };
+};
+
+type StageExecutionOutcome = {
+  verdict: StageVerdict;
+  output: string;
+  agentRun: AgentRunRecord;
+  filesChanged: string[];
+  commandsRun: string[];
+  tokenUsage: TokenUsage;
+  promptTraceId: string;
+  artifactPaths: string[];
+  artifactNames: string[];
+  summary: string;
+  reason: string;
+  repoRoot: string;
+  projectRoot: string;
+  promptPath: string;
+  contextPacketPath: string;
+  skillRouting: Record<string, unknown>;
+  stageStartedAt: string;
+  stageStartedAtIso: string;
+  executorStartedAt: string;
+  executorCompletedAt: string;
+  executorDurationMs: number;
 };
 
 export type RunProductDevQaWorkflowOptions = {
@@ -49,7 +89,6 @@ export type RunProductDevQaWorkflowOptions = {
   stateRoot?: string;
   request?: string;
   sessionId?: string;
-  profile?: RuntimeProfile;
   worktree?: WorktreeRecord;
   requestSources?: RequestSourceRecord[];
   runner?: AgentRunner;
@@ -78,6 +117,7 @@ const STAGES: Record<StageKey, ProductDevQaStagePlan> = {
     requiredInputs: [],
     requiredOutputs: ["request-summary.md"],
     requiredEvidence: ["request_summary_generated"],
+    executor: { maxTurns: 3 },
   },
   product: {
     key: "product",
@@ -92,6 +132,7 @@ const STAGES: Record<StageKey, ProductDevQaStagePlan> = {
     requiredInputs: ["request-summary.md"],
     requiredOutputs: ["product-contract.md", "product-handoff.md"],
     requiredEvidence: ["scope_defined", "acceptance_criteria_defined", "qa_focus_defined"],
+    executor: { maxTurns: 5 },
   },
   "dev.technical_plan": {
     key: "dev.technical_plan",
@@ -106,6 +147,7 @@ const STAGES: Record<StageKey, ProductDevQaStagePlan> = {
     requiredInputs: ["request-summary.md", "product-contract.md", "product-handoff.md"],
     requiredOutputs: ["technical-plan.md"],
     requiredEvidence: ["implementation_plan_defined", "test_strategy_defined", "implementation_ambiguities_declared"],
+    executor: { maxTurns: 5 },
   },
   "dev.implementation": {
     key: "dev.implementation",
@@ -125,6 +167,7 @@ const STAGES: Record<StageKey, ProductDevQaStagePlan> = {
       "qa-handoff.md",
     ],
     requiredEvidence: ["code_changed", "self_tests_recorded", "implementation_ambiguities_declared"],
+    executor: { maxTurns: 8 },
   },
   qa: {
     key: "qa",
@@ -148,6 +191,7 @@ const STAGES: Record<StageKey, ProductDevQaStagePlan> = {
     ],
     requiredOutputs: ["qa-report.md", "verification-evidence.json"],
     requiredEvidence: ["independent_verification", "unverified_items_declared"],
+    executor: { maxTurns: 6 },
   },
 };
 
@@ -167,7 +211,6 @@ export async function runProductDevQaWorkflow(options: RunProductDevQaWorkflowOp
     ? await store.loadSession(options.sessionId)
     : await store.createSession({
         request: requiredRequest(options.request),
-        profile: options.profile ?? "full",
         repoRoot,
         projectRoot: options.projectRoot,
         workflowId: PRODUCT_DEV_QA_WORKFLOW_ID,
@@ -176,6 +219,7 @@ export async function runProductDevQaWorkflow(options: RunProductDevQaWorkflowOp
       });
   const workflow = await ensureProductDevQaWorkflow(store, session.session_id);
   const runner = options.runner ?? buildAgentRunner(store);
+  const hooks = createDefaultV2HookManager(store);
   let current = workflow;
 
   while (true) {
@@ -191,25 +235,37 @@ export async function runProductDevQaWorkflow(options: RunProductDevQaWorkflowOp
     }
 
     const running = await markStageRunning(store, current, stage);
-    const outcome = await executeStage({
-      store,
-      sessionId: session.session_id,
-      repoRoot: session.repo_root,
-      projectRoot: session.project_root || session.repo_root,
-      profile: session.profile,
-      request: session.request,
-      workflow: running.workflow,
-      stage,
-      attemptNumber: running.attemptNumber,
-      runner,
-    });
-    current = await transitionAfterStage({
-      store,
-      workflow: running.workflow,
-      stage,
-      outcome,
-      maxQaFailureLoops: options.maxQaFailureLoops ?? 3,
-    });
+    try {
+      const outcome = await executeStage({
+        store,
+        sessionId: session.session_id,
+        repoRoot: session.repo_root,
+        projectRoot: session.project_root || session.repo_root,
+        request: session.request,
+        workflow: running.workflow,
+        stage,
+        attemptNumber: running.attemptNumber,
+        runner,
+        hooks,
+      });
+      current = await transitionAfterStage({
+        store,
+        workflow: running.workflow,
+        stage,
+        outcome,
+        maxQaFailureLoops: options.maxQaFailureLoops ?? 3,
+        hooks,
+      });
+    } catch (error) {
+      current = await blockStageRuntimeError({
+        store,
+        workflow: running.workflow,
+        stage,
+        attemptNumber: running.attemptNumber,
+        runner,
+        error,
+      });
+    }
   }
 }
 
@@ -317,7 +373,7 @@ async function ensureProductDevQaWorkflow(
     updated_at: now,
     completed_at: null,
   };
-  await ensureProductDevQaExecutionWorkflow(store, sessionId, session.profile, now);
+  await ensureProductDevQaExecutionWorkflow(store, sessionId, now);
   await writeAndSyncWorkflow(store, workflow);
   return workflow;
 }
@@ -325,7 +381,6 @@ async function ensureProductDevQaWorkflow(
 async function ensureProductDevQaExecutionWorkflow(
   store: RuntimeStore,
   sessionId: string,
-  profile: RuntimeProfile,
   updatedAt: string,
 ): Promise<ExecutionWorkflowRecord> {
   const existing = await store.loadExecutionWorkflow(sessionId);
@@ -334,7 +389,6 @@ async function ensureProductDevQaExecutionWorkflow(
   }
   return store.updateExecutionWorkflow(sessionId, (workflow) => ({
     ...workflow,
-    profile,
     status: "in_progress",
     current_stage: "created",
     steps: EXECUTION_STAGE_ORDER.map((key) => ({
@@ -387,15 +441,6 @@ async function markStageRunning(
   }, stage);
   await setExecutionStageStatus(store, running, stage, "running", {});
   await writeAndSyncWorkflow(store, running);
-  await store.appendEvent({
-    at: now,
-    session_id: workflow.session_id,
-    kind: "product_dev_qa_stage_started",
-    role: stage.role,
-    status: "running",
-    message: `${stage.currentStage} attempt ${attemptNumber} started.`,
-    details: { workflow_id: PRODUCT_DEV_QA_WORKFLOW_ID, stage: stage.key, attempt: attemptNumber },
-  });
   return { workflow: running, attemptNumber };
 }
 
@@ -404,35 +449,54 @@ async function executeStage(args: {
   sessionId: string;
   repoRoot: string;
   projectRoot: string;
-  profile: RuntimeProfile;
   request: string;
   workflow: ProductDevQaWorkflowRunRecord;
   stage: ProductDevQaStagePlan;
   attemptNumber: number;
   runner: AgentRunner;
-}): Promise<{
-  verdict: StageVerdict;
-  output: string;
-  agentRun: AgentRunRecord;
-  filesChanged: string[];
-  commandsRun: string[];
-  promptTraceId: string;
-  artifactPaths: string[];
-  artifactNames: string[];
-  summary: string;
-  reason: string;
-}> {
+  hooks: V2HookManager;
+}): Promise<StageExecutionOutcome> {
   const attemptDir = stageAttemptDir(args.store, args.sessionId, args.stage, args.attemptNumber);
   await mkdir(attemptDir, { recursive: true });
   await writeJson(path.join(attemptDir, "pre-state.json"), args.workflow);
-
-  const artifactInputs = await readInputArtifacts(args.store, args.sessionId, args.stage.requiredInputs);
-  const routing = await resolveSkillRouting({
+  const stageStartedAtIso = args.workflow.updated_at;
+  const stageStartedAt = dateOnly(stageStartedAtIso);
+  const stageCtx: V2StageHookContext = {
+    sessionId: args.sessionId,
+    workflowId: PRODUCT_DEV_QA_WORKFLOW_ID,
+    workflowRunId: args.workflow.workflow_run_id,
+    stage: args.stage.key,
+    role: args.stage.role,
+    attempt: args.attemptNumber,
     repoRoot: args.repoRoot,
     projectRoot: args.projectRoot,
-    role: args.stage.role,
-    profile: args.profile,
-  });
+    stateRoot: args.store.stateRoot,
+    stageStartedAt,
+    inputArtifacts: args.stage.requiredInputs,
+    requiredOutputs: args.stage.requiredOutputs,
+    requiredEvidence: args.stage.requiredEvidence,
+  };
+  try {
+    await args.hooks.beforeStage(stageCtx);
+  } catch (error) {
+    await notifyStageError(args.hooks, stageCtx, "before_stage", error);
+  }
+
+  let artifactInputs: Awaited<ReturnType<typeof readInputArtifacts>>;
+  let routing: Awaited<ReturnType<typeof resolveSkillRouting>>;
+  try {
+    artifactInputs = await readInputArtifacts(args.store, args.sessionId, args.stage.requiredInputs);
+    routing = await resolveSkillRouting({
+      repoRoot: args.repoRoot,
+      projectRoot: args.projectRoot,
+      workflowId: PRODUCT_DEV_QA_WORKFLOW_ID,
+      stage: args.stage.key,
+      role: args.stage.role,
+    });
+  } catch (error) {
+    await notifyStageError(args.hooks, stageCtx, "prepare_context", error);
+    throw error;
+  }
   const contextPacket = {
     schema_version: 1,
     workflow_run_id: args.workflow.workflow_run_id,
@@ -452,7 +516,9 @@ async function executeStage(args: {
     },
     skill_routing: skillRoutingMetadata(routing),
   };
-  await writeJson(path.join(attemptDir, "context-packet.json"), contextPacket);
+  const contextPacketPath = path.join(attemptDir, "context-packet.json");
+  await writeJson(contextPacketPath, contextPacket);
+  await writeJson(path.join(attemptDir, "skill-routing.json"), skillRoutingAuditMetadata(routing));
 
   const prompt = renderStagePrompt({
     request: args.request,
@@ -473,11 +539,31 @@ async function executeStage(args: {
       step: args.stage.currentStep ?? "",
       attempt: args.attemptNumber,
       write_allowed: args.stage.canWriteCode,
-      skill_routing: skillRoutingMetadata(routing),
+      skill_routing: skillRoutingAuditMetadata(routing),
     },
   });
-  await writeFile(path.join(attemptDir, "prompt.md"), prompt);
+  const promptPath = path.join(attemptDir, "prompt.md");
+  await writeFile(promptPath, prompt);
   await writeJson(path.join(attemptDir, "prompt.meta.json"), trace);
+
+  const executorStartedAt = nowIso();
+  const executorStartedMs = Date.now();
+  const executorCtx: V2ExecutorHookContext = {
+    ...stageCtx,
+    executorStartedAt,
+    runner: args.runner.name,
+    maxTurns: args.stage.executor.maxTurns,
+    writeAllowed: args.stage.canWriteCode,
+    promptTraceId: trace.prompt_id,
+    promptPath,
+    contextPacketPath,
+    skillRouting: skillRoutingMetadata(routing),
+  };
+  try {
+    await args.hooks.beforeExecutor(executorCtx);
+  } catch (error) {
+    await notifyStageError(args.hooks, stageCtx, "before_executor", error);
+  }
 
   let result: AgentTaskResult;
   if (routing.missing_required_skills.length > 0) {
@@ -502,20 +588,45 @@ async function executeStage(args: {
         missing_required_skills: routing.missing_required_skills,
       },
     });
-    result = { agentRun: completed, output: completed.output, filesChanged: [], commandsRun: [] };
+    result = {
+      agentRun: completed,
+      output: completed.output,
+      filesChanged: [],
+      commandsRun: [],
+      tokenUsage: emptyTokenUsage(),
+    };
   } else {
     result = await runStageSafely({
       store: args.store,
       runner: args.runner,
       sessionId: args.sessionId,
       role: args.stage.role,
-      profile: args.profile,
       repoRoot: args.repoRoot,
       prompt,
+      skills: skillsForExecutor(routing),
       writeAllowed: args.stage.canWriteCode,
+      maxTurns: args.stage.executor.maxTurns,
       traceId: trace.prompt_id,
       stageKey: args.stage.key,
+      stageCtx,
+      hooks: args.hooks,
     });
+  }
+  const executorCompletedAt = nowIso();
+  const executorDurationMs = Date.now() - executorStartedMs;
+  try {
+    await args.hooks.afterExecutor({
+      ...executorCtx,
+      executorCompletedAt,
+      executorDurationMs,
+      agentRunId: result.agentRun.agent_run_id,
+      executorStatus: result.agentRun.status,
+      filesChanged: result.filesChanged,
+      commandsRun: result.commandsRun,
+      tokenUsage: result.tokenUsage,
+    });
+  } catch (error) {
+    await notifyStageError(args.hooks, stageCtx, "after_executor", error);
   }
 
   const baseVerdict: StageVerdict =
@@ -526,28 +637,32 @@ async function executeStage(args: {
       : "blocked";
   const artifactRecords = [];
   if (baseVerdict !== "blocked") {
-    for (const name of args.stage.requiredOutputs) {
-      artifactRecords.push(await args.store.writeArtifact({
-        sessionId: args.sessionId,
-        role: args.stage.role,
-        name,
-        content: renderOutputArtifact({
+    try {
+      for (const name of args.stage.requiredOutputs) {
+        artifactRecords.push(await args.store.writeArtifact({
+          sessionId: args.sessionId,
+          role: args.stage.role,
           name,
-          stage: args.stage,
-          verdict: baseVerdict,
-          output: result.output,
-          filesChanged: result.filesChanged,
-          commandsRun: result.commandsRun,
-        }),
-        metadata: {
-          workflow_id: PRODUCT_DEV_QA_WORKFLOW_ID,
-          stage: args.stage.key,
-          attempt: args.attemptNumber,
-          agent_run_id: result.agentRun.agent_run_id,
-          prompt_trace_id: trace.prompt_id,
-          verdict: baseVerdict,
-        },
-      }));
+          content: renderOutputArtifact({
+            name,
+            stage: args.stage,
+            verdict: baseVerdict,
+            output: result.output,
+            filesChanged: result.filesChanged,
+            commandsRun: result.commandsRun,
+          }),
+          metadata: {
+            workflow_id: PRODUCT_DEV_QA_WORKFLOW_ID,
+            stage: args.stage.key,
+            attempt: args.attemptNumber,
+            agent_run_id: result.agentRun.agent_run_id,
+            prompt_trace_id: trace.prompt_id,
+            verdict: baseVerdict,
+          },
+        }));
+      }
+    } catch (error) {
+      await notifyStageError(args.hooks, stageCtx, "write_artifacts", error);
     }
   }
   const artifactNames = artifactRecords.map((artifact) => artifact.name);
@@ -559,34 +674,44 @@ async function executeStage(args: {
       ? result.output || result.agentRun.error || `${args.stage.currentStage} blocked.`
       : "";
 
-  await writeJson(path.join(attemptDir, "candidate.json"), {
-    schema_version: 1,
-    stage: args.stage.key,
-    attempt: args.attemptNumber,
-    output: result.output,
-    files_changed: result.filesChanged,
-    commands_run: result.commandsRun,
-    artifact_names: artifactNames,
-    artifact_paths: artifactPaths,
-  });
-  await writeJson(path.join(attemptDir, "verdict.json"), {
-    schema_version: 1,
-    stage: args.stage.key,
-    attempt: args.attemptNumber,
-    verdict: baseVerdict,
-    reason,
-    required_outputs: args.stage.requiredOutputs,
-    produced_artifacts: artifactNames,
-    evidence_refs: {
-      prompt_trace_id: trace.prompt_id,
-      agent_run_id: result.agentRun.agent_run_id,
-    },
-  });
-  await writeJson(path.join(attemptDir, "executor-run.json"), {
-    agent_run: result.agentRun,
-    files_changed: result.filesChanged,
-    commands_run: result.commandsRun,
-  });
+  try {
+    await writeJson(path.join(attemptDir, "candidate.json"), {
+      schema_version: 1,
+      stage: args.stage.key,
+      attempt: args.attemptNumber,
+      output: result.output,
+      files_changed: result.filesChanged,
+      commands_run: result.commandsRun,
+      token_usage: result.tokenUsage,
+      artifact_names: artifactNames,
+      artifact_paths: artifactPaths,
+    });
+    await writeJson(path.join(attemptDir, "verdict.json"), {
+      schema_version: 1,
+      stage: args.stage.key,
+      attempt: args.attemptNumber,
+      verdict: baseVerdict,
+      reason,
+      required_outputs: args.stage.requiredOutputs,
+      produced_artifacts: artifactNames,
+      evidence_refs: {
+        prompt_trace_id: trace.prompt_id,
+        agent_run_id: result.agentRun.agent_run_id,
+      },
+      token_usage: result.tokenUsage,
+    });
+    await writeJson(path.join(attemptDir, "executor-run.json"), {
+      agent_run: result.agentRun,
+      files_changed: result.filesChanged,
+      commands_run: result.commandsRun,
+      token_usage: result.tokenUsage,
+      executor_started_at: executorStartedAt,
+      executor_completed_at: executorCompletedAt,
+      executor_duration_ms: executorDurationMs,
+    });
+  } catch (error) {
+    await notifyStageError(args.hooks, stageCtx, "write_artifacts", error);
+  }
 
   return {
     verdict: baseVerdict,
@@ -594,11 +719,22 @@ async function executeStage(args: {
     agentRun: result.agentRun,
     filesChanged: result.filesChanged,
     commandsRun: result.commandsRun,
+    tokenUsage: result.tokenUsage,
     promptTraceId: trace.prompt_id,
     artifactPaths,
     artifactNames,
     summary,
     reason,
+    repoRoot: args.repoRoot,
+    projectRoot: args.projectRoot,
+    promptPath,
+    contextPacketPath,
+    skillRouting: skillRoutingMetadata(routing),
+    stageStartedAt,
+    stageStartedAtIso,
+    executorStartedAt,
+    executorCompletedAt,
+    executorDurationMs,
   };
 }
 
@@ -606,18 +742,9 @@ async function transitionAfterStage(args: {
   store: RuntimeStore;
   workflow: ProductDevQaWorkflowRunRecord;
   stage: ProductDevQaStagePlan;
-  outcome: {
-    verdict: StageVerdict;
-    agentRun: AgentRunRecord;
-    filesChanged: string[];
-    commandsRun: string[];
-    promptTraceId: string;
-    artifactPaths: string[];
-    artifactNames: string[];
-    summary: string;
-    reason: string;
-  };
+  outcome: StageExecutionOutcome;
   maxQaFailureLoops: number;
+  hooks: V2HookManager;
 }): Promise<ProductDevQaWorkflowRunRecord> {
   const now = nowIso();
   await setExecutionStageStatus(args.store, args.workflow, args.stage, args.outcome.verdict === "blocked" ? "blocked" : "completed", {
@@ -736,21 +863,144 @@ async function transitionAfterStage(args: {
   await writeAndSyncWorkflow(args.store, next);
   const attemptDir = stageAttemptDir(args.store, args.workflow.session_id, args.stage, args.workflow.stage_attempt_counts[args.stage.key] ?? 1);
   await writeJson(path.join(attemptDir, "post-state.json"), next);
+  try {
+    await args.hooks.afterStage({
+      sessionId: args.workflow.session_id,
+      workflowId: PRODUCT_DEV_QA_WORKFLOW_ID,
+      workflowRunId: args.workflow.workflow_run_id,
+      stage: args.stage.key,
+      role: args.stage.role,
+      attempt: args.workflow.stage_attempt_counts[args.stage.key] ?? 1,
+      repoRoot: args.outcome.repoRoot,
+      projectRoot: args.outcome.projectRoot,
+      stateRoot: args.store.stateRoot,
+      stageStartedAt: args.outcome.stageStartedAt,
+      inputArtifacts: args.stage.requiredInputs,
+      requiredOutputs: args.stage.requiredOutputs,
+      requiredEvidence: args.stage.requiredEvidence,
+      executorStartedAt: args.outcome.executorStartedAt,
+      runner: args.outcome.agentRun.runner,
+      maxTurns: args.stage.executor.maxTurns,
+      writeAllowed: args.stage.canWriteCode,
+      promptTraceId: args.outcome.promptTraceId,
+      promptPath: args.outcome.promptPath,
+      contextPacketPath: args.outcome.contextPacketPath,
+      skillRouting: args.outcome.skillRouting,
+      executorCompletedAt: args.outcome.executorCompletedAt,
+      executorDurationMs: args.outcome.executorDurationMs,
+      agentRunId: args.outcome.agentRun.agent_run_id,
+      executorStatus: args.outcome.agentRun.status,
+      filesChanged: args.outcome.filesChanged,
+      commandsRun: args.outcome.commandsRun,
+      tokenUsage: args.outcome.tokenUsage,
+      stageCompletedAt: now,
+      stageDurationMs: durationMs(args.outcome.stageStartedAtIso, now),
+      verdict: args.outcome.verdict,
+      summary: args.outcome.summary,
+      reason: args.outcome.reason,
+      artifactNames: args.outcome.artifactNames,
+      artifactPaths: args.outcome.artifactPaths,
+      nextStatus: next.status,
+      nextStage: next.current_stage,
+    });
+  } catch (error) {
+    await notifyStageError(args.hooks, {
+      sessionId: args.workflow.session_id,
+      workflowId: PRODUCT_DEV_QA_WORKFLOW_ID,
+      workflowRunId: args.workflow.workflow_run_id,
+      stage: args.stage.key,
+      role: args.stage.role,
+      attempt: args.workflow.stage_attempt_counts[args.stage.key] ?? 1,
+      repoRoot: args.outcome.repoRoot,
+      projectRoot: args.outcome.projectRoot,
+      stateRoot: args.store.stateRoot,
+      stageStartedAt: args.outcome.stageStartedAt,
+      inputArtifacts: args.stage.requiredInputs,
+      requiredOutputs: args.stage.requiredOutputs,
+      requiredEvidence: args.stage.requiredEvidence,
+    }, "after_stage", error);
+  }
+  return next;
+}
+
+async function blockStageRuntimeError(args: {
+  store: RuntimeStore;
+  workflow: ProductDevQaWorkflowRunRecord;
+  stage: ProductDevQaStagePlan;
+  attemptNumber: number;
+  runner: AgentRunner;
+  error: unknown;
+}): Promise<ProductDevQaWorkflowRunRecord> {
+  const now = nowIso();
+  const message = errorMessage(args.error);
+  const agentRun = await args.store.createAgentRun({
+    sessionId: args.workflow.session_id,
+    role: args.stage.role,
+    runner: args.runner.name,
+    input: `${args.stage.currentStage} runtime error`,
+    metadata: {
+      workflow_id: PRODUCT_DEV_QA_WORKFLOW_ID,
+      stage: args.stage.key,
+      attempt: args.attemptNumber,
+      runtime_error: true,
+    },
+  });
+  const completed = await args.store.completeAgentRun(agentRun, {
+    status: "blocked",
+    output: message,
+    error: message,
+    metadata: {
+      runtime_error: true,
+    },
+  });
+  const blocked: ProductDevQaWorkflowRunRecord = {
+    ...args.workflow,
+    status: "blocked",
+    waiting_on: null,
+    blocked_reason: message,
+    summary: `${args.stage.currentStage} blocked by runtime error: ${message}`,
+    last_stage_verdict: "blocked",
+    last_stage_summary: message,
+    last_stage_artifacts: [],
+    updated_at: now,
+  };
+  await setExecutionStageStatus(args.store, blocked, args.stage, "blocked", {
+    agent_run_id: completed.agent_run_id,
+    prompt_trace_id: "",
+    artifact_path: "",
+    files_changed: [],
+    commands_run: [],
+    completed_at: now,
+    summary: `${args.stage.currentStage}: runtime error: ${message}`,
+  });
+  await setExecutionStatusForWorkflow(args.store, blocked, "blocked");
+  await writeAndSyncWorkflow(args.store, blocked);
+  const attemptDir = stageAttemptDir(args.store, args.workflow.session_id, args.stage, args.attemptNumber);
+  await mkdir(attemptDir, { recursive: true });
+  await writeJson(path.join(attemptDir, "post-state.json"), blocked);
+  await writeJson(path.join(attemptDir, "runtime-error.json"), {
+    schema_version: 1,
+    stage: args.stage.key,
+    attempt: args.attemptNumber,
+    error: message,
+    agent_run_id: completed.agent_run_id,
+  });
   await args.store.appendEvent({
     at: now,
     session_id: args.workflow.session_id,
-    kind: "product_dev_qa_stage_completed",
+    kind: "stage_blocked_by_error",
     role: args.stage.role,
-    status: args.outcome.verdict,
-    message: `${args.stage.currentStage} ${args.outcome.verdict}.`,
+    status: "blocked",
+    message,
     details: {
       workflow_id: PRODUCT_DEV_QA_WORKFLOW_ID,
+      workflow_run_id: args.workflow.workflow_run_id,
       stage: args.stage.key,
-      attempt: args.workflow.stage_attempt_counts[args.stage.key] ?? 1,
-      artifacts: args.outcome.artifactNames,
+      attempt: args.attemptNumber,
+      agent_run_id: completed.agent_run_id,
     },
   });
-  return next;
+  return blocked;
 }
 
 async function transitionToDone(
@@ -791,21 +1041,25 @@ async function runStageSafely(args: {
   runner: AgentRunner;
   sessionId: string;
   role: AgentRole;
-  profile: RuntimeProfile;
   repoRoot: string;
   prompt: string;
+  skills: ReturnType<typeof skillsForExecutor>;
   writeAllowed: boolean;
+  maxTurns: number;
   traceId: string;
   stageKey: StageKey;
+  stageCtx: V2StageHookContext;
+  hooks: V2HookManager;
 }): Promise<AgentTaskResult> {
   try {
     const result = await args.runner.runTask({
       sessionId: args.sessionId,
       role: args.role,
-      profile: args.profile,
       repoRoot: args.repoRoot,
       prompt: args.prompt,
+      skills: args.skills,
       writeAllowed: args.writeAllowed,
+      maxTurns: args.maxTurns,
     });
     if (result.agentRun.status === "completed") {
       return result;
@@ -821,6 +1075,7 @@ async function runStageSafely(args: {
     });
     return { ...result, agentRun: completed, output: completed.output };
   } catch (error) {
+    await recordStageError(args.hooks, args.stageCtx, "executor", error);
     const message = error instanceof Error ? error.message : String(error);
     const agentRun = await args.store.createAgentRun({
       sessionId: args.sessionId,
@@ -839,8 +1094,54 @@ async function runStageSafely(args: {
       output: message,
       error: message,
     });
-    return { agentRun: completed, output: message, filesChanged: [], commandsRun: [] };
+    return { agentRun: completed, output: message, filesChanged: [], commandsRun: [], tokenUsage: emptyTokenUsage() };
   }
+}
+
+async function notifyStageError(
+  hooks: V2HookManager,
+  ctx: V2StageHookContext,
+  phase: "before_stage" | "prepare_context" | "before_executor" | "executor" | "after_executor" | "write_artifacts" | "after_stage",
+  error: unknown,
+): Promise<never> {
+  await recordStageError(hooks, ctx, phase, error);
+  throw error instanceof Error ? error : new Error(errorMessage(error));
+}
+
+async function recordStageError(
+  hooks: V2HookManager,
+  ctx: V2StageHookContext,
+  phase: "before_stage" | "prepare_context" | "before_executor" | "executor" | "after_executor" | "write_artifacts" | "after_stage",
+  error: unknown,
+): Promise<void> {
+  const message = error instanceof Error ? error.message : String(error);
+  try {
+    await hooks.onStageError({ ...ctx, phase, error: message });
+  } catch {
+    // Keep the original stage error as the control-flow cause. Hook failure is
+    // already written as hook_failed by V2HookManager when persistence works.
+  }
+}
+
+function durationMs(startedAt: string, completedAt: string): number {
+  const started = Date.parse(startedAt);
+  const completed = Date.parse(completedAt);
+  if (!Number.isFinite(started) || !Number.isFinite(completed) || completed < started) {
+    return 0;
+  }
+  return completed - started;
+}
+
+function dateOnly(value: string): string {
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) {
+    return value.slice(0, 10);
+  }
+  return new Date(parsed).toISOString().slice(0, 10);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function readInputArtifacts(
@@ -868,22 +1169,38 @@ function renderStagePrompt(args: {
   missingInputArtifacts: string[];
   skillInjection: string;
 }): string {
+  const inputContext = args.stage.includeRequest
+    ? `## Request\n${args.request}`
+    : [
+        "## Input Artifacts",
+        args.artifactInputs.length
+          ? args.artifactInputs.map((item) => `### ${item.name}\n${item.content.trim()}`).join("\n\n")
+          : "No input artifacts.",
+      ].join("\n");
+  const missingInputs = args.missingInputArtifacts.length
+    ? `\n\nMissing input artifacts: ${args.missingInputArtifacts.join(", ")}`
+    : "";
+  const qaVerdict = args.stage.role === "qa"
+    ? "\nFor QA, include `VERDICT: passed` or `VERDICT: failed`."
+    : "";
   const sections = [
-    `Workflow: ${PRODUCT_DEV_QA_WORKFLOW_ID}`,
-    `Stage: ${args.stage.currentStage}`,
-    `Role: ${args.stage.currentRole}`,
-    args.stage.currentStep ? `Step: ${args.stage.currentStep}` : "",
-    `Goal: ${args.stage.goal}`,
-    `Can write code: ${args.stage.canWriteCode}`,
-    args.stage.includeRequest ? `User request:\n${args.request}` : "Use only the handoff artifacts below as stage context. Do not rely on full chat history.",
+    [
+      "# AGT Stage",
+      `Workflow: ${PRODUCT_DEV_QA_WORKFLOW_ID}`,
+      `Stage: ${args.stage.currentStage}`,
+      `Role: ${args.stage.currentRole}`,
+      args.stage.currentStep ? `Step: ${args.stage.currentStep}` : "",
+      `Goal: ${args.stage.goal}`,
+      `Write access: ${args.stage.canWriteCode}`,
+    ].filter(Boolean).join("\n"),
+    inputContext + missingInputs,
     args.skillInjection,
-    args.artifactInputs.length
-      ? `Input artifacts:\n${args.artifactInputs.map((item) => `## ${item.name}\n${item.content.trim()}`).join("\n\n")}`
-      : "",
-    args.missingInputArtifacts.length ? `Missing input artifacts: ${args.missingInputArtifacts.join(", ")}` : "",
-    `Required output artifacts: ${args.stage.requiredOutputs.join(", ")}`,
-    `Required evidence: ${args.stage.requiredEvidence.join(", ")}`,
-    "Return a concise evidence-backed report. For QA, include a line exactly like `VERDICT: passed` or `VERDICT: failed`.",
+    [
+      "## Output Contract",
+      `Artifacts: ${args.stage.requiredOutputs.join(", ")}`,
+      `Evidence: ${args.stage.requiredEvidence.join(", ")}`,
+      `Return a concise evidence-backed report.${qaVerdict}`,
+    ].join("\n"),
   ];
   return sections.filter(Boolean).join("\n\n");
 }
@@ -1152,7 +1469,6 @@ async function productDevQaRunResult(store: RuntimeStore, sessionId: string): Pr
     status,
     delivery_status: delivery.status,
     execution_status: executionStatusForProductDevQa(workflow),
-    profile: session.profile,
     state_root: store.stateRoot,
     session_dir: store.sessionDir(sessionId),
     repo_root: session.repo_root,

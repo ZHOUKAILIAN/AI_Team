@@ -46,7 +46,6 @@ export type SessionStatusSnapshot = {
   generated_at: string;
   session_id: string;
   request: string;
-  profile: string;
   workflow_status: string;
   delivery_status: string;
   execution_status: string;
@@ -115,7 +114,6 @@ export function buildSessionStatusSnapshot(args: {
     generated_at: now.toISOString(),
     session_id: args.session.session_id,
     request: args.session.request,
-    profile: args.session.profile,
     workflow_status: args.deliveryWorkflow.status,
     delivery_status: args.deliveryWorkflow.status,
     execution_status: args.executionWorkflow.status,

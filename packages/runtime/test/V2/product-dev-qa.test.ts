@@ -1,4 +1,4 @@
-import { access, mkdtemp } from "node:fs/promises";
+import { access, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -7,6 +7,7 @@ import {
   type AgentRunner,
   type AgentTask,
   type AgentTaskResult,
+  emptyTokenUsage,
   recordProductDevQaHumanDecision,
   runProductDevQaWorkflow,
   RuntimeStore,
@@ -56,7 +57,16 @@ class ProductDevQaRunner implements AgentRunner {
       output,
       filesChanged: task.writeAllowed ? ["src/example.ts"] : [],
       commandsRun: task.writeAllowed ? ["npm test -- example"] : ["echo verify"],
+      tokenUsage: emptyTokenUsage(),
     };
+  }
+}
+
+class ThrowingRunner implements AgentRunner {
+  readonly name = "local_fallback" as const;
+
+  async runTask(): Promise<AgentTaskResult> {
+    throw new Error("synthetic executor failure");
   }
 }
 
@@ -79,6 +89,40 @@ describe("product-dev-qa workflow", () => {
     expect(workflow.status).toBe("waiting_human");
     expect(workflow.current_role).toBe("product");
     expect(workflow.waiting_on).toBe("product_check");
+    const sessionDir = path.join(stateRoot, "sessions", result.session_id);
+    const sessionJson = JSON.parse(await readFile(path.join(sessionDir, "session.json"), "utf8")) as Record<string, unknown>;
+    const executionJson = JSON.parse(await readFile(path.join(sessionDir, "execution-workflow.json"), "utf8")) as Record<string, unknown>;
+    const indexJson = JSON.parse(await readFile(path.join(stateRoot, "session-index.json"), "utf8")) as {
+      sessions: Array<Record<string, unknown>>;
+    };
+    expect(sessionJson).not.toHaveProperty("profile");
+    expect(executionJson).not.toHaveProperty("profile");
+    expect(indexJson.sessions[0]).not.toHaveProperty("profile");
+
+    const eventKinds = (await store.readEvents(result.session_id)).map((event) => event.kind);
+    expect(eventKinds).toEqual(expect.arrayContaining([
+      "stage_started",
+      "executor_started",
+      "executor_completed",
+      "stage_completed",
+    ]));
+    expect(eventKinds).not.toContain("product_dev_qa_stage_started");
+    expect(eventKinds).not.toContain("product_dev_qa_stage_completed");
+
+    const metrics = await store.readMetrics(result.session_id);
+    expect(metrics.map((metric) => metric.stage)).toEqual(["intake_summary", "product"]);
+    expect(metrics.every((metric) => metric.kind === "stage.completed")).toBe(true);
+    expect(metrics[0]?.stage_started_at).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(metrics[0]).toMatchObject({
+      workflow_id: "product-dev-qa",
+      attempt: 1,
+      verdict: "passed",
+      runner: "local_fallback",
+      token_usage: {
+        total_tokens: 0,
+      },
+    });
+    expect(JSON.stringify(metrics)).not.toContain("profile");
 
     const artifacts = await store.readArtifacts(result.session_id);
     expect(artifacts.map((item) => item.name)).toEqual([
@@ -87,8 +131,27 @@ describe("product-dev-qa workflow", () => {
       "product-handoff.md",
     ]);
 
-    await access(path.join(stateRoot, "sessions", result.session_id, "stages", "intake_summary", "attempt-001", "context-packet.json"));
-    await access(path.join(stateRoot, "sessions", result.session_id, "stages", "product", "attempt-001", "prompt.md"));
+    const intakeAttemptDir = path.join(stateRoot, "sessions", result.session_id, "stages", "intake_summary", "attempt-001");
+    const productAttemptDir = path.join(stateRoot, "sessions", result.session_id, "stages", "product", "attempt-001");
+    const contextPacket = JSON.parse(await readFile(path.join(intakeAttemptDir, "context-packet.json"), "utf8")) as {
+      skill_routing: Record<string, unknown>;
+    };
+    expect(contextPacket.skill_routing).toMatchObject({
+      workflow_id: "product-dev-qa",
+      stage: "intake_summary",
+      role: "intake_summary",
+      matched: false,
+      skills: [],
+      missing_skills: [],
+      missing_required_skills: [],
+    });
+    expect(contextPacket.skill_routing).not.toHaveProperty("selected_skills");
+    expect(contextPacket.skill_routing).not.toHaveProperty("reasons");
+    await access(path.join(intakeAttemptDir, "skill-routing.json"));
+    const prompt = await readFile(path.join(productAttemptDir, "prompt.md"), "utf8");
+    expect(prompt).toContain("# AGT Stage");
+    expect(prompt).toContain("## Output Contract");
+    expect(prompt).not.toContain("Included in prompt:");
     await access(path.join(stateRoot, "sessions", result.session_id, "stages", "product", "attempt-001", "verdict.json"));
   });
 
@@ -185,5 +248,87 @@ describe("product-dev-qa workflow", () => {
 
     await access(path.join(stateRoot, "sessions", first.session_id, "stages", "dev", "implementation", "attempt-002", "post-state.json"));
     await access(path.join(stateRoot, "sessions", first.session_id, "stages", "qa", "attempt-002", "verdict.json"));
+  });
+
+  it("blocks and audits executor errors instead of leaking them out of the workflow", async () => {
+    const repoRoot = await mkdtemp(path.join(tmpdir(), "agt-p0-"));
+    const stateRoot = path.join(repoRoot, ".agt-test");
+    const result = await runProductDevQaWorkflow({
+      repoRoot,
+      stateRoot,
+      request: "exercise executor failure",
+      runner: new ThrowingRunner(),
+    });
+
+    expect(result.status).toBe("blocked");
+    expect(result.current_stage).toBe("intake_summary");
+    expect(result.blocked_reason).toContain("synthetic executor failure");
+
+    const store = new RuntimeStore(stateRoot);
+    const workflow = await store.loadProductDevQaWorkflow(result.session_id);
+    expect(workflow.status).toBe("blocked");
+    expect(workflow.last_stage_verdict).toBe("blocked");
+    expect(workflow.blocked_reason).toContain("synthetic executor failure");
+
+    const events = await store.readEvents(result.session_id);
+    expect(events.map((event) => event.kind)).toEqual(expect.arrayContaining([
+      "stage_error",
+      "executor_completed",
+      "stage_completed",
+    ]));
+    expect(events.find((event) => event.kind === "stage_error")?.details).toMatchObject({
+      phase: "executor",
+      stage: "intake_summary",
+    });
+
+    const sessionDir = path.join(stateRoot, "sessions", result.session_id);
+    await access(path.join(sessionDir, "stages", "intake_summary", "attempt-001", "verdict.json"));
+    const executionJson = JSON.parse(await readFile(path.join(sessionDir, "execution-workflow.json"), "utf8")) as {
+      status: string;
+      steps: Array<{ status: string; agent_run_id?: string }>;
+    };
+    expect(executionJson.status).toBe("blocked");
+    expect(executionJson.steps[0]?.status).toBe("blocked");
+    expect(executionJson.steps[0]?.agent_run_id).toBeTruthy();
+  });
+
+  it("blocks and writes runtime-error artifacts when runtime persistence fails", async () => {
+    const repoRoot = await mkdtemp(path.join(tmpdir(), "agt-p0-"));
+    const stateRoot = path.join(repoRoot, ".agt-test");
+    const originalWriteArtifact = RuntimeStore.prototype.writeArtifact;
+    RuntimeStore.prototype.writeArtifact = async function writeArtifactWithSyntheticFailure(...args) {
+      if (args[0]?.name === "request-summary.md") {
+        throw new Error("synthetic artifact failure");
+      }
+      return originalWriteArtifact.apply(this, args);
+    };
+    try {
+      const result = await runProductDevQaWorkflow({
+        repoRoot,
+        stateRoot,
+        request: "exercise runtime persistence failure",
+        runner: new ProductDevQaRunner(),
+      });
+
+      expect(result.status).toBe("blocked");
+      expect(result.current_stage).toBe("intake_summary");
+      expect(result.blocked_reason).toContain("synthetic artifact failure");
+
+      const store = new RuntimeStore(stateRoot);
+      const events = await store.readEvents(result.session_id);
+      expect(events.map((event) => event.kind)).toEqual(expect.arrayContaining([
+        "stage_error",
+        "stage_blocked_by_error",
+      ]));
+      expect(events.find((event) => event.kind === "stage_error")?.details).toMatchObject({
+        phase: "write_artifacts",
+        stage: "intake_summary",
+      });
+
+      const sessionDir = path.join(stateRoot, "sessions", result.session_id);
+      await access(path.join(sessionDir, "stages", "intake_summary", "attempt-001", "runtime-error.json"));
+    } finally {
+      RuntimeStore.prototype.writeArtifact = originalWriteArtifact;
+    }
   });
 });

@@ -1,26 +1,41 @@
 import { Agent, run, setTracingDisabled } from "@openai/agents";
 import { SandboxAgent } from "@openai/agents/sandbox";
-import { Capabilities } from "@openai/agents/sandbox";
+import { Capabilities, skills as sdkSkills } from "@openai/agents/sandbox";
 import { localDir } from "@openai/agents/sandbox";
 import { UnixLocalSandboxClient } from "@openai/agents/sandbox/local";
 import { execa } from "execa";
 import {
   type AgentRole,
   type AgentRunRecord,
-  type RuntimeProfile,
+  type TokenUsage,
   type ToolCallRecord,
   nowIso,
 } from "./schema.js";
+import {
+  applyOpenAIExecutorEnv,
+  hasOpenAIExecutorConfig,
+  resolveOpenAIExecutorConfig,
+} from "./openai-config.js";
 import { RuntimeStore } from "./store.js";
+import { emptyTokenUsage, summarizeOpenAIUsage } from "./usage.js";
 
 export type AgentTask = {
   sessionId: string;
   role: AgentRole;
-  profile: RuntimeProfile;
   repoRoot: string;
   prompt: string;
+  skills?: AgentTaskSkill[];
   writeAllowed?: boolean;
   maxTurns?: number;
+};
+
+export type AgentTaskSkill = {
+  name: string;
+  description: string;
+  content: string;
+  path: string;
+  content_sha256: string;
+  required: boolean;
 };
 
 export type AgentTaskResult = {
@@ -28,6 +43,7 @@ export type AgentTaskResult = {
   output: string;
   filesChanged: string[];
   commandsRun: string[];
+  tokenUsage: TokenUsage;
 };
 
 export type AgentRunner = {
@@ -36,7 +52,7 @@ export type AgentRunner = {
 };
 
 export function buildAgentRunner(store: RuntimeStore): AgentRunner {
-  if (process.env.OPENAI_API_KEY || process.env.OPENAI_BASE_URL) {
+  if (hasOpenAIExecutorConfig(resolveOpenAIExecutorConfig())) {
     return new OpenAISandboxRunner(store);
   }
   return new LocalFallbackRunner(store);
@@ -49,15 +65,27 @@ export class OpenAISandboxRunner implements AgentRunner {
 
   async runTask(task: AgentTask): Promise<AgentTaskResult> {
     const config = await this.store.loadConfig();
-    const model = process.env.AGT_OPENAI_MODEL || process.env.OPENAI_MODEL || config.default_model;
-    const maxTurns = task.maxTurns ?? config.max_turns[task.profile];
+    const openAIConfig = resolveOpenAIExecutorConfig({ runtimeDefaultModel: config.default_model });
+    applyOpenAIExecutorEnv(openAIConfig);
+    const model = openAIConfig.model ?? config.default_model;
+    const maxTurns = task.maxTurns ?? config.executor.default_max_turns;
     setTracingDisabled(false);
     const agentRun = await this.store.createAgentRun({
       sessionId: task.sessionId,
       role: task.role,
       runner: this.name,
       input: task.prompt,
-      metadata: { profile: task.profile, write_allowed: Boolean(task.writeAllowed), model, max_turns: maxTurns },
+      metadata: {
+        write_allowed: Boolean(task.writeAllowed),
+        model,
+        max_turns: maxTurns,
+        skills: taskSkillMetadata(task.skills),
+        openai_config_sources: {
+          api_key: openAIConfig.apiKeySource,
+          base_url: openAIConfig.baseUrlSource,
+          model: openAIConfig.modelSource,
+        },
+      },
     });
     const heartbeat = startAgentRunHeartbeat(this.store, agentRun, config.monitoring.heartbeat_interval_ms);
     const started = Date.now();
@@ -74,7 +102,7 @@ export class OpenAISandboxRunner implements AgentRunner {
             entries: {
               workspace: localDir({
                 src: task.repoRoot,
-                permissions: task.writeAllowed ? "read_write" : "read_only",
+                permissions: sandboxWorkspacePermissions(task.writeAllowed),
               }),
             },
           },
@@ -83,6 +111,7 @@ export class OpenAISandboxRunner implements AgentRunner {
       const output = stringifyFinalOutput(result.finalOutput);
       const filesChanged = await this.changedFiles(task.repoRoot, toolCallsBefore);
       const commandsRun = commandsFromRunItems(result.newItems);
+      const tokenUsage = summarizeOpenAIUsage(result.rawResponses);
       await this.recordSdkToolCalls(task, agentRun, result.newItems);
       const sdkTrace = await this.store.writeArtifact({
         sessionId: task.sessionId,
@@ -101,6 +130,8 @@ export class OpenAISandboxRunner implements AgentRunner {
           new_item_count: result.newItems.length,
           last_response_id: result.lastResponseId ?? "",
           sdk_trace_artifact_path: sdkTrace.path,
+          token_usage: tokenUsage,
+          executor_duration_ms: Date.now() - started,
         },
       });
       await this.recordRuntimeToolCall(task, completed, {
@@ -113,23 +144,29 @@ export class OpenAISandboxRunner implements AgentRunner {
           sdk_trace_artifact_path: sdkTrace.path,
           raw_response_count: result.rawResponses.length,
           new_item_count: result.newItems.length,
+          token_usage: tokenUsage,
         },
       });
-      return { agentRun: completed, output, filesChanged, commandsRun };
+      return { agentRun: completed, output, filesChanged, commandsRun, tokenUsage };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await heartbeat.stop();
+      const tokenUsage = emptyTokenUsage();
       const completed = await this.store.completeAgentRun(agentRun, {
         status: "failed",
         error: message,
         output: "",
+        metadata: {
+          token_usage: tokenUsage,
+          executor_duration_ms: Date.now() - started,
+        },
       });
       await this.recordRuntimeToolCall(task, completed, {
         name: "openai_sandbox_error",
         started,
-        output: { error: message },
+        output: { error: message, token_usage: tokenUsage },
       });
-      return { agentRun: completed, output: message, filesChanged: [], commandsRun: [] };
+      return { agentRun: completed, output: message, filesChanged: [], commandsRun: [], tokenUsage };
     } finally {
       await heartbeat.stop();
     }
@@ -149,7 +186,7 @@ export class OpenAISandboxRunner implements AgentRunner {
     return new SandboxAgent({
       name: `agt_${task.role}`,
       instructions,
-      capabilities: Capabilities.default(),
+      capabilities: sandboxCapabilities(task),
       model,
     });
   }
@@ -188,7 +225,7 @@ export class OpenAISandboxRunner implements AgentRunner {
       role: task.role,
       kind: "agent_run",
       name: args.name,
-      input: { profile: task.profile, write_allowed: Boolean(task.writeAllowed) },
+      input: { write_allowed: Boolean(task.writeAllowed), max_turns: task.maxTurns, skills: taskSkillMetadata(task.skills) },
       output: args.output,
       duration_ms: Date.now() - args.started,
     };
@@ -218,6 +255,13 @@ export class OpenAISandboxRunner implements AgentRunner {
   }
 }
 
+export function sandboxWorkspacePermissions(_writeAllowed?: boolean): number {
+  // The OpenAI local sandbox owns a copied temp workspace and must be able to
+  // clean it up even for read-only AGT stages. Code write policy is enforced by
+  // writeAllowed in the stage contract and audited through git diff tracking.
+  return 0o755;
+}
+
 export class LocalFallbackRunner implements AgentRunner {
   readonly name = "local_fallback" as const;
 
@@ -230,8 +274,8 @@ export class LocalFallbackRunner implements AgentRunner {
       runner: this.name,
       input: task.prompt,
       metadata: {
-        profile: task.profile,
         reason: "OPENAI_API_KEY/OPENAI_BASE_URL not set; using deterministic local runner.",
+        skills: taskSkillMetadata(task.skills),
       },
     });
     const config = await this.store.loadConfig();
@@ -241,7 +285,6 @@ export class LocalFallbackRunner implements AgentRunner {
       const git = await runGitStatus(task.repoRoot);
       const output = [
         `${task.role} local fallback completed.`,
-        `Profile: ${task.profile}`,
         `Write allowed: ${Boolean(task.writeAllowed)}`,
         git.summary,
       ].join("\n");
@@ -258,20 +301,53 @@ export class LocalFallbackRunner implements AgentRunner {
         duration_ms: Date.now() - started,
       });
       await heartbeat.stop();
+      const tokenUsage = emptyTokenUsage();
       const completed = await this.store.completeAgentRun(agentRun, {
         status: "completed",
         output,
+        metadata: {
+          token_usage: tokenUsage,
+          executor_duration_ms: Date.now() - started,
+        },
       });
       return {
         agentRun: completed,
         output,
         filesChanged: git.changedFiles,
         commandsRun: ["git status --short"],
+        tokenUsage,
       };
     } finally {
       await heartbeat.stop();
     }
   }
+}
+
+function sandboxCapabilities(task: AgentTask) {
+  const capabilities = Capabilities.default();
+  const routedSkills = task.skills?.filter((skill) => skill.content.trim()) ?? [];
+  if (routedSkills.length > 0) {
+    capabilities.push(sdkSkills({
+      skillsPath: ".agt2/skills",
+      skills: routedSkills.map((skill) => ({
+        name: skill.name,
+        description: skill.description || "No description provided.",
+        content: skill.content,
+      })),
+    }));
+  }
+  return capabilities;
+}
+
+function taskSkillMetadata(skills: AgentTaskSkill[] | undefined): Array<Record<string, unknown>> {
+  return (skills ?? []).map((skill) => ({
+    name: skill.name,
+    description: skill.description,
+    path: skill.path,
+    content_sha256: skill.content_sha256,
+    required: skill.required,
+    delivery: "sdk_skill",
+  }));
 }
 
 function startAgentRunHeartbeat(store: RuntimeStore, agentRun: AgentRunRecord, intervalMs: number): { stop: () => Promise<void> } {

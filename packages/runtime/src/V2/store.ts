@@ -20,7 +20,8 @@ import {
   RuntimeEventSchema,
   type RuntimeConfig,
   RuntimeConfigSchema,
-  type RuntimeProfile,
+  type MetricRecord,
+  MetricRecordSchema,
   type SessionIndex,
   type SessionIndexEntry,
   SessionIndexSchema,
@@ -36,7 +37,6 @@ import { createInitialDeliveryWorkflow, projectDeliveryWorkflow } from "./delive
 
 export type CreateSessionOptions = {
   request: string;
-  profile: RuntimeProfile;
   repoRoot: string;
   projectRoot?: string;
   stateRoot?: string;
@@ -101,7 +101,6 @@ export class RuntimeStore {
       request: options.request,
       request_sources: options.requestSources ?? [],
       workflow_id: options.workflowId ?? "",
-      profile: options.profile,
       delivery_status: "in_progress",
       execution_status: "in_progress",
       status: "in_progress",
@@ -123,7 +122,6 @@ export class RuntimeStore {
     await this.writeExecutionWorkflow({
       schema_version: 1,
       session_id: sessionId,
-      profile: options.profile,
       status: "in_progress",
       current_stage: "created",
       steps: [],
@@ -139,7 +137,7 @@ export class RuntimeStore {
       session_id: sessionId,
       kind: "session_created",
       status: "in_progress",
-      message: `Created ${options.profile} session.`,
+      message: "Created session.",
       details: { repo_root: session.repo_root, project_root: session.project_root },
     });
     await this.upsertSessionIndex(session);
@@ -215,6 +213,11 @@ export class RuntimeStore {
   async appendToolCall(call: ToolCallRecord): Promise<void> {
     const parsed = ToolCallSchema.parse(call);
     await appendJsonl(path.join(this.sessionDir(parsed.session_id), "tool-calls.jsonl"), parsed);
+  }
+
+  async appendMetric(metric: MetricRecord): Promise<void> {
+    const parsed = MetricRecordSchema.parse(metric);
+    await appendJsonl(path.join(this.sessionDir(parsed.session_id), "metrics.jsonl"), parsed);
   }
 
   async createAgentRun(args: {
@@ -349,6 +352,10 @@ export class RuntimeStore {
 
   async readToolCalls(sessionId: string): Promise<ToolCallRecord[]> {
     return readJsonl(path.join(this.sessionDir(sessionId), "tool-calls.jsonl"), ToolCallSchema.parse);
+  }
+
+  async readMetrics(sessionId: string): Promise<MetricRecord[]> {
+    return readJsonl(path.join(this.sessionDir(sessionId), "metrics.jsonl"), MetricRecordSchema.parse);
   }
 
   async listAgentRuns(sessionId: string): Promise<AgentRunRecord[]> {
@@ -516,7 +523,6 @@ export class RuntimeStore {
       status: session.status,
       current_phase: session.current_phase,
       current_stage: session.current_stage,
-      profile: session.profile,
       project_root: session.project_root || session.repo_root,
       worktree_path: session.repo_root,
       state_root: session.state_root,

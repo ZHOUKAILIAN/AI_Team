@@ -8,7 +8,7 @@ import {
   type AgentRunRecord,
   type ArtifactRecord,
   type DeliveryWorkflowRecord,
-  type ExecutionWorkflowRecord,
+  type ExecutionWorkflowRecord as V1ExecutionWorkflowRecord,
   type ProductDevQaWorkflowRunRecord,
   type PromptTraceRecord,
   type RuntimeEvent,
@@ -19,6 +19,7 @@ import {
 import {
   PRODUCT_DEV_QA_WORKFLOW_ID,
   RuntimeStore as V2RuntimeStore,
+  type ExecutionWorkflowRecord as V2ExecutionWorkflowRecord,
   type SessionRecord as V2SessionRecord,
 } from "@agent-team-runtime/runtime/V2";
 
@@ -30,7 +31,7 @@ export type CreateServerOptions = {
 type HydratedSession = {
   session: AnySessionRecord;
   deliveryWorkflow: DeliveryWorkflowRecord;
-  executionWorkflow: ExecutionWorkflowRecord;
+  executionWorkflow: AnyExecutionWorkflowRecord;
   workflowRun: ProductDevQaWorkflowRunRecord | null;
   events: RuntimeEvent[];
   toolCalls: ToolCallRecord[];
@@ -41,6 +42,7 @@ type HydratedSession = {
 
 type RuntimeStoreLike = V1RuntimeStore | V2RuntimeStore;
 type AnySessionRecord = V1SessionRecord | V2SessionRecord;
+type AnyExecutionWorkflowRecord = V1ExecutionWorkflowRecord | V2ExecutionWorkflowRecord;
 
 export async function createServer(options: CreateServerOptions) {
   const app = Fastify({ logger: false });
@@ -505,7 +507,7 @@ function buildPanelSnapshot(item: HydratedSession) {
   };
 }
 
-function artifactPaths(workflow: ExecutionWorkflowRecord): Record<string, string> {
+function artifactPaths(workflow: AnyExecutionWorkflowRecord): Record<string, string> {
   return Object.fromEntries(
     workflow.steps
       .filter((step) => step.artifact_path)
