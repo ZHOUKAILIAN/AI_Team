@@ -85,6 +85,8 @@ AGT 的定位是：
 | `state` | runtime 维护的机器可读状态 |
 | `verdict` | runtime 对阶段结果的结构化判断 |
 
+Executor 协议不属于 L1 产品真相。AGT 的稳定能力是选择 role / skill、构建 context packet、推进 state machine、保存 artifact / evidence；OpenAI Agents SDK sandbox tool、Codex CLI、OpenCode 或其他 coding agent 只是在某个阶段执行这些输入的实现方式。当前已记录的问题是：部分 OpenAI-compatible `base_url` 能完成模型请求，但不支持 Agents SDK 原生 `apply_patch` tool type。这个问题应通过 executor 可替换性处理，不能要求 AGT 把 skill routing 或 workflow state 下沉给某个执行器。
+
 ### 3.3 P0 边界
 
 P0 只覆盖“本地交付到可验收”的闭环，明确包括：

@@ -19,7 +19,11 @@ import {
 import {
   PRODUCT_DEV_QA_WORKFLOW_ID,
   RuntimeStore as V2RuntimeStore,
+  compareTimestamps,
+  formatReadableDateTime,
+  type AgentRunRecord as V2AgentRunRecord,
   type ExecutionWorkflowRecord as V2ExecutionWorkflowRecord,
+  type PromptTraceRecord as V2PromptTraceRecord,
   type SessionRecord as V2SessionRecord,
 } from "@agent-team-runtime/runtime/V2";
 
@@ -35,14 +39,16 @@ type HydratedSession = {
   workflowRun: ProductDevQaWorkflowRunRecord | null;
   events: RuntimeEvent[];
   toolCalls: ToolCallRecord[];
-  prompts: PromptTraceRecord[];
+  prompts: AnyPromptTraceRecord[];
   artifacts: ArtifactRecord[];
-  agentRuns: AgentRunRecord[];
+  agentRuns: AnyAgentRunRecord[];
 };
 
 type RuntimeStoreLike = V1RuntimeStore | V2RuntimeStore;
 type AnySessionRecord = V1SessionRecord | V2SessionRecord;
 type AnyExecutionWorkflowRecord = V1ExecutionWorkflowRecord | V2ExecutionWorkflowRecord;
+type AnyPromptTraceRecord = PromptTraceRecord | V2PromptTraceRecord;
+type AnyAgentRunRecord = AgentRunRecord | V2AgentRunRecord;
 
 export async function createServer(options: CreateServerOptions) {
   const app = Fastify({ logger: false });
@@ -278,7 +284,7 @@ async function listSessions(stateRoot: string): Promise<AnySessionRecord[]> {
   );
   return sessions
     .filter((session): session is AnySessionRecord => session !== null)
-    .sort((left, right) => right.updated_at.localeCompare(left.updated_at));
+    .sort((left, right) => compareTimestamps(right.updated_at, left.updated_at));
 }
 
 async function latestSession(stateRoot: string): Promise<{ sessionId: string; stateRoot: string; workflowId: string } | null> {
@@ -377,10 +383,10 @@ function buildConsoleSnapshot(items: HydratedSession[]) {
   const projectList = [...projects.values()].map((project) => ({
     ...project,
     worktree_count: project.worktrees.length,
-    sessions: project.sessions.sort((a: any, b: any) => b.updated_at.localeCompare(a.updated_at)),
-  })).sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    sessions: project.sessions.sort((a: any, b: any) => compareTimestamps(b.updated_at, a.updated_at)),
+  })).sort((a, b) => compareTimestamps(b.updated_at, a.updated_at));
   return {
-    generated_at: new Date().toISOString(),
+    generated_at: formatReadableDateTime(new Date()),
     stats: {
       projects: projectList.length,
       worktrees: projectList.reduce((sum, project) => sum + project.worktree_count, 0),
@@ -520,7 +526,7 @@ function projectIdFor(projectRoot: string): string {
 }
 
 function maxDate(left: string, right: string): string {
-  return left.localeCompare(right) >= 0 ? left : right;
+  return compareTimestamps(left, right) >= 0 ? left : right;
 }
 
 function resolveWebDist(explicit?: string): string | null {

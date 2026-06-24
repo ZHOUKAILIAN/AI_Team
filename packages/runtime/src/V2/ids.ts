@@ -12,7 +12,7 @@ export function slugify(value: string, fallback = "task"): string {
 export function createSessionId(request: string): string {
   const timestamp = new Date().toISOString().replace(/[-:.]/g, "").replace("T", "T").slice(0, 18);
   const digest = createHash("sha1").update(request).digest("hex").slice(0, 8);
-  return `${timestamp}-${digest}-${slugify(request)}`;
+  return `${timestamp}-${digest}`;
 }
 
 export function createRunId(role: string): string {

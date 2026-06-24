@@ -4,6 +4,7 @@ import {
   type MetricRecord,
   type ProductDevQaWorkflowRunRecord,
   type TokenUsage,
+  nowReadableDateTime,
 } from "./schema.js";
 import { RuntimeStore } from "./store.js";
 import { emptyTokenUsage } from "./usage.js";
@@ -133,7 +134,7 @@ export class V2HookManager {
   ): Promise<void> {
     try {
       await this.store.appendEvent({
-        at: new Date().toISOString(),
+        at: nowReadableDateTime(),
         session_id: ctx.sessionId,
         kind: "hook_failed",
         role: ctx.role,
@@ -242,7 +243,7 @@ class AuditEventHook implements V2RuntimeHook {
 
   async onStageError(ctx: V2StageErrorContext): Promise<void> {
     await this.store.appendEvent({
-      at: new Date().toISOString(),
+      at: nowReadableDateTime(),
       session_id: ctx.sessionId,
       kind: "stage_error",
       role: ctx.role,

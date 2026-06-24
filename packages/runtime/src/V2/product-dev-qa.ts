@@ -23,7 +23,8 @@ import {
   type TokenUsage,
   type WorkflowStatus,
   type WorktreeRecord,
-  nowIso,
+  formatReadableDateTime,
+  nowReadableDateTime,
 } from "./schema.js";
 import {
   renderSkillInjection,
@@ -132,7 +133,7 @@ const STAGES: Record<StageKey, ProductDevQaStagePlan> = {
     requiredInputs: ["request-summary.md"],
     requiredOutputs: ["product-contract.md", "product-handoff.md"],
     requiredEvidence: ["scope_defined", "acceptance_criteria_defined", "qa_focus_defined"],
-    executor: { maxTurns: 5 },
+    executor: { maxTurns: 8 },
   },
   "dev.technical_plan": {
     key: "dev.technical_plan",
@@ -147,7 +148,7 @@ const STAGES: Record<StageKey, ProductDevQaStagePlan> = {
     requiredInputs: ["request-summary.md", "product-contract.md", "product-handoff.md"],
     requiredOutputs: ["technical-plan.md"],
     requiredEvidence: ["implementation_plan_defined", "test_strategy_defined", "implementation_ambiguities_declared"],
-    executor: { maxTurns: 5 },
+    executor: { maxTurns: 8 },
   },
   "dev.implementation": {
     key: "dev.implementation",
@@ -282,7 +283,7 @@ export async function recordProductDevQaHumanDecision(
     throw new Error(`Session is not waiting for a Product/Dev plan decision: ${options.sessionId}`);
   }
 
-  const now = nowIso();
+  const now = nowReadableDateTime();
   if (options.decision === "no-go") {
     const blocked: ProductDevQaWorkflowRunRecord = {
       ...workflow,
@@ -349,7 +350,7 @@ async function ensureProductDevQaWorkflow(
     return existing;
   }
   const session = await store.loadSession(sessionId);
-  const now = nowIso();
+  const now = nowReadableDateTime();
   const workflow: ProductDevQaWorkflowRunRecord = {
     schema_version: 1,
     workflow_id: PRODUCT_DEV_QA_WORKFLOW_ID,
@@ -421,7 +422,7 @@ async function markStageRunning(
   stage: ProductDevQaStagePlan,
 ): Promise<{ workflow: ProductDevQaWorkflowRunRecord; attemptNumber: number }> {
   const attemptNumber = (workflow.stage_attempt_counts[stage.key] ?? 0) + 1;
-  const now = nowIso();
+  const now = nowReadableDateTime();
   const running = setWorkflowStage({
     ...workflow,
     status: "running",
@@ -460,7 +461,7 @@ async function executeStage(args: {
   await mkdir(attemptDir, { recursive: true });
   await writeJson(path.join(attemptDir, "pre-state.json"), args.workflow);
   const stageStartedAtIso = args.workflow.updated_at;
-  const stageStartedAt = dateOnly(stageStartedAtIso);
+  const stageStartedAt = formatReadableDateTime(stageStartedAtIso);
   const stageCtx: V2StageHookContext = {
     sessionId: args.sessionId,
     workflowId: PRODUCT_DEV_QA_WORKFLOW_ID,
@@ -546,7 +547,7 @@ async function executeStage(args: {
   await writeFile(promptPath, prompt);
   await writeJson(path.join(attemptDir, "prompt.meta.json"), trace);
 
-  const executorStartedAt = nowIso();
+  const executorStartedAt = nowReadableDateTime();
   const executorStartedMs = Date.now();
   const executorCtx: V2ExecutorHookContext = {
     ...stageCtx,
@@ -612,7 +613,7 @@ async function executeStage(args: {
       hooks: args.hooks,
     });
   }
-  const executorCompletedAt = nowIso();
+  const executorCompletedAt = nowReadableDateTime();
   const executorDurationMs = Date.now() - executorStartedMs;
   try {
     await args.hooks.afterExecutor({
@@ -746,7 +747,7 @@ async function transitionAfterStage(args: {
   maxQaFailureLoops: number;
   hooks: V2HookManager;
 }): Promise<ProductDevQaWorkflowRunRecord> {
-  const now = nowIso();
+  const now = nowReadableDateTime();
   await setExecutionStageStatus(args.store, args.workflow, args.stage, args.outcome.verdict === "blocked" ? "blocked" : "completed", {
     agent_run_id: args.outcome.agentRun.agent_run_id,
     prompt_trace_id: args.outcome.promptTraceId,
@@ -931,7 +932,7 @@ async function blockStageRuntimeError(args: {
   runner: AgentRunner;
   error: unknown;
 }): Promise<ProductDevQaWorkflowRunRecord> {
-  const now = nowIso();
+  const now = nowReadableDateTime();
   const message = errorMessage(args.error);
   const agentRun = await args.store.createAgentRun({
     sessionId: args.workflow.session_id,
@@ -1007,7 +1008,7 @@ async function transitionToDone(
   store: RuntimeStore,
   workflow: ProductDevQaWorkflowRunRecord,
 ): Promise<ProductDevQaWorkflowRunRecord> {
-  const now = nowIso();
+  const now = nowReadableDateTime();
   const done: ProductDevQaWorkflowRunRecord = {
     ...workflow,
     status: "done",
@@ -1130,14 +1131,6 @@ function durationMs(startedAt: string, completedAt: string): number {
     return 0;
   }
   return completed - started;
-}
-
-function dateOnly(value: string): string {
-  const parsed = Date.parse(value);
-  if (!Number.isFinite(parsed)) {
-    return value.slice(0, 10);
-  }
-  return new Date(parsed).toISOString().slice(0, 10);
 }
 
 function errorMessage(error: unknown): string {

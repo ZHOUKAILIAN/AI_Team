@@ -7,6 +7,7 @@ import {
   type DeliveryWorkflowRecord,
   type EvidenceRef,
   type ExecutionWorkflowRecord,
+  latestTimestamp,
 } from "./schema.js";
 
 export const DELIVERY_PHASES: DeliveryPhase[] = ["requirement", "development", "verification", "handoff"];
@@ -93,7 +94,7 @@ function projectPhase(
   const startedAt = steps.map((step) => step.started_at).find(Boolean) ?? previousPhase?.started_at;
   const completedAt =
     status === "passed"
-      ? latestString(steps.map((step) => step.completed_at).filter(Boolean) as string[]) ?? previousPhase?.completed_at
+      ? latestTimestamp(steps.map((step) => step.completed_at).filter(Boolean) as string[]) ?? previousPhase?.completed_at
       : undefined;
 
   return {
@@ -335,8 +336,4 @@ function uniqueEvidence(refs: EvidenceRef[]): EvidenceRef[] {
     unique.push(ref);
   }
   return unique;
-}
-
-function latestString(values: string[]): string | undefined {
-  return values.sort((left, right) => right.localeCompare(left))[0];
 }
