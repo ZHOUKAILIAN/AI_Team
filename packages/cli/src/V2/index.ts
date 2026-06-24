@@ -13,6 +13,7 @@ import {
   readSessionStatus,
   runProductDevQaWorkflow,
   RuntimeStore,
+  compareTimestamps,
   type RequestSourceRecord,
   type RunResult,
   type RuntimeConfig,
@@ -371,7 +372,7 @@ async function resolveLatestSessionTarget(sourceStateRoot: string): Promise<Sess
   const latest = await latestSessionInStateRoot(sourceStateRoot);
   const index = await readSessionIndex(sourceStateRoot);
   const indexed = index.sessions[0];
-  if (indexed && (!latest || indexed.updated_at.localeCompare(latest.updatedAt) >= 0)) {
+  if (indexed && (!latest || compareTimestamps(indexed.updated_at, latest.updatedAt) >= 0)) {
     return hydrateSessionTarget(indexed.state_root, indexed.session_id, {
       repoRoot: indexed.worktree_path,
       workflowId: indexed.workflow_id,
@@ -402,7 +403,7 @@ async function latestSessionInStateRoot(stateRoot: string): Promise<(SessionTarg
     workflowId: session.workflow_id ?? "",
     updatedAt: session.updated_at,
   }));
-  candidates.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  candidates.sort((left, right) => compareTimestamps(right.updatedAt, left.updatedAt));
   return candidates[0] ?? null;
 }
 
@@ -555,7 +556,7 @@ async function mirrorSessionIndex(sourceStateRoot: string, targetStateRoot: stri
   } else {
     index.sessions.push(entry);
   }
-  index.sessions.sort((left, right) => right.updated_at.localeCompare(left.updated_at));
+  index.sessions.sort((left, right) => compareTimestamps(right.updated_at, left.updated_at));
   await writeSessionIndex(sourceStateRoot, index);
 }
 
@@ -680,7 +681,7 @@ async function listLocalSessionMetas(stateRoot: string): Promise<SessionMeta[]> 
   );
   return sessions
     .filter((session): session is SessionMeta => session !== null)
-    .sort((left, right) => right.updated_at.localeCompare(left.updated_at));
+    .sort((left, right) => compareTimestamps(right.updated_at, left.updated_at));
 }
 
 async function writeSessionIndex(stateRoot: string, index: { schema_version: 1; sessions: SessionIndexEntry[] }): Promise<void> {

@@ -1,3 +1,4 @@
+import { compareTimestamps, formatReadableDateTime } from "./schema.js";
 import type {
   AgentRunRecord,
   DeliveryBlocker,
@@ -104,14 +105,14 @@ export function buildSessionStatusSnapshot(args: {
 }): SessionStatusSnapshot {
   const now = args.now ?? new Date();
   const stalledAfterMs = args.stalledAfterMs ?? DEFAULT_STALLED_AFTER_MS;
-  const runs = [...args.agentRuns].sort((left, right) => left.started_at.localeCompare(right.started_at));
+  const runs = [...args.agentRuns].sort((left, right) => compareTimestamps(left.started_at, right.started_at));
   const activeRun = [...runs].reverse().find((run) => run.status === "running") ?? null;
   const latestRun = runs.at(-1) ?? null;
   const activeRunStatus = activeRun ? summarizeAgentRun(activeRun, now, stalledAfterMs) : null;
   const latestRunStatus = latestRun ? summarizeAgentRun(latestRun, now, stalledAfterMs) : null;
 
   return {
-    generated_at: now.toISOString(),
+    generated_at: formatReadableDateTime(now),
     session_id: args.session.session_id,
     request: args.session.request,
     workflow_status: args.deliveryWorkflow.status,
@@ -132,7 +133,7 @@ export function buildSessionStatusSnapshot(args: {
     latest_run: latestRunStatus,
     latest_event: args.events?.at(-1) ?? null,
     latest_tool_call: args.toolCalls?.at(-1) ?? null,
-    updated_at: args.session.updated_at,
+    updated_at: formatReadableDateTime(args.session.updated_at),
   };
 }
 
@@ -154,9 +155,9 @@ export function summarizeAgentRun(
     runner: run.runner,
     status: run.status,
     runtime_status: runtimeStatus,
-    started_at: run.started_at,
-    completed_at: run.completed_at,
-    last_heartbeat_at: run.last_heartbeat_at,
+    started_at: formatReadableDateTime(run.started_at),
+    completed_at: run.completed_at ? formatReadableDateTime(run.completed_at) : undefined,
+    last_heartbeat_at: run.last_heartbeat_at ? formatReadableDateTime(run.last_heartbeat_at) : undefined,
     heartbeat_count: run.heartbeat_count ?? 0,
     elapsed_ms: elapsedMs(run.started_at, end),
     heartbeat_age_ms: heartbeatAgeMs,

@@ -1,6 +1,6 @@
 import { Agent, run, setTracingDisabled } from "@openai/agents";
 import { SandboxAgent } from "@openai/agents/sandbox";
-import { Capabilities, skills as sdkSkills } from "@openai/agents/sandbox";
+import { Capabilities, filesystem, skills as sdkSkills } from "@openai/agents/sandbox";
 import { localDir } from "@openai/agents/sandbox";
 import { UnixLocalSandboxClient } from "@openai/agents/sandbox/local";
 import { execa } from "execa";
@@ -8,13 +8,16 @@ import {
   type AgentRole,
   type AgentRunRecord,
   type TokenUsage,
+  TokenUsageSchema,
   type ToolCallRecord,
-  nowIso,
+  nowReadableDateTime,
 } from "./schema.js";
 import {
   applyOpenAIExecutorEnv,
   hasOpenAIExecutorConfig,
   resolveOpenAIExecutorConfig,
+  shouldEnableOpenAISandboxApplyPatch,
+  shouldEnableOpenAITracing,
 } from "./openai-config.js";
 import { RuntimeStore } from "./store.js";
 import { emptyTokenUsage, summarizeOpenAIUsage } from "./usage.js";
@@ -51,11 +54,45 @@ export type AgentRunner = {
   runTask(task: AgentTask): Promise<AgentTaskResult>;
 };
 
+export type AgentExecutorPreference = "auto" | "openai_sandbox" | "codex_exec" | "local_fallback";
+
 export function buildAgentRunner(store: RuntimeStore): AgentRunner {
+  const preference = resolveAgentExecutorPreference();
+  if (preference === "codex_exec") {
+    return new CodexExecRunner(store);
+  }
+  if (preference === "local_fallback") {
+    return new LocalFallbackRunner(store);
+  }
+  if (preference === "openai_sandbox") {
+    return hasOpenAIExecutorConfig(resolveOpenAIExecutorConfig())
+      ? new OpenAISandboxRunner(store)
+      : new LocalFallbackRunner(store);
+  }
   if (hasOpenAIExecutorConfig(resolveOpenAIExecutorConfig())) {
     return new OpenAISandboxRunner(store);
   }
   return new LocalFallbackRunner(store);
+}
+
+export function resolveAgentExecutorPreference(env: NodeJS.ProcessEnv = process.env): AgentExecutorPreference {
+  const raw = (env.AGT_EXECUTOR ?? env.AGT_V2_EXECUTOR ?? "").trim();
+  if (!raw) {
+    return "auto";
+  }
+  if (raw === "codex" || raw === "codex-exec") {
+    return "codex_exec";
+  }
+  if (raw === "openai" || raw === "openai-sdk") {
+    return "openai_sandbox";
+  }
+  if (raw === "fallback" || raw === "local") {
+    return "local_fallback";
+  }
+  if (["auto", "openai_sandbox", "codex_exec", "local_fallback"].includes(raw)) {
+    return raw as AgentExecutorPreference;
+  }
+  throw new Error(`Unsupported AGT executor: ${raw}`);
 }
 
 export class OpenAISandboxRunner implements AgentRunner {
@@ -69,7 +106,9 @@ export class OpenAISandboxRunner implements AgentRunner {
     applyOpenAIExecutorEnv(openAIConfig);
     const model = openAIConfig.model ?? config.default_model;
     const maxTurns = task.maxTurns ?? config.executor.default_max_turns;
-    setTracingDisabled(false);
+    const sdkTracingEnabled = shouldEnableOpenAITracing(openAIConfig);
+    const sdkApplyPatchEnabled = shouldEnableOpenAISandboxApplyPatch(openAIConfig);
+    setTracingDisabled(!sdkTracingEnabled);
     const agentRun = await this.store.createAgentRun({
       sessionId: task.sessionId,
       role: task.role,
@@ -85,13 +124,15 @@ export class OpenAISandboxRunner implements AgentRunner {
           base_url: openAIConfig.baseUrlSource,
           model: openAIConfig.modelSource,
         },
+        sdk_tracing_enabled: sdkTracingEnabled,
+        sdk_apply_patch_enabled: sdkApplyPatchEnabled,
       },
     });
     const heartbeat = startAgentRunHeartbeat(this.store, agentRun, config.monitoring.heartbeat_interval_ms);
     const started = Date.now();
     const toolCallsBefore = await this.snapshotGit(task.repoRoot);
     try {
-      const agent = this.createAgent(task, model);
+      const agent = this.createAgent(task, model, { enableApplyPatchTool: sdkApplyPatchEnabled });
       const sandboxClient = new UnixLocalSandboxClient();
       const result = await run(agent, task.prompt, {
         maxTurns,
@@ -172,21 +213,28 @@ export class OpenAISandboxRunner implements AgentRunner {
     }
   }
 
-  private createAgent(task: AgentTask, model: string): Agent | SandboxAgent {
+  private createAgent(
+    task: AgentTask,
+    model: string,
+    options: { enableApplyPatchTool: boolean },
+  ): Agent | SandboxAgent {
     const instructions = [
       `You are the ${task.role} agent in Agent Team Runtime.`,
       "Work only inside /workspace.",
       task.writeAllowed
         ? "You may edit files when needed and must keep changes scoped."
         : "You are read-only. Do not edit files or run commands that mutate the repository.",
+      options.enableApplyPatchTool || !task.writeAllowed
+        ? ""
+        : "The apply_patch tool is unavailable on this executor; use shell commands for required file edits.",
       "Return a concise report with evidence: files inspected, commands run, changes made, risks.",
       "Do not include secrets or private credentials in output.",
-    ].join("\n");
+    ].filter(Boolean).join("\n");
 
     return new SandboxAgent({
       name: `agt_${task.role}`,
       instructions,
-      capabilities: sandboxCapabilities(task),
+      capabilities: sandboxCapabilities(task, { enableApplyPatchTool: options.enableApplyPatchTool }),
       model,
     });
   }
@@ -200,7 +248,7 @@ export class OpenAISandboxRunner implements AgentRunner {
         continue;
       }
       await this.store.appendToolCall({
-        at: nowIso(),
+        at: nowReadableDateTime(),
         session_id: task.sessionId,
         agent_run_id: agentRun.agent_run_id,
         role: task.role,
@@ -219,7 +267,7 @@ export class OpenAISandboxRunner implements AgentRunner {
     args: { name: string; started: number; output: Record<string, unknown> },
   ): Promise<void> {
     const call: ToolCallRecord = {
-      at: nowIso(),
+      at: nowReadableDateTime(),
       session_id: task.sessionId,
       agent_run_id: agentRun.agent_run_id,
       role: task.role,
@@ -262,6 +310,157 @@ export function sandboxWorkspacePermissions(_writeAllowed?: boolean): number {
   return 0o755;
 }
 
+export class CodexExecRunner implements AgentRunner {
+  readonly name = "codex_exec" as const;
+
+  constructor(private readonly store: RuntimeStore) {}
+
+  async runTask(task: AgentTask): Promise<AgentTaskResult> {
+    const config = await this.store.loadConfig();
+    const prompt = buildCodexExecPrompt(task);
+    const model = codexModelOverride();
+    const agentRun = await this.store.createAgentRun({
+      sessionId: task.sessionId,
+      role: task.role,
+      runner: this.name,
+      input: prompt,
+      metadata: {
+        write_allowed: Boolean(task.writeAllowed),
+        model: model ?? "",
+        model_source: model ? "env" : "codex_config",
+        max_turns: task.maxTurns ?? config.executor.default_max_turns,
+        skills: taskSkillMetadata(task.skills, "prompt_inline"),
+      },
+    });
+    const heartbeat = startAgentRunHeartbeat(this.store, agentRun, config.monitoring.heartbeat_interval_ms);
+    const started = Date.now();
+    const before = await snapshotGitDiffNames(task.repoRoot);
+    try {
+      const args = codexExecArgs(task, model);
+      const result = await execa(codexBinary(), args, {
+        cwd: task.repoRoot,
+        input: prompt,
+        reject: false,
+        maxBuffer: 1000 * 1000 * 100,
+      });
+      const events = parseCodexExecJsonl(result.stdout);
+      const commandsRun = commandsFromCodexExecEvents(events);
+      const filesChanged = await changedGitDiffNames(task.repoRoot, before);
+      const tokenUsage = summarizeCodexExecUsage(events);
+      const output = finalMessageFromCodexExecEvents(events) || result.stderr || result.stdout || "";
+      const eventsArtifact = await this.store.writeArtifact({
+        sessionId: task.sessionId,
+        role: task.role,
+        name: `${agentRun.agent_run_id}-codex-exec-events.jsonl`,
+        content: normalizeCodexExecEventsArtifact(result.stdout, result.stderr),
+        metadata: { agent_run_id: agentRun.agent_run_id, kind: "codex_exec_events" },
+      });
+      const promptArtifact = await this.store.writeArtifact({
+        sessionId: task.sessionId,
+        role: task.role,
+        name: `${agentRun.agent_run_id}-codex-exec-prompt.md`,
+        content: prompt,
+        metadata: { agent_run_id: agentRun.agent_run_id, kind: "codex_exec_prompt" },
+      });
+      await this.recordCodexToolCalls(task, agentRun, events);
+      await heartbeat.stop();
+      const completed = await this.store.completeAgentRun(agentRun, {
+        status: result.exitCode === 0 ? "completed" : "failed",
+        output,
+        error: result.exitCode === 0 ? "" : result.stderr || output,
+        metadata: {
+          ...agentRun.metadata,
+          executor_status: result.exitCode === 0 ? "completed" : "failed",
+          exit_code: result.exitCode ?? 0,
+          stderr: redactLargeString(result.stderr),
+          stdout_event_count: events.length,
+          codex_exec_events_artifact_path: eventsArtifact.path,
+          codex_exec_prompt_artifact_path: promptArtifact.path,
+          token_usage: tokenUsage,
+          executor_duration_ms: Date.now() - started,
+        },
+      });
+      await this.recordRuntimeToolCall(task, completed, {
+        name: result.exitCode === 0 ? "codex_exec_run" : "codex_exec_error",
+        started,
+        output: {
+          final_output: output,
+          changed_files: filesChanged,
+          commands_run: commandsRun,
+          exit_code: result.exitCode ?? 0,
+          stderr: redactLargeString(result.stderr),
+          stdout_event_count: events.length,
+          codex_exec_events_artifact_path: eventsArtifact.path,
+          codex_exec_prompt_artifact_path: promptArtifact.path,
+          token_usage: tokenUsage,
+        },
+      });
+      return { agentRun: completed, output, filesChanged, commandsRun, tokenUsage };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await heartbeat.stop();
+      const tokenUsage = emptyTokenUsage();
+      const completed = await this.store.completeAgentRun(agentRun, {
+        status: "failed",
+        error: message,
+        output: message,
+        metadata: {
+          token_usage: tokenUsage,
+          executor_duration_ms: Date.now() - started,
+        },
+      });
+      await this.recordRuntimeToolCall(task, completed, {
+        name: "codex_exec_error",
+        started,
+        output: { error: message, token_usage: tokenUsage },
+      });
+      return { agentRun: completed, output: message, filesChanged: [], commandsRun: [], tokenUsage };
+    } finally {
+      await heartbeat.stop();
+    }
+  }
+
+  private async recordCodexToolCalls(task: AgentTask, agentRun: AgentRunRecord, events: unknown[]): Promise<void> {
+    for (const event of events) {
+      const record = safeRecord(event);
+      const item = safeRecord(record.item);
+      if (item.type !== "command_execution") {
+        continue;
+      }
+      const command = stringValue(item.command) || "command_execution";
+      await this.store.appendToolCall({
+        at: nowReadableDateTime(),
+        session_id: task.sessionId,
+        agent_run_id: agentRun.agent_run_id,
+        role: task.role,
+        kind: "shell",
+        name: "codex_command_execution",
+        input: { command, event_type: record.type ?? "" },
+        output: { status: item.status ?? "", event_type: record.type ?? "" },
+        duration_ms: undefined,
+      });
+    }
+  }
+
+  private async recordRuntimeToolCall(
+    task: AgentTask,
+    agentRun: AgentRunRecord,
+    args: { name: string; started: number; output: Record<string, unknown> },
+  ): Promise<void> {
+    await this.store.appendToolCall({
+      at: nowReadableDateTime(),
+      session_id: task.sessionId,
+      agent_run_id: agentRun.agent_run_id,
+      role: task.role,
+      kind: "agent_run",
+      name: args.name,
+      input: { write_allowed: Boolean(task.writeAllowed), max_turns: task.maxTurns, skills: taskSkillMetadata(task.skills, "prompt_inline") },
+      output: args.output,
+      duration_ms: Date.now() - args.started,
+    });
+  }
+}
+
 export class LocalFallbackRunner implements AgentRunner {
   readonly name = "local_fallback" as const;
 
@@ -289,7 +488,7 @@ export class LocalFallbackRunner implements AgentRunner {
         git.summary,
       ].join("\n");
       await this.store.appendToolCall({
-        at: nowIso(),
+        at: nowReadableDateTime(),
         session_id: task.sessionId,
         agent_run_id: agentRun.agent_run_id,
         role: task.role,
@@ -323,8 +522,14 @@ export class LocalFallbackRunner implements AgentRunner {
   }
 }
 
-function sandboxCapabilities(task: AgentTask) {
-  const capabilities = Capabilities.default();
+function sandboxCapabilities(task: AgentTask, options: { enableApplyPatchTool: boolean }) {
+  const capabilities = options.enableApplyPatchTool
+    ? Capabilities.default()
+    : Capabilities.default().map((capability) => capability.type === "filesystem"
+      ? filesystem({
+        configureTools: (tools) => tools.filter((tool) => tool.type !== "apply_patch"),
+      })
+      : capability);
   const routedSkills = task.skills?.filter((skill) => skill.content.trim()) ?? [];
   if (routedSkills.length > 0) {
     capabilities.push(sdkSkills({
@@ -339,15 +544,180 @@ function sandboxCapabilities(task: AgentTask) {
   return capabilities;
 }
 
-function taskSkillMetadata(skills: AgentTaskSkill[] | undefined): Array<Record<string, unknown>> {
+function taskSkillMetadata(
+  skills: AgentTaskSkill[] | undefined,
+  delivery: "sdk_skill" | "prompt_inline" = "sdk_skill",
+): Array<Record<string, unknown>> {
   return (skills ?? []).map((skill) => ({
     name: skill.name,
     description: skill.description,
     path: skill.path,
     content_sha256: skill.content_sha256,
     required: skill.required,
-    delivery: "sdk_skill",
+    delivery,
   }));
+}
+
+function codexBinary(): string {
+  return process.env.AGT_CODEX_BIN?.trim() || "codex";
+}
+
+function codexModelOverride(): string | undefined {
+  return process.env.AGT_CODEX_MODEL?.trim()
+    || process.env.AGT_OPENAI_MODEL?.trim()
+    || process.env.OPENAI_MODEL?.trim()
+    || undefined;
+}
+
+function codexExecArgs(task: AgentTask, model: string | undefined): string[] {
+  const args = [
+    "exec",
+    "--json",
+    "--color",
+    "never",
+    "--sandbox",
+    task.writeAllowed ? "workspace-write" : "read-only",
+    "--cd",
+    task.repoRoot,
+  ];
+  if (model) {
+    args.push("--model", model);
+  }
+  if (process.env.AGT_CODEX_SKIP_GIT_REPO_CHECK === "1") {
+    args.push("--skip-git-repo-check");
+  }
+  args.push("-");
+  return args;
+}
+
+export function buildCodexExecPrompt(task: AgentTask): string {
+  const skills = task.skills?.filter((skill) => skill.content.trim()) ?? [];
+  if (skills.length === 0) {
+    return task.prompt;
+  }
+  const skillSections = skills.map((skill) => [
+    `## Skill: ${skill.name}`,
+    `Required: ${skill.required ? "yes" : "no"}`,
+    `Source path: ${skill.path}`,
+    `Content SHA256: ${skill.content_sha256}`,
+    "",
+    skill.content.trim(),
+  ].join("\n"));
+  return [
+    task.prompt,
+    "",
+    "# AGT-Routed Skill Bodies",
+    "",
+    "The following skill bodies were selected by AGT for this stage. Treat these sections as the active stage skills. Do not invoke unrelated local skills unless the stage prompt explicitly asks for them.",
+    "",
+    ...skillSections,
+  ].join("\n");
+}
+
+export function parseCodexExecJsonl(stdout: string): unknown[] {
+  return stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return JSON.parse(line) as unknown;
+      } catch (error) {
+        return {
+          type: "parse_error",
+          raw: line,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    });
+}
+
+export function commandsFromCodexExecEvents(events: unknown[]): string[] {
+  const commands = events
+    .map((event) => stringValue(safeRecord(safeRecord(event).item).command))
+    .filter(Boolean);
+  return [...new Set(commands)];
+}
+
+export function finalMessageFromCodexExecEvents(events: unknown[]): string {
+  for (const event of [...events].reverse()) {
+    const record = safeRecord(event);
+    const item = safeRecord(record.item);
+    if (record.type === "item.completed" && item.type === "agent_message") {
+      const text = stringValue(item.text);
+      if (text) {
+        return text;
+      }
+    }
+  }
+  return "";
+}
+
+export function summarizeCodexExecUsage(events: unknown[]): TokenUsage {
+  const usages = events
+    .map((event) => safeRecord(safeRecord(event).usage))
+    .filter((usage) => Object.keys(usage).length > 0);
+  if (usages.length === 0) {
+    return emptyTokenUsage();
+  }
+  const inputTokens = sumCodexUsageNumber(usages, ["input_tokens", "inputTokens", "prompt_tokens", "promptTokens"]);
+  const outputTokens = sumCodexUsageNumber(usages, ["output_tokens", "outputTokens", "completion_tokens", "completionTokens"]);
+  const explicitTotal = sumCodexUsageNumber(usages, ["total_tokens", "totalTokens"]);
+  const reasoningTokens = sumCodexUsageNumber(usages, [
+    "reasoning_tokens",
+    "reasoningTokens",
+    "reasoning_output_tokens",
+    "reasoningOutputTokens",
+  ]);
+  return TokenUsageSchema.parse({
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    total_tokens: explicitTotal || inputTokens + outputTokens,
+    reasoning_tokens: reasoningTokens,
+    raw: usages,
+  });
+}
+
+function sumCodexUsageNumber(usages: Array<Record<string, unknown>>, keys: string[]): number {
+  return usages.reduce((total, usage) => {
+    for (const key of keys) {
+      const value = usage[key];
+      if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+        return total + Math.trunc(value);
+      }
+    }
+    return total;
+  }, 0);
+}
+
+function normalizeCodexExecEventsArtifact(stdout: string, stderr: string): string {
+  const lines = stdout.trim() ? stdout.trim().split(/\r?\n/) : [];
+  if (stderr.trim()) {
+    lines.push(JSON.stringify({ type: "stderr", text: stderr }));
+  }
+  return lines.length ? `${lines.join("\n")}\n` : "";
+}
+
+async function snapshotGitDiffNames(repoRoot: string): Promise<string> {
+  try {
+    const result = await execa("git", ["diff", "--name-only"], { cwd: repoRoot });
+    return result.stdout;
+  } catch {
+    return "";
+  }
+}
+
+async function changedGitDiffNames(repoRoot: string, before: string): Promise<string[]> {
+  try {
+    const result = await execa("git", ["diff", "--name-only"], { cwd: repoRoot });
+    const beforeSet = new Set(before.split("\n").filter(Boolean));
+    return result.stdout
+      .split("\n")
+      .filter(Boolean)
+      .filter((file) => !beforeSet.has(file));
+  } catch {
+    return [];
+  }
 }
 
 function startAgentRunHeartbeat(store: RuntimeStore, agentRun: AgentRunRecord, intervalMs: number): { stop: () => Promise<void> } {
@@ -575,4 +945,8 @@ function redactLargeStrings(value: Record<string, unknown>): Record<string, unkn
       typeof item === "string" && item.length > 4000 ? `${item.slice(0, 4000)}...<truncated>` : item,
     ]),
   );
+}
+
+function redactLargeString(value: string): string {
+  return value.length > 4000 ? `${value.slice(0, 4000)}...<truncated>` : value;
 }

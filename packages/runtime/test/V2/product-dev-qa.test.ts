@@ -13,6 +13,8 @@ import {
   RuntimeStore,
 } from "../../src/V2/index.js";
 
+const READABLE_DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+
 class ProductDevQaRunner implements AgentRunner {
   readonly name = "local_fallback" as const;
 
@@ -98,8 +100,11 @@ describe("product-dev-qa workflow", () => {
     expect(sessionJson).not.toHaveProperty("profile");
     expect(executionJson).not.toHaveProperty("profile");
     expect(indexJson.sessions[0]).not.toHaveProperty("profile");
+    expect(sessionJson.created_at).toMatch(READABLE_DATE_TIME_PATTERN);
+    expect(sessionJson.updated_at).toMatch(READABLE_DATE_TIME_PATTERN);
 
-    const eventKinds = (await store.readEvents(result.session_id)).map((event) => event.kind);
+    const events = await store.readEvents(result.session_id);
+    const eventKinds = events.map((event) => event.kind);
     expect(eventKinds).toEqual(expect.arrayContaining([
       "stage_started",
       "executor_started",
@@ -108,11 +113,13 @@ describe("product-dev-qa workflow", () => {
     ]));
     expect(eventKinds).not.toContain("product_dev_qa_stage_started");
     expect(eventKinds).not.toContain("product_dev_qa_stage_completed");
+    expect(events.every((event) => READABLE_DATE_TIME_PATTERN.test(event.at))).toBe(true);
 
     const metrics = await store.readMetrics(result.session_id);
     expect(metrics.map((metric) => metric.stage)).toEqual(["intake_summary", "product"]);
     expect(metrics.every((metric) => metric.kind === "stage.completed")).toBe(true);
-    expect(metrics[0]?.stage_started_at).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(metrics[0]?.stage_started_at).toMatch(READABLE_DATE_TIME_PATTERN);
+    expect(metrics[0]?.stage_completed_at).toMatch(READABLE_DATE_TIME_PATTERN);
     expect(metrics[0]).toMatchObject({
       workflow_id: "product-dev-qa",
       attempt: 1,
