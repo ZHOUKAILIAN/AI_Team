@@ -1,6 +1,6 @@
 import { Agent, run, setTracingDisabled } from "@openai/agents";
 import { SandboxAgent } from "@openai/agents/sandbox";
-import { Capabilities } from "@openai/agents/sandbox";
+import { Capabilities, skills as sdkSkills } from "@openai/agents/sandbox";
 import { localDir } from "@openai/agents/sandbox";
 import { UnixLocalSandboxClient } from "@openai/agents/sandbox/local";
 import { execa } from "execa";
@@ -24,8 +24,18 @@ export type AgentTask = {
   role: AgentRole;
   repoRoot: string;
   prompt: string;
+  skills?: AgentTaskSkill[];
   writeAllowed?: boolean;
   maxTurns?: number;
+};
+
+export type AgentTaskSkill = {
+  name: string;
+  description: string;
+  content: string;
+  path: string;
+  content_sha256: string;
+  required: boolean;
 };
 
 export type AgentTaskResult = {
@@ -69,6 +79,7 @@ export class OpenAISandboxRunner implements AgentRunner {
         write_allowed: Boolean(task.writeAllowed),
         model,
         max_turns: maxTurns,
+        skills: taskSkillMetadata(task.skills),
         openai_config_sources: {
           api_key: openAIConfig.apiKeySource,
           base_url: openAIConfig.baseUrlSource,
@@ -175,7 +186,7 @@ export class OpenAISandboxRunner implements AgentRunner {
     return new SandboxAgent({
       name: `agt_${task.role}`,
       instructions,
-      capabilities: Capabilities.default(),
+      capabilities: sandboxCapabilities(task),
       model,
     });
   }
@@ -214,7 +225,7 @@ export class OpenAISandboxRunner implements AgentRunner {
       role: task.role,
       kind: "agent_run",
       name: args.name,
-      input: { write_allowed: Boolean(task.writeAllowed), max_turns: task.maxTurns },
+      input: { write_allowed: Boolean(task.writeAllowed), max_turns: task.maxTurns, skills: taskSkillMetadata(task.skills) },
       output: args.output,
       duration_ms: Date.now() - args.started,
     };
@@ -264,6 +275,7 @@ export class LocalFallbackRunner implements AgentRunner {
       input: task.prompt,
       metadata: {
         reason: "OPENAI_API_KEY/OPENAI_BASE_URL not set; using deterministic local runner.",
+        skills: taskSkillMetadata(task.skills),
       },
     });
     const config = await this.store.loadConfig();
@@ -309,6 +321,33 @@ export class LocalFallbackRunner implements AgentRunner {
       await heartbeat.stop();
     }
   }
+}
+
+function sandboxCapabilities(task: AgentTask) {
+  const capabilities = Capabilities.default();
+  const routedSkills = task.skills?.filter((skill) => skill.content.trim()) ?? [];
+  if (routedSkills.length > 0) {
+    capabilities.push(sdkSkills({
+      skillsPath: ".agt2/skills",
+      skills: routedSkills.map((skill) => ({
+        name: skill.name,
+        description: skill.description || "No description provided.",
+        content: skill.content,
+      })),
+    }));
+  }
+  return capabilities;
+}
+
+function taskSkillMetadata(skills: AgentTaskSkill[] | undefined): Array<Record<string, unknown>> {
+  return (skills ?? []).map((skill) => ({
+    name: skill.name,
+    description: skill.description,
+    path: skill.path,
+    content_sha256: skill.content_sha256,
+    required: skill.required,
+    delivery: "sdk_skill",
+  }));
 }
 
 function startAgentRunHeartbeat(store: RuntimeStore, agentRun: AgentRunRecord, intervalMs: number): { stop: () => Promise<void> } {

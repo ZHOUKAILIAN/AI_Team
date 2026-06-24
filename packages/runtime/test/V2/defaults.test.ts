@@ -9,9 +9,11 @@ import {
   createTaskWorktree,
   hasOpenAIExecutorConfig,
   initRuntime,
+  renderSkillInjection,
   resolveOpenAIExecutorConfig,
   resolveSkillRouting,
   sandboxWorkspacePermissions,
+  skillsForExecutor,
   summarizeOpenAIUsage,
 } from "../../src/V2/index.js";
 
@@ -194,7 +196,20 @@ describe("V2 runtime defaults", () => {
     const skillsRoot = await mkdtemp(path.join(tmpdir(), "agt2-routing-skills-"));
     for (const name of ["route-skill", "product-skill", "plan-skill", "implementation-skill", "qa-skill"]) {
       await mkdir(path.join(skillsRoot, name), { recursive: true });
-      await writeFile(path.join(skillsRoot, name, "SKILL.md"), `# ${name}\n`);
+      const descriptionLines = name === "product-skill"
+        ? ["description: |", `  ${name} description`]
+        : [`description: ${name} description`];
+      await writeFile(path.join(skillsRoot, name, "SKILL.md"), [
+        "---",
+        `name: ${name}`,
+        ...descriptionLines,
+        "---",
+        "",
+        `# ${name}`,
+        "",
+        `${name} private body.`,
+        "",
+      ].join("\n"));
     }
     const projectConfigDir = path.join(configRoot, path.basename(repoRoot));
     await mkdir(projectConfigDir, { recursive: true });
@@ -246,6 +261,25 @@ describe("V2 runtime defaults", () => {
         role: "product",
       });
       expect(product.selected_skills.map((skill) => skill.name)).toEqual(["product-skill"]);
+      expect(product.missing_skills).toEqual([]);
+      expect(product.missing_required_skills).toEqual([]);
+      expect(product.selected_skills[0]).toMatchObject({
+        description: "product-skill description",
+        delivery: "sdk_skill",
+        included_in_prompt: false,
+      });
+      const productPromptSkills = renderSkillInjection(product);
+      expect(productPromptSkills).toContain("Available skills: product-skill");
+      expect(productPromptSkills).toContain("Skill bodies are provided to compatible executors as SDK skills");
+      expect(productPromptSkills).not.toContain("product-skill private body.");
+      expect(skillsForExecutor(product)).toEqual([
+        expect.objectContaining({
+          name: "product-skill",
+          description: "product-skill description",
+          content: expect.stringContaining("product-skill private body."),
+          required: true,
+        }),
+      ]);
 
       const technicalPlan = await resolveSkillRouting({
         repoRoot,

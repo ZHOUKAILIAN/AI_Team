@@ -243,7 +243,7 @@ export type V2ExecutorHookContext = V2StageHookContext & {
 | `promptTraceId` | `string` | 本阶段实际发送给 runner 的 prompt trace id |
 | `promptPath` | `string` | prompt 文件路径，例如 `stages/qa/attempt-001/prompt.md` |
 | `contextPacketPath` | `string` | context packet 文件路径 |
-| `skillRouting` | `Record<string, unknown>` | 精简后的 skill routing 元数据，只包含匹配状态、注入 skill 名称和缺失 skill；完整审计信息写入 `stages/*/attempt-*/skill-routing.json` |
+| `skillRouting` | `Record<string, unknown>` | 精简后的 skill routing 元数据，只包含匹配状态、提供给 executor 的 skill 名称和缺失 skill；完整审计信息写入 `stages/*/attempt-*/skill-routing.json` |
 
 V2 的 hook context 不使用 `profile` 作为流程字段。`Product -> Dev -> QA` 的阶段顺序由 workflow spec 和状态机决定；`model`、`maxTurns` 这类字段属于 executor 配置，不应该影响 workflow 结构。
 

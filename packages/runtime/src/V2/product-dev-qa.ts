@@ -28,6 +28,7 @@ import {
 import {
   renderSkillInjection,
   resolveSkillRouting,
+  skillsForExecutor,
   skillRoutingAuditMetadata,
   skillRoutingMetadata,
 } from "./skill-routing.js";
@@ -602,6 +603,7 @@ async function executeStage(args: {
       role: args.stage.role,
       repoRoot: args.repoRoot,
       prompt,
+      skills: skillsForExecutor(routing),
       writeAllowed: args.stage.canWriteCode,
       maxTurns: args.stage.executor.maxTurns,
       traceId: trace.prompt_id,
@@ -1041,6 +1043,7 @@ async function runStageSafely(args: {
   role: AgentRole;
   repoRoot: string;
   prompt: string;
+  skills: ReturnType<typeof skillsForExecutor>;
   writeAllowed: boolean;
   maxTurns: number;
   traceId: string;
@@ -1054,6 +1057,7 @@ async function runStageSafely(args: {
       role: args.role,
       repoRoot: args.repoRoot,
       prompt: args.prompt,
+      skills: args.skills,
       writeAllowed: args.writeAllowed,
       maxTurns: args.maxTurns,
     });
