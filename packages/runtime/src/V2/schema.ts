@@ -181,7 +181,7 @@ export const AgentRunSchema = z.object({
   agent_run_id: z.string(),
   role: AgentRoleSchema,
   status: z.enum(["running", "completed", "blocked", "failed"]),
-  runner: z.enum(["openai_sandbox", "local_fallback"]),
+  runner: z.enum(["openai_sandbox", "codex_exec", "local_fallback"]),
   input: z.string(),
   output: z.string().default(""),
   started_at: z.string(),
@@ -199,7 +199,7 @@ export const PromptTraceSchema = z.object({
   session_id: z.string(),
   role: AgentRoleSchema,
   kind: z.enum(["stage", "runtime"]).default("stage"),
-  runner: z.enum(["openai_sandbox", "local_fallback"]).optional(),
+  runner: z.enum(["openai_sandbox", "codex_exec", "local_fallback"]).optional(),
   source: z.string(),
   path: z.string(),
   sha256: z.string(),
@@ -302,6 +302,14 @@ export const ProductDevQaWorkflowRunStatusSchema = z.enum([
 ]);
 export type ProductDevQaWorkflowRunStatus = z.infer<typeof ProductDevQaWorkflowRunStatusSchema>;
 
+export const ProductDevQaRetryContextSchema = z.object({
+  message: z.string().default(""),
+  sources: z.array(RequestSourceSchema).default([]),
+  created_at: z.string(),
+  blocked_reason: z.string().default(""),
+});
+export type ProductDevQaRetryContext = z.infer<typeof ProductDevQaRetryContextSchema>;
+
 export const ProductDevQaWorkflowRunSchema = z.object({
   schema_version: z.literal(1),
   workflow_id: z.literal("product-dev-qa"),
@@ -321,6 +329,7 @@ export const ProductDevQaWorkflowRunSchema = z.object({
   last_stage_verdict: z.enum(["passed", "failed", "blocked"]).nullable().default(null),
   last_stage_summary: z.string().default(""),
   last_stage_artifacts: z.array(z.string()).default([]),
+  retry_context: ProductDevQaRetryContextSchema.nullable().default(null),
   started_at: z.string(),
   updated_at: z.string(),
   completed_at: z.string().nullable().default(null),

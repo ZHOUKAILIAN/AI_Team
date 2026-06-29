@@ -9,6 +9,7 @@ import {
   type AgentTaskResult,
   emptyTokenUsage,
   recordProductDevQaHumanDecision,
+  retryProductDevQaBlockedStage,
   runProductDevQaWorkflow,
   RuntimeStore,
 } from "../../src/V2/index.js";
@@ -67,6 +68,86 @@ class ThrowingRunner implements AgentRunner {
 
   async runTask(): Promise<AgentTaskResult> {
     throw new Error("synthetic executor failure");
+  }
+}
+
+class RetryableFailureRunner implements AgentRunner {
+  readonly name = "local_fallback" as const;
+
+  constructor(private failuresRemaining: number) {}
+
+  async runTask(task: AgentTask): Promise<AgentTaskResult> {
+    const store = new RuntimeStore(path.join(task.repoRoot, ".agt-test"));
+    const agentRun = await store.createAgentRun({
+      sessionId: task.sessionId,
+      role: task.role,
+      runner: this.name,
+      input: task.prompt,
+    });
+    if (this.failuresRemaining > 0) {
+      this.failuresRemaining -= 1;
+      const message = "stream disconnected before completion: error sending request for url (https://ai.smartingredients.my/v1/responses)";
+      const failed = await store.completeAgentRun(agentRun, {
+        status: "failed",
+        output: message,
+        error: message,
+        metadata: {
+          failure_kind: "executor_transient",
+          failure_message: message,
+          retryable: true,
+        },
+      });
+      return {
+        agentRun: failed,
+        output: message,
+        filesChanged: [],
+        commandsRun: [],
+        tokenUsage: emptyTokenUsage(),
+      };
+    }
+    const completed = await store.completeAgentRun(agentRun, {
+      status: "completed",
+      output: task.role === "qa" ? "QA verified local delivery.\nVERDICT: passed" : `${task.role} recovered.`,
+    });
+    return {
+      agentRun: completed,
+      output: completed.output,
+      filesChanged: task.writeAllowed ? ["src/example.ts"] : [],
+      commandsRun: [],
+      tokenUsage: emptyTokenUsage(),
+    };
+  }
+}
+
+class NonRetryableFailureRunner implements AgentRunner {
+  readonly name = "local_fallback" as const;
+
+  async runTask(task: AgentTask): Promise<AgentTaskResult> {
+    const store = new RuntimeStore(path.join(task.repoRoot, ".agt-test"));
+    const agentRun = await store.createAgentRun({
+      sessionId: task.sessionId,
+      role: task.role,
+      runner: this.name,
+      input: task.prompt,
+    });
+    const message = "Routing config gap: missing required skills.";
+    const failed = await store.completeAgentRun(agentRun, {
+      status: "failed",
+      output: message,
+      error: message,
+      metadata: {
+        failure_kind: "executor_failed",
+        failure_message: message,
+        retryable: false,
+      },
+    });
+    return {
+      agentRun: failed,
+      output: message,
+      filesChanged: [],
+      commandsRun: [],
+      tokenUsage: emptyTokenUsage(),
+    };
   }
 }
 
@@ -290,6 +371,138 @@ describe("product-dev-qa workflow", () => {
     expect(executionJson.status).toBe("blocked");
     expect(executionJson.steps[0]?.status).toBe("blocked");
     expect(executionJson.steps[0]?.agent_run_id).toBeTruthy();
+  });
+
+  it("automatically retries retryable executor failures and preserves attempt artifacts", async () => {
+    const repoRoot = await mkdtemp(path.join(tmpdir(), "agt-p0-"));
+    const stateRoot = path.join(repoRoot, ".agt-test");
+    const result = await runProductDevQaWorkflow({
+      repoRoot,
+      stateRoot,
+      request: "exercise retryable executor failure",
+      runner: new RetryableFailureRunner(2),
+    });
+
+    expect(result.status).toBe("waiting_human");
+    expect(result.current_stage).toBe("product");
+
+    const store = new RuntimeStore(stateRoot);
+    const workflow = await store.loadProductDevQaWorkflow(result.session_id);
+    expect(workflow.stage_attempt_counts.intake_summary).toBe(3);
+    expect(workflow.stage_attempt_counts.product).toBe(1);
+
+    const events = await store.readEvents(result.session_id);
+    const retryEvents = events.filter((event) => event.kind === "stage_retry_scheduled");
+    expect(retryEvents).toHaveLength(2);
+    expect(retryEvents[0]?.details).toMatchObject({
+      stage: "intake_summary",
+      attempt: 1,
+      next_attempt: 2,
+      failure_kind: "executor_transient",
+    });
+
+    const sessionDir = path.join(stateRoot, "sessions", result.session_id);
+    await access(path.join(sessionDir, "stages", "intake_summary", "attempt-001", "retry-scheduled.json"));
+    await access(path.join(sessionDir, "stages", "intake_summary", "attempt-002", "retry-scheduled.json"));
+    await access(path.join(sessionDir, "stages", "intake_summary", "attempt-003", "verdict.json"));
+  });
+
+  it("blocks with a deterministic reason after retryable executor failures exhaust retries", async () => {
+    const repoRoot = await mkdtemp(path.join(tmpdir(), "agt-p0-"));
+    const stateRoot = path.join(repoRoot, ".agt-test");
+    const result = await runProductDevQaWorkflow({
+      repoRoot,
+      stateRoot,
+      request: "exercise retry exhaustion",
+      runner: new RetryableFailureRunner(4),
+    });
+
+    expect(result.status).toBe("blocked");
+    expect(result.current_stage).toBe("intake_summary");
+    expect(result.blocked_reason).toContain("Executor failed after 4 attempt(s), 3 retries exhausted:");
+    expect(result.blocked_reason).toContain("stream disconnected before completion");
+
+    const store = new RuntimeStore(stateRoot);
+    const workflow = await store.loadProductDevQaWorkflow(result.session_id);
+    expect(workflow.stage_attempt_counts.intake_summary).toBe(4);
+    const retryEvents = (await store.readEvents(result.session_id)).filter((event) => event.kind === "stage_retry_scheduled");
+    expect(retryEvents).toHaveLength(3);
+  });
+
+  it("does not automatically retry non-retryable blocked outcomes", async () => {
+    const repoRoot = await mkdtemp(path.join(tmpdir(), "agt-p0-"));
+    const stateRoot = path.join(repoRoot, ".agt-test");
+    const result = await runProductDevQaWorkflow({
+      repoRoot,
+      stateRoot,
+      request: "exercise non retryable failure",
+      runner: new NonRetryableFailureRunner(),
+    });
+
+    expect(result.status).toBe("blocked");
+    expect(result.blocked_reason).toContain("Routing config gap");
+
+    const store = new RuntimeStore(stateRoot);
+    const workflow = await store.loadProductDevQaWorkflow(result.session_id);
+    expect(workflow.stage_attempt_counts.intake_summary).toBe(1);
+    expect((await store.readEvents(result.session_id)).map((event) => event.kind)).not.toContain("stage_retry_scheduled");
+  });
+
+  it("retries a blocked stage after human context without creating a new session", async () => {
+    const repoRoot = await mkdtemp(path.join(tmpdir(), "agt-p0-"));
+    const stateRoot = path.join(repoRoot, ".agt-test");
+    const first = await runProductDevQaWorkflow({
+      repoRoot,
+      stateRoot,
+      request: "exercise human retry",
+      runner: new ThrowingRunner(),
+    });
+    expect(first.status).toBe("blocked");
+
+    const retried = await retryProductDevQaBlockedStage({
+      stateRoot,
+      sessionId: first.session_id,
+      message: "I fixed the executor network issue; retry the same stage.",
+      runner: new ProductDevQaRunner(),
+    });
+
+    expect(retried.session_id).toBe(first.session_id);
+    expect(retried.status).toBe("waiting_human");
+    expect(retried.current_stage).toBe("product");
+
+    const store = new RuntimeStore(stateRoot);
+    const workflow = await store.loadProductDevQaWorkflow(first.session_id);
+    expect(workflow.stage_attempt_counts.intake_summary).toBe(2);
+    expect(workflow.retry_context).toBeNull();
+    const eventKinds = (await store.readEvents(first.session_id)).map((event) => event.kind);
+    expect(eventKinds).toContain("human_retry_requested");
+
+    const retryPrompt = await readFile(
+      path.join(stateRoot, "sessions", first.session_id, "stages", "intake_summary", "attempt-002", "prompt.md"),
+      "utf8",
+    );
+    expect(retryPrompt).toContain("## Human Retry Context");
+    expect(retryPrompt).toContain("I fixed the executor network issue");
+
+    const artifacts = await store.readArtifacts(first.session_id);
+    expect(artifacts.some((artifact) => artifact.name.startsWith("retry-context-intake_summary-"))).toBe(true);
+  });
+
+  it("rejects retry while waiting for human approval and points to approve", async () => {
+    const repoRoot = await mkdtemp(path.join(tmpdir(), "agt-p0-"));
+    const stateRoot = path.join(repoRoot, ".agt-test");
+    const first = await runProductDevQaWorkflow({
+      repoRoot,
+      stateRoot,
+      request: "exercise retry restriction",
+      runner: new ProductDevQaRunner(),
+    });
+
+    await expect(retryProductDevQaBlockedStage({
+      stateRoot,
+      sessionId: first.session_id,
+      runner: new ProductDevQaRunner(),
+    })).rejects.toThrow("use agt2 approve");
   });
 
   it("blocks and writes runtime-error artifacts when runtime persistence fails", async () => {

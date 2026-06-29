@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { createInterface } from "node:readline/promises";
 import {
   createTaskWorktree,
   initRuntime,
@@ -11,6 +12,7 @@ import {
   PRODUCT_DEV_QA_WORKFLOW_ID,
   recordProductDevQaHumanDecision,
   readSessionStatus,
+  retryProductDevQaBlockedStage,
   runProductDevQaWorkflow,
   RuntimeStore,
   type RequestSourceRecord,
@@ -67,9 +69,15 @@ program
   .option("--state-root <path>", "state root; defaults to <repo>/.agt2")
   .option("--from <path>", "read request context from a file")
   .option("--from-dir <path>", "read request context from all files under a directory")
+  .option("--interactive", "prompt in the current terminal when waiting_human or blocked")
+  .option("--no-interactive", "disable current-terminal prompts")
   .option("--no-task-worktree", "run in the current repository instead of an isolated task worktree")
   .action(async (messageParts: string[], options: DeliverOptions) => {
-    const result = await startProductDevQaDelivery(messageParts, options, true);
+    let result = await startProductDevQaDelivery(messageParts, options, true);
+    result = await runProductDevQaInteractiveLoop(result, {
+      enabled: shouldUseInteractiveMode(options),
+      sourceStateRoot: resolveSourceStateRoot(options),
+    });
     printResult(result);
   });
 
@@ -81,10 +89,16 @@ program
   .option("--state-root <path>", "state root; defaults to <repo>/.agt2")
   .option("--from <path>", "read request context from a file")
   .option("--from-dir <path>", "read request context from all files under a directory")
+  .option("--interactive", "prompt in the current terminal when waiting_human or blocked")
+  .option("--no-interactive", "disable current-terminal prompts")
   .option("--task-worktree", "create an isolated git worktree for this run")
   .option("--no-task-worktree", "disable configured task worktree for this run")
   .action(async (messageParts: string[], options: DeliverOptions) => {
-    const result = await startProductDevQaDelivery(messageParts, options, false);
+    let result = await startProductDevQaDelivery(messageParts, options, false);
+    result = await runProductDevQaInteractiveLoop(result, {
+      enabled: shouldUseInteractiveMode(options),
+      sourceStateRoot: resolveSourceStateRoot(options),
+    });
     printResult(result);
   });
 
@@ -113,6 +127,18 @@ program
   .option("--state-root <path>", "state root", path.join(process.cwd(), DEFAULT_STATE_DIR))
   .action(async (sessionId: string | undefined, options: ApproveOptions) => {
     const result = await approveProductDevQaGate(sessionId, options);
+    printResult(result);
+  });
+
+program
+  .command("retry")
+  .argument("[session-id]", "session id; defaults to latest session")
+  .description("retry the current blocked product-dev-qa stage after a human resolves the blocker")
+  .option("--state-root <path>", "state root", path.join(process.cwd(), DEFAULT_STATE_DIR))
+  .option("--message <text>", "human retry context to inject into the next stage prompt")
+  .option("--from <path>", "read human retry context from a file")
+  .action(async (sessionId: string | undefined, options: RetryOptions) => {
+    const result = await retryProductDevQaStage(sessionId, options);
     printResult(result);
   });
 
@@ -205,6 +231,7 @@ type DeliverOptions = {
   stateRoot?: string;
   from?: string;
   fromDir?: string;
+  interactive?: boolean;
   taskWorktree?: boolean;
 };
 
@@ -215,6 +242,12 @@ type DecisionOptions = {
 
 type ApproveOptions = {
   stateRoot: string;
+};
+
+type RetryOptions = {
+  stateRoot: string;
+  message?: string;
+  from?: string;
 };
 
 type StatusOptions = {
@@ -458,6 +491,18 @@ async function startProductDevQaDelivery(
   });
 }
 
+function resolveSourceStateRoot(options: Pick<DeliverOptions, "repoRoot" | "stateRoot">): string {
+  const repoRoot = path.resolve(options.repoRoot);
+  return path.resolve(options.stateRoot ?? path.join(repoRoot, DEFAULT_STATE_DIR));
+}
+
+function shouldUseInteractiveMode(options: Pick<DeliverOptions, "interactive">): boolean {
+  if (options.interactive !== undefined) {
+    return options.interactive;
+  }
+  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
+}
+
 async function startProductDevQaRun(args: {
   sourceRepoRoot: string;
   sourceStateRoot: string;
@@ -516,6 +561,148 @@ async function approveProductDevQaGate(
   });
   await mirrorSessionIndex(sourceStateRoot, target.stateRoot, result.session_id);
   return result;
+}
+
+async function retryProductDevQaStage(
+  sessionId: string | undefined,
+  options: RetryOptions,
+): Promise<RunResult> {
+  const sourceStateRoot = path.resolve(options.stateRoot);
+  const target = sessionId
+    ? await resolveSessionTarget(sourceStateRoot, sessionId)
+    : await resolveLatestSessionTarget(sourceStateRoot);
+  await assertProductDevQaSession(target);
+  const retryInput = await readRequestInput(options.message ? [options.message] : [], { from: options.from });
+  const result = await retryProductDevQaBlockedStage({
+    stateRoot: target.stateRoot,
+    sessionId: target.sessionId,
+    message: retryInput.request,
+    requestSources: retryInput.sources,
+  });
+  await mirrorSessionIndex(sourceStateRoot, target.stateRoot, result.session_id);
+  return result;
+}
+
+async function runProductDevQaInteractiveLoop(
+  initial: RunResult,
+  options: { enabled: boolean; sourceStateRoot: string },
+): Promise<RunResult> {
+  if (!options.enabled) {
+    return initial;
+  }
+  let result = initial;
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    while (result.status === "waiting_human" || result.status === "blocked") {
+      const store = new RuntimeStore(result.state_root);
+      const snapshot = await readSessionStatus(store, result.session_id);
+      printInteractiveSummary(snapshot);
+      if (result.status === "waiting_human") {
+        const action = normalizeInteractiveAction(await rl.question("[a] approve  [n] no-go  [i] status  [q] quit > "));
+        if (action === "approve") {
+          result = await recordProductDevQaHumanDecision({
+            stateRoot: result.state_root,
+            sessionId: result.session_id,
+            decision: "go",
+          });
+          await mirrorSessionIndex(options.sourceStateRoot, result.state_root, result.session_id);
+          continue;
+        }
+        if (action === "no-go") {
+          result = await recordProductDevQaHumanDecision({
+            stateRoot: result.state_root,
+            sessionId: result.session_id,
+            decision: "no-go",
+          });
+          await mirrorSessionIndex(options.sourceStateRoot, result.state_root, result.session_id);
+          return result;
+        }
+        if (action === "status") {
+          printStatus(snapshot);
+          continue;
+        }
+        if (action === "quit") {
+          return result;
+        }
+        console.log("Unknown action. Use a, n, i, or q.");
+        continue;
+      }
+
+      const action = normalizeInteractiveAction(await rl.question("[r] retry  [f] retry from file  [i] status  [q] quit > "));
+      if (action === "retry") {
+        const message = (await rl.question("Retry message (optional) > ")).trim();
+        result = await retryProductDevQaBlockedStage({
+          stateRoot: result.state_root,
+          sessionId: result.session_id,
+          message,
+        });
+        await mirrorSessionIndex(options.sourceStateRoot, result.state_root, result.session_id);
+        continue;
+      }
+      if (action === "retry-from-file") {
+        const filePath = (await rl.question("Retry context file path > ")).trim();
+        if (!filePath) {
+          console.log("File path is required for retry from file.");
+          continue;
+        }
+        const message = (await rl.question("Retry message (optional) > ")).trim();
+        const retryInput = await readRequestInput(message ? [message] : [], { from: filePath });
+        result = await retryProductDevQaBlockedStage({
+          stateRoot: result.state_root,
+          sessionId: result.session_id,
+          message: retryInput.request,
+          requestSources: retryInput.sources,
+        });
+        await mirrorSessionIndex(options.sourceStateRoot, result.state_root, result.session_id);
+        continue;
+      }
+      if (action === "status") {
+        printStatus(snapshot);
+        continue;
+      }
+      if (action === "quit") {
+        return result;
+      }
+      console.log("Unknown action. Use r, f, i, or q.");
+    }
+    return result;
+  } finally {
+    rl.close();
+  }
+}
+
+function printInteractiveSummary(snapshot: SessionStatusSnapshot): void {
+  console.log("");
+  console.log(`session_id: ${snapshot.session_id}`);
+  console.log(`runtime_status: ${snapshot.runtime_status}`);
+  console.log(`current_stage: ${snapshot.current_stage}`);
+  if (snapshot.blocked_reason) {
+    printIndentedValue("blocked_reason", snapshot.blocked_reason, "  ");
+  }
+  console.log(`summary: ${snapshot.summary}`);
+}
+
+function normalizeInteractiveAction(value: string): "approve" | "no-go" | "retry" | "retry-from-file" | "status" | "quit" | "unknown" {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "a" || normalized === "approve" || normalized === "go") {
+    return "approve";
+  }
+  if (normalized === "n" || normalized === "no-go" || normalized === "no" || normalized === "reject") {
+    return "no-go";
+  }
+  if (normalized === "r" || normalized === "retry") {
+    return "retry";
+  }
+  if (normalized === "f" || normalized === "file" || normalized === "from-file" || normalized === "retry-from-file") {
+    return "retry-from-file";
+  }
+  if (normalized === "i" || normalized === "inspect" || normalized === "status") {
+    return "status";
+  }
+  if (normalized === "q" || normalized === "quit" || normalized === "exit") {
+    return "quit";
+  }
+  return "unknown";
 }
 
 async function assertProductDevQaSession(target: SessionTarget): Promise<void> {
