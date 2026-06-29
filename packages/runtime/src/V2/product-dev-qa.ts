@@ -7,7 +7,13 @@ import {
   type V2HookManager,
   type V2StageHookContext,
 } from "./hooks.js";
-import { buildAgentRunner, type AgentRunner, type AgentTaskResult } from "./runner.js";
+import {
+  agentRunFailureMetadata,
+  buildAgentRunner,
+  classifyExecutorFailure,
+  type AgentRunner,
+  type AgentTaskResult,
+} from "./runner.js";
 import {
   type AgentRole,
   type AgentRunRecord,
@@ -15,6 +21,7 @@ import {
   type DeliveryPhaseStatus,
   type DeliveryWorkflowRecord,
   type ExecutionWorkflowRecord,
+  type ProductDevQaRetryContext,
   type ProductDevQaStageRole,
   type ProductDevQaStageStep,
   type ProductDevQaWorkflowRunRecord,
@@ -36,6 +43,7 @@ import { RuntimeStore, writeJson } from "./store.js";
 import { emptyTokenUsage } from "./usage.js";
 
 export const PRODUCT_DEV_QA_WORKFLOW_ID = "product-dev-qa" as const;
+export const DEFAULT_STAGE_RETRY_LIMIT = 3;
 
 type StageKey = "intake_summary" | "product" | "dev.technical_plan" | "dev.implementation" | "qa";
 type StageVerdict = "passed" | "failed" | "blocked";
@@ -93,6 +101,7 @@ export type RunProductDevQaWorkflowOptions = {
   requestSources?: RequestSourceRecord[];
   runner?: AgentRunner;
   maxQaFailureLoops?: number;
+  maxStageRetries?: number;
 };
 
 export type RecordProductDevQaDecisionOptions = {
@@ -101,6 +110,17 @@ export type RecordProductDevQaDecisionOptions = {
   decision: "go" | "no-go";
   runner?: AgentRunner;
   maxQaFailureLoops?: number;
+  maxStageRetries?: number;
+};
+
+export type RetryProductDevQaBlockedStageOptions = {
+  stateRoot: string;
+  sessionId: string;
+  message?: string;
+  requestSources?: RequestSourceRecord[];
+  runner?: AgentRunner;
+  maxQaFailureLoops?: number;
+  maxStageRetries?: number;
 };
 
 const STAGES: Record<StageKey, ProductDevQaStagePlan> = {
@@ -220,6 +240,7 @@ export async function runProductDevQaWorkflow(options: RunProductDevQaWorkflowOp
   const workflow = await ensureProductDevQaWorkflow(store, session.session_id);
   const runner = options.runner ?? buildAgentRunner(store);
   const hooks = createDefaultV2HookManager(store);
+  const maxStageRetries = options.maxStageRetries ?? DEFAULT_STAGE_RETRY_LIMIT;
   let current = workflow;
 
   while (true) {
@@ -248,11 +269,22 @@ export async function runProductDevQaWorkflow(options: RunProductDevQaWorkflowOp
         runner,
         hooks,
       });
+      if (shouldAutoRetryStageOutcome(outcome, running.attemptNumber, maxStageRetries)) {
+        current = await scheduleStageRetry({
+          store,
+          workflow: running.workflow,
+          stage,
+          outcome,
+          attemptNumber: running.attemptNumber,
+          maxStageRetries,
+        });
+        continue;
+      }
       current = await transitionAfterStage({
         store,
         workflow: running.workflow,
         stage,
-        outcome,
+        outcome: retryExhaustedOutcome(outcome, running.attemptNumber, maxStageRetries),
         maxQaFailureLoops: options.maxQaFailureLoops ?? 3,
         hooks,
       });
@@ -279,6 +311,9 @@ export async function recordProductDevQaHumanDecision(
     throw new Error(`Session is not a ${PRODUCT_DEV_QA_WORKFLOW_ID} workflow: ${options.sessionId}`);
   }
   if (workflow.status !== "waiting_human" || !workflow.waiting_on) {
+    if (workflow.status === "blocked") {
+      throw new Error(`Session is blocked; use agt2 retry ${options.sessionId} after resolving the blocker.`);
+    }
     throw new Error(`Session is not waiting for a Product/Dev plan decision: ${options.sessionId}`);
   }
 
@@ -290,6 +325,7 @@ export async function recordProductDevQaHumanDecision(
       waiting_on: null,
       blocked_reason: `Human decision rejected ${workflow.waiting_on}.`,
       summary: `Blocked by human decision at ${workflow.waiting_on}.`,
+      retry_context: null,
       updated_at: now,
     };
     await store.appendEvent({
@@ -313,6 +349,7 @@ export async function recordProductDevQaHumanDecision(
     waiting_on: null,
     blocked_reason: "",
     summary: `Human approved ${workflow.waiting_on}; continuing to ${nextStage}.`,
+    retry_context: null,
     updated_at: now,
   }, STAGES[nextStage]);
   await store.appendEvent({
@@ -332,6 +369,77 @@ export async function recordProductDevQaHumanDecision(
     sessionId: options.sessionId,
     runner: options.runner,
     maxQaFailureLoops: options.maxQaFailureLoops,
+    maxStageRetries: options.maxStageRetries,
+  });
+}
+
+export async function retryProductDevQaBlockedStage(
+  options: RetryProductDevQaBlockedStageOptions,
+): Promise<RunResult> {
+  const store = new RuntimeStore(options.stateRoot);
+  const session = await store.loadSession(options.sessionId);
+  const workflow = await store.loadProductDevQaWorkflow(options.sessionId);
+  if (workflow.workflow_id !== PRODUCT_DEV_QA_WORKFLOW_ID) {
+    throw new Error(`Session is not a ${PRODUCT_DEV_QA_WORKFLOW_ID} workflow: ${options.sessionId}`);
+  }
+  if (workflow.status !== "blocked") {
+    if (workflow.status === "waiting_human") {
+      throw new Error(`Session is waiting for a Product/Dev plan decision; use agt2 approve ${options.sessionId}.`);
+    }
+    if (workflow.status === "done") {
+      throw new Error(`Session is already done and cannot be retried: ${options.sessionId}`);
+    }
+    throw new Error(`Session is ${workflow.status}; only blocked ${PRODUCT_DEV_QA_WORKFLOW_ID} sessions can be retried.`);
+  }
+
+  const stage = stageFromCurrentStage(workflow.current_stage) ?? stageFromWorkflowKey(workflow.last_stage_key);
+  if (!stage) {
+    throw new Error(`Cannot retry blocked session because current stage is unknown: ${workflow.current_stage}`);
+  }
+
+  const now = nowIso();
+  const retryContext: ProductDevQaRetryContext = {
+    message: options.message?.trim() ?? "",
+    sources: options.requestSources ?? [],
+    created_at: now,
+    blocked_reason: workflow.blocked_reason,
+  };
+  const retrying = setWorkflowStage({
+    ...workflow,
+    status: "running",
+    waiting_on: null,
+    blocked_reason: "",
+    summary: `Human requested retry for ${stage.currentStage}.`,
+    retry_context: retryContext,
+    updated_at: now,
+  }, stage);
+
+  await store.appendEvent({
+    at: now,
+    session_id: options.sessionId,
+    kind: "human_retry_requested",
+    role: stage.role,
+    status: "running",
+    message: retryContext.message || `Human requested retry for ${stage.currentStage}.`,
+    details: {
+      workflow_id: PRODUCT_DEV_QA_WORKFLOW_ID,
+      workflow_run_id: workflow.workflow_run_id,
+      stage: stage.key,
+      previous_blocked_reason: workflow.blocked_reason,
+      source_paths: retryContext.sources.map((source) => source.path),
+    },
+  });
+  await writeRetryContextArtifact(store, options.sessionId, stage, retryContext);
+  await resetExecutionFromStage(store, retrying, stage.key);
+  await writeAndSyncWorkflow(store, retrying);
+  return runProductDevQaWorkflow({
+    repoRoot: session.repo_root,
+    projectRoot: session.project_root,
+    stateRoot: store.stateRoot,
+    sessionId: options.sessionId,
+    runner: options.runner,
+    maxQaFailureLoops: options.maxQaFailureLoops,
+    maxStageRetries: options.maxStageRetries,
   });
 }
 
@@ -369,6 +477,7 @@ async function ensureProductDevQaWorkflow(
     last_stage_verdict: null,
     last_stage_summary: "",
     last_stage_artifacts: [],
+    retry_context: null,
     started_at: now,
     updated_at: now,
     completed_at: null,
@@ -413,6 +522,145 @@ function nextRunnableStage(workflow: ProductDevQaWorkflowRunRecord): ProductDevQ
 
 function stageFromCurrentStage(currentStage: string): ProductDevQaStagePlan | undefined {
   return Object.values(STAGES).find((stage) => stage.currentStage === currentStage || stage.key === currentStage);
+}
+
+function stageFromWorkflowKey(key: string): ProductDevQaStagePlan | undefined {
+  return Object.values(STAGES).find((stage) => stage.key === key);
+}
+
+function shouldAutoRetryStageOutcome(
+  outcome: StageExecutionOutcome,
+  attemptNumber: number,
+  maxStageRetries: number,
+): boolean {
+  const failure = agentRunFailureMetadata(outcome.agentRun);
+  return outcome.verdict === "blocked"
+    && failure?.retryable === true
+    && attemptNumber <= maxStageRetries;
+}
+
+function retryExhaustedOutcome(
+  outcome: StageExecutionOutcome,
+  attemptNumber: number,
+  maxStageRetries: number,
+): StageExecutionOutcome {
+  const failure = agentRunFailureMetadata(outcome.agentRun);
+  if (outcome.verdict !== "blocked" || failure?.retryable !== true || attemptNumber <= maxStageRetries) {
+    return outcome;
+  }
+  const reason = `Executor failed after ${attemptNumber} attempt(s), ${maxStageRetries} retries exhausted: ${failure.failureMessage}`;
+  return {
+    ...outcome,
+    output: reason,
+    summary: reason,
+    reason,
+  };
+}
+
+async function scheduleStageRetry(args: {
+  store: RuntimeStore;
+  workflow: ProductDevQaWorkflowRunRecord;
+  stage: ProductDevQaStagePlan;
+  outcome: StageExecutionOutcome;
+  attemptNumber: number;
+  maxStageRetries: number;
+}): Promise<ProductDevQaWorkflowRunRecord> {
+  const now = nowIso();
+  const failure = agentRunFailureMetadata(args.outcome.agentRun);
+  const remainingRetries = Math.max(args.maxStageRetries - args.attemptNumber, 0);
+  const nextAttempt = args.attemptNumber + 1;
+  const retrying = setWorkflowStage({
+    ...args.workflow,
+    status: "running",
+    waiting_on: null,
+    blocked_reason: "",
+    summary: `${args.stage.currentStage} retry ${nextAttempt} scheduled after retryable executor failure.`,
+    last_stage_verdict: "blocked",
+    last_stage_summary: args.outcome.reason || args.outcome.summary,
+    last_stage_artifacts: args.outcome.artifactNames,
+    retry_context: null,
+    updated_at: now,
+  }, args.stage);
+  await setExecutionStageStatus(args.store, retrying, args.stage, "pending", {
+    agent_run_id: args.outcome.agentRun.agent_run_id,
+    prompt_trace_id: args.outcome.promptTraceId,
+    artifact_path: args.outcome.artifactPaths[0] ?? "",
+    files_changed: args.outcome.filesChanged,
+    commands_run: args.outcome.commandsRun,
+    completed_at: now,
+    summary: `${args.stage.currentStage}: retry ${nextAttempt} scheduled after ${failure?.failureKind ?? "executor_failed"}.`,
+  });
+  await setExecutionStatusForWorkflow(args.store, retrying, "in_progress");
+  await writeAndSyncWorkflow(args.store, retrying);
+  const attemptDir = stageAttemptDir(args.store, args.workflow.session_id, args.stage, args.attemptNumber);
+  await writeJson(path.join(attemptDir, "retry-scheduled.json"), {
+    schema_version: 1,
+    stage: args.stage.key,
+    attempt: args.attemptNumber,
+    next_attempt: nextAttempt,
+    failure_kind: failure?.failureKind ?? "",
+    failure_message: failure?.failureMessage ?? args.outcome.reason,
+    remaining_retries: remainingRetries,
+    agent_run_id: args.outcome.agentRun.agent_run_id,
+    prompt_trace_id: args.outcome.promptTraceId,
+  });
+  await args.store.appendEvent({
+    at: now,
+    session_id: args.workflow.session_id,
+    kind: "stage_retry_scheduled",
+    role: args.stage.role,
+    status: "running",
+    message: `${args.stage.currentStage} retry ${nextAttempt} scheduled.`,
+    details: {
+      workflow_id: PRODUCT_DEV_QA_WORKFLOW_ID,
+      workflow_run_id: args.workflow.workflow_run_id,
+      stage: args.stage.key,
+      attempt: args.attemptNumber,
+      next_attempt: nextAttempt,
+      failure_kind: failure?.failureKind ?? "",
+      failure_message: failure?.failureMessage ?? args.outcome.reason,
+      remaining_retries: remainingRetries,
+    },
+  });
+  return retrying;
+}
+
+async function writeRetryContextArtifact(
+  store: RuntimeStore,
+  sessionId: string,
+  stage: ProductDevQaStagePlan,
+  retryContext: ProductDevQaRetryContext,
+): Promise<void> {
+  const safeStage = stage.key.replace(/[^a-z0-9_.-]+/gi, "-");
+  await store.writeArtifact({
+    sessionId,
+    role: stage.role,
+    name: `retry-context-${safeStage}-${Date.parse(retryContext.created_at) || Date.now()}.md`,
+    content: [
+      "# Human Retry Context",
+      "",
+      `Stage: ${stage.currentStage}`,
+      `Created at: ${retryContext.created_at}`,
+      "",
+      "## Previous Blocked Reason",
+      retryContext.blocked_reason || "No previous blocked reason recorded.",
+      "",
+      "## Human Message",
+      retryContext.message || "No additional human message.",
+      "",
+      "## Sources",
+      retryContext.sources.length
+        ? retryContext.sources.map((source) => `- ${source.path} (${source.bytes} bytes, sha256 ${source.sha256})`).join("\n")
+        : "No retry source files.",
+      "",
+    ].join("\n"),
+    metadata: {
+      workflow_id: PRODUCT_DEV_QA_WORKFLOW_ID,
+      stage: stage.key,
+      kind: "human_retry_context",
+      source_paths: retryContext.sources.map((source) => source.path),
+    },
+  });
 }
 
 async function markStageRunning(
@@ -514,6 +762,7 @@ async function executeStage(args: {
       can_write_code: args.stage.canWriteCode,
       must_produce_verdict: args.stage.role === "qa",
     },
+    human_retry_context: args.workflow.retry_context,
     skill_routing: skillRoutingMetadata(routing),
   };
   const contextPacketPath = path.join(attemptDir, "context-packet.json");
@@ -525,6 +774,7 @@ async function executeStage(args: {
     stage: args.stage,
     artifactInputs: artifactInputs.contents,
     missingInputArtifacts: artifactInputs.missing,
+    retryContext: args.workflow.retry_context,
     skillInjection: renderSkillInjection(routing),
   });
   const trace = await args.store.recordPromptTrace({
@@ -767,6 +1017,7 @@ async function transitionAfterStage(args: {
       last_stage_verdict: "blocked",
       last_stage_summary: args.outcome.summary,
       last_stage_artifacts: args.outcome.artifactNames,
+      retry_context: null,
       updated_at: now,
     };
     await setExecutionStatusForWorkflow(args.store, next, "blocked");
@@ -782,6 +1033,7 @@ async function transitionAfterStage(args: {
       last_stage_verdict: "passed",
       last_stage_summary: args.outcome.summary,
       last_stage_artifacts: args.outcome.artifactNames,
+      retry_context: null,
       updated_at: now,
     };
     await setExecutionStatusForWorkflow(args.store, next, "waiting_human");
@@ -797,6 +1049,7 @@ async function transitionAfterStage(args: {
       last_stage_verdict: "passed",
       last_stage_summary: args.outcome.summary,
       last_stage_artifacts: args.outcome.artifactNames,
+      retry_context: null,
       updated_at: now,
     };
     await setExecutionStatusForWorkflow(args.store, next, "waiting_human");
@@ -810,6 +1063,7 @@ async function transitionAfterStage(args: {
         last_stage_verdict: "failed",
         last_stage_summary: args.outcome.summary,
         last_stage_artifacts: args.outcome.artifactNames,
+        retry_context: null,
         updated_at: now,
       };
       await setExecutionStatusForWorkflow(args.store, next, "blocked");
@@ -823,6 +1077,7 @@ async function transitionAfterStage(args: {
         last_stage_verdict: "failed",
         last_stage_summary: args.outcome.summary,
         last_stage_artifacts: args.outcome.artifactNames,
+        retry_context: null,
         updated_at: now,
       }, STAGES["dev.implementation"]);
       await resetExecutionFromStage(args.store, next, "dev.implementation");
@@ -840,6 +1095,7 @@ async function transitionAfterStage(args: {
       last_stage_verdict: "passed",
       last_stage_summary: args.outcome.summary,
       last_stage_artifacts: args.outcome.artifactNames,
+      retry_context: null,
       updated_at: now,
       completed_at: now,
     };
@@ -855,6 +1111,7 @@ async function transitionAfterStage(args: {
       last_stage_verdict: "passed",
       last_stage_summary: args.outcome.summary,
       last_stage_artifacts: args.outcome.artifactNames,
+      retry_context: null,
       updated_at: now,
     }, nextStage);
     await setExecutionStatusForWorkflow(args.store, next, "in_progress");
@@ -962,6 +1219,7 @@ async function blockStageRuntimeError(args: {
     last_stage_verdict: "blocked",
     last_stage_summary: message,
     last_stage_artifacts: [],
+    retry_context: null,
     updated_at: now,
   };
   await setExecutionStageStatus(args.store, blocked, args.stage, "blocked", {
@@ -1016,6 +1274,7 @@ async function transitionToDone(
     current_stage: "done",
     waiting_on: null,
     summary: "Local code changes and QA verification report are complete.",
+    retry_context: null,
     updated_at: now,
     completed_at: now,
   };
@@ -1064,19 +1323,25 @@ async function runStageSafely(args: {
     if (result.agentRun.status === "completed") {
       return result;
     }
+    const output = result.output || result.agentRun.error || `${args.stageKey} did not complete.`;
+    const failure = agentRunFailureMetadata(result.agentRun) ?? classifyExecutorFailure(output);
     const completed = await args.store.completeAgentRun(result.agentRun, {
       status: "blocked",
-      output: result.output || result.agentRun.error || `${args.stageKey} did not complete.`,
+      output,
       metadata: {
         workflow_id: PRODUCT_DEV_QA_WORKFLOW_ID,
         stage: args.stageKey,
         prompt_trace_id: args.traceId,
+        failure_kind: failure.failureKind,
+        failure_message: failure.failureMessage,
+        retryable: failure.retryable,
       },
     });
     return { ...result, agentRun: completed, output: completed.output };
   } catch (error) {
     await recordStageError(args.hooks, args.stageCtx, "executor", error);
     const message = error instanceof Error ? error.message : String(error);
+    const failure = classifyExecutorFailure(message);
     const agentRun = await args.store.createAgentRun({
       sessionId: args.sessionId,
       role: args.role,
@@ -1087,12 +1352,20 @@ async function runStageSafely(args: {
         stage: args.stageKey,
         prompt_trace_id: args.traceId,
         executor_status: "failed",
+        failure_kind: failure.failureKind,
+        failure_message: failure.failureMessage,
+        retryable: failure.retryable,
       },
     });
     const completed = await args.store.completeAgentRun(agentRun, {
       status: "blocked",
       output: message,
       error: message,
+      metadata: {
+        failure_kind: failure.failureKind,
+        failure_message: failure.failureMessage,
+        retryable: failure.retryable,
+      },
     });
     return { agentRun: completed, output: message, filesChanged: [], commandsRun: [], tokenUsage: emptyTokenUsage() };
   }
@@ -1162,11 +1435,31 @@ async function readInputArtifacts(
   return { contents, missing };
 }
 
+function renderHumanRetryContext(retryContext: ProductDevQaRetryContext | null | undefined): string {
+  if (!retryContext) {
+    return "";
+  }
+  return [
+    "## Human Retry Context",
+    `Previous blocked reason: ${retryContext.blocked_reason || "not recorded"}`,
+    "",
+    retryContext.message || "No additional human message.",
+    "",
+    retryContext.sources.length
+      ? [
+          "Retry context sources:",
+          ...retryContext.sources.map((source) => `- ${source.path} (${source.bytes} bytes, sha256 ${source.sha256})`),
+        ].join("\n")
+      : "",
+  ].filter(Boolean).join("\n");
+}
+
 function renderStagePrompt(args: {
   request: string;
   stage: ProductDevQaStagePlan;
   artifactInputs: Array<{ name: string; content: string }>;
   missingInputArtifacts: string[];
+  retryContext?: ProductDevQaRetryContext | null;
   skillInjection: string;
 }): string {
   const inputContext = args.stage.includeRequest
@@ -1183,6 +1476,7 @@ function renderStagePrompt(args: {
   const qaVerdict = args.stage.role === "qa"
     ? "\nFor QA, include `VERDICT: passed` or `VERDICT: failed`."
     : "";
+  const retryContext = renderHumanRetryContext(args.retryContext);
   const sections = [
     [
       "# AGT Stage",
@@ -1194,6 +1488,7 @@ function renderStagePrompt(args: {
       `Write access: ${args.stage.canWriteCode}`,
     ].filter(Boolean).join("\n"),
     inputContext + missingInputs,
+    retryContext,
     args.skillInjection,
     [
       "## Output Contract",

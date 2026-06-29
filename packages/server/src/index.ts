@@ -19,7 +19,9 @@ import {
 import {
   PRODUCT_DEV_QA_WORKFLOW_ID,
   RuntimeStore as V2RuntimeStore,
+  type AgentRunRecord as V2AgentRunRecord,
   type ExecutionWorkflowRecord as V2ExecutionWorkflowRecord,
+  type PromptTraceRecord as V2PromptTraceRecord,
   type SessionRecord as V2SessionRecord,
 } from "@agent-team-runtime/runtime/V2";
 
@@ -35,14 +37,16 @@ type HydratedSession = {
   workflowRun: ProductDevQaWorkflowRunRecord | null;
   events: RuntimeEvent[];
   toolCalls: ToolCallRecord[];
-  prompts: PromptTraceRecord[];
+  prompts: AnyPromptTraceRecord[];
   artifacts: ArtifactRecord[];
-  agentRuns: AgentRunRecord[];
+  agentRuns: AnyAgentRunRecord[];
 };
 
 type RuntimeStoreLike = V1RuntimeStore | V2RuntimeStore;
 type AnySessionRecord = V1SessionRecord | V2SessionRecord;
 type AnyExecutionWorkflowRecord = V1ExecutionWorkflowRecord | V2ExecutionWorkflowRecord;
+type AnyPromptTraceRecord = PromptTraceRecord | V2PromptTraceRecord;
+type AnyAgentRunRecord = AgentRunRecord | V2AgentRunRecord;
 
 export async function createServer(options: CreateServerOptions) {
   const app = Fastify({ logger: false });

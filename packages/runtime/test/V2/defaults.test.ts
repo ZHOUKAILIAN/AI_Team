@@ -6,15 +6,24 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyOpenAIExecutorEnv,
+  buildAgentRunner,
+  buildCodexExecPrompt,
+  commandsFromCodexExecEvents,
+  failureFromCodexExecEvents,
+  finalMessageFromCodexExecEvents,
   createTaskWorktree,
   hasOpenAIExecutorConfig,
   initRuntime,
+  parseCodexExecJsonl,
   renderSkillInjection,
+  resolveAgentExecutorPreference,
   resolveOpenAIExecutorConfig,
   resolveSkillRouting,
   sandboxWorkspacePermissions,
   skillsForExecutor,
+  summarizeCodexExecUsage,
   summarizeOpenAIUsage,
+  RuntimeStore,
 } from "../../src/V2/index.js";
 
 describe("V2 runtime defaults", () => {
@@ -188,6 +197,82 @@ describe("V2 runtime defaults", () => {
   it("uses SDK-cleanup-safe numeric sandbox permissions", () => {
     expect(sandboxWorkspacePermissions(false)).toBe(0o755);
     expect(sandboxWorkspacePermissions(true)).toBe(0o755);
+  });
+
+  it("can select codex exec as the V2 executor without changing the default auto path", async () => {
+    expect(resolveAgentExecutorPreference({})).toBe("auto");
+    expect(resolveAgentExecutorPreference({ AGT_EXECUTOR: "codex" })).toBe("codex_exec");
+    expect(resolveAgentExecutorPreference({ AGT_V2_EXECUTOR: "codex-exec" })).toBe("codex_exec");
+    expect(resolveAgentExecutorPreference({ AGT_EXECUTOR: "openai-sdk" })).toBe("openai_sandbox");
+
+    const stateRoot = await mkdtemp(path.join(tmpdir(), "agt2-runner-select-"));
+    const store = new RuntimeStore(stateRoot);
+    const previous = process.env.AGT_EXECUTOR;
+    process.env.AGT_EXECUTOR = "codex_exec";
+    try {
+      expect(buildAgentRunner(store).name).toBe("codex_exec");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AGT_EXECUTOR;
+      } else {
+        process.env.AGT_EXECUTOR = previous;
+      }
+    }
+  });
+
+  it("builds a codex exec prompt with AGT-controlled skill bodies", () => {
+    const prompt = buildCodexExecPrompt({
+      sessionId: "session",
+      role: "dev",
+      repoRoot: "/repo",
+      prompt: "Base stage prompt.",
+      skills: [{
+        name: "backend-verification",
+        description: "Verify backend changes.",
+        content: "# Backend Verification\nRun API checks.",
+        path: "/skills/backend-verification/SKILL.md",
+        content_sha256: "abc123",
+        required: true,
+      }],
+    });
+
+    expect(prompt).toContain("Base stage prompt.");
+    expect(prompt).toContain("# AGT-Routed Skill Bodies");
+    expect(prompt).toContain("## Skill: backend-verification");
+    expect(prompt).toContain("Run API checks.");
+  });
+
+  it("parses codex exec JSONL events into output, commands, usage, and retryable failures", () => {
+    const events = parseCodexExecJsonl([
+      JSON.stringify({ type: "thread.started", thread_id: "thread" }),
+      JSON.stringify({ type: "item.completed", item: { type: "command_execution", command: "npm test", status: "completed" } }),
+      JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "last progress message" } }),
+      JSON.stringify({
+        type: "turn.completed",
+        usage: {
+          input_tokens: 10,
+          cached_input_tokens: 4,
+          output_tokens: 3,
+          reasoning_output_tokens: 2,
+        },
+      }),
+      JSON.stringify({ type: "error", message: "stream disconnected before completion: error sending request for url (https://ai.smartingredients.my/v1/responses)" }),
+      JSON.stringify({ type: "turn.failed", error: { message: "stream disconnected before completion: error sending request for url (https://ai.smartingredients.my/v1/responses)" } }),
+    ].join("\n"));
+
+    expect(commandsFromCodexExecEvents(events)).toEqual(["npm test"]);
+    expect(finalMessageFromCodexExecEvents(events)).toBe("last progress message");
+    expect(summarizeCodexExecUsage(events)).toMatchObject({
+      input_tokens: 10,
+      output_tokens: 3,
+      total_tokens: 13,
+      reasoning_tokens: 2,
+    });
+    expect(failureFromCodexExecEvents(events)).toMatchObject({
+      failureKind: "executor_transient",
+      failureMessage: "stream disconnected before completion: error sending request for url (https://ai.smartingredients.my/v1/responses)",
+      retryable: true,
+    });
   });
 
   it("routes V2 skills by concrete stage without broad role bleed-through", async () => {
