@@ -207,6 +207,8 @@ V1 的默认模型和每个 profile 的最大 turns 可以写在 `.agt/config.js
 
 V2 executor 优先读取 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`AGT_OPENAI_MODEL` / `OPENAI_MODEL`。如果这些环境变量没有设置，会尝试读取 `~/.codex/config.toml` 的 `model` / `model_provider` / provider `base_url`，以及 `~/.codex/auth.json` 的 `OPENAI_API_KEY`。环境变量和 Codex 配置都不可用时，runtime 才会走 `local_fallback`，只执行确定性的本地检查并写入同样的状态文件。这样 `npm test`、CLI smoke 和迁移验证不依赖外部模型。
 
+V2 也可以显式使用 Codex CLI 作为阶段 executor：`AGT_EXECUTOR=codex_exec agt2 deliver --from docs/requirement.md`。`codex_exec` runner 调用 `codex exec --json`，由 AGT 为每次 agent run 准备隔离的 `CODEX_HOME`，只把当前 stage 选中的 skills 物化到 `codex-home/skills/<skill>/SKILL.md`，并剥离继承自用户全局配置的 `[[skills.config]]`。Prompt 只携带 skill 名称、来源和 hash；skill 正文通过隔离 home 供 Codex 原生发现。默认从当前 `CODEX_HOME` 或 `~/.codex` 复制认证和配置，也可用 `AGT_CODEX_SHARED_HOME` 指定来源。每次 Codex run 会记录 `<agent_run_id>-codex-exec-prompt.md`、`<agent_run_id>-codex-exec-events.jsonl`、`runs/<agent_run_id>/skill-manifest.json`、agent run metadata、tool call 摘要、commands、changed files 和 token usage。
+
 ## 状态目录
 
 V1 默认状态目录是 `<repo>/.agt`，V2 默认状态目录是 `<repo>/.agt2`。V1 目录结构示例：

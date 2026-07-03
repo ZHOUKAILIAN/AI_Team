@@ -3,6 +3,10 @@ import { SandboxAgent } from "@openai/agents/sandbox";
 import { Capabilities, skills as sdkSkills } from "@openai/agents/sandbox";
 import { localDir } from "@openai/agents/sandbox";
 import { UnixLocalSandboxClient } from "@openai/agents/sandbox/local";
+import { existsSync } from "node:fs";
+import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import path from "node:path";
 import { execa } from "execa";
 import {
   type AgentRole,
@@ -45,6 +49,26 @@ export type AgentTaskResult = {
   filesChanged: string[];
   commandsRun: string[];
   tokenUsage: TokenUsage;
+};
+
+export type CodexExecSkillDelivery = "codex_home" | "prompt_inline" | "sdk_skill";
+
+export type CodexExecSkillManifestEntry = {
+  name: string;
+  description: string;
+  path: string;
+  content_sha256: string;
+  required: boolean;
+  installed_path: string;
+};
+
+export type CodexExecHome = {
+  runRoot: string;
+  codexHome: string;
+  skillsDir: string;
+  manifestPath: string;
+  skills: CodexExecSkillManifestEntry[];
+  sharedCodexHome: string;
 };
 
 export type AgentRunner = {
@@ -324,16 +348,21 @@ export class CodexExecRunner implements AgentRunner {
         model: model ?? "",
         model_source: model ? "env" : "codex_config",
         max_turns: task.maxTurns ?? config.executor.default_max_turns,
-        skills: taskSkillMetadata(task.skills, "prompt_inline"),
+        skills: taskSkillMetadata(task.skills, "codex_home"),
       },
     });
     const heartbeat = startAgentRunHeartbeat(this.store, agentRun, config.monitoring.heartbeat_interval_ms);
     const started = Date.now();
     const before = await snapshotGitDiffNames(task.repoRoot);
     try {
+      const codexHome = await prepareCodexExecHome(this.store, agentRun, task);
       const result = await execa(codexBinary(), codexExecArgs(task, model), {
         cwd: task.repoRoot,
         input: prompt,
+        env: {
+          ...process.env,
+          CODEX_HOME: codexHome.codexHome,
+        },
         reject: false,
         maxBuffer: 1000 * 1000 * 100,
       });
@@ -377,6 +406,8 @@ export class CodexExecRunner implements AgentRunner {
           stdout_event_count: events.length,
           codex_exec_events_artifact_path: eventsArtifact.path,
           codex_exec_prompt_artifact_path: promptArtifact.path,
+          codex_home: codexHome.codexHome,
+          codex_skill_manifest_path: codexHome.manifestPath,
           token_usage: tokenUsage,
           executor_duration_ms: Date.now() - started,
         },
@@ -396,6 +427,8 @@ export class CodexExecRunner implements AgentRunner {
           retryable: failure?.retryable ?? false,
           codex_exec_events_artifact_path: eventsArtifact.path,
           codex_exec_prompt_artifact_path: promptArtifact.path,
+          codex_home: codexHome.codexHome,
+          codex_skill_manifest_path: codexHome.manifestPath,
           token_usage: tokenUsage,
         },
       });
@@ -460,7 +493,7 @@ export class CodexExecRunner implements AgentRunner {
       role: task.role,
       kind: "agent_run",
       name: args.name,
-      input: { write_allowed: Boolean(task.writeAllowed), max_turns: task.maxTurns, skills: taskSkillMetadata(task.skills, "prompt_inline") },
+      input: { write_allowed: Boolean(task.writeAllowed), max_turns: task.maxTurns, skills: taskSkillMetadata(task.skills, "codex_home") },
       output: args.output,
       duration_ms: Date.now() - args.started,
     });
@@ -546,7 +579,7 @@ function sandboxCapabilities(task: AgentTask) {
 
 function taskSkillMetadata(
   skills: AgentTaskSkill[] | undefined,
-  delivery: "sdk_skill" | "prompt_inline" = "sdk_skill",
+  delivery: CodexExecSkillDelivery = "sdk_skill",
 ): Array<Record<string, unknown>> {
   return (skills ?? []).map((skill) => ({
     name: skill.name,
@@ -596,22 +629,170 @@ export function buildCodexExecPrompt(task: AgentTask): string {
     return task.prompt;
   }
   const skillSections = skills.map((skill) => [
-    `## Skill: ${skill.name}`,
-    `Required: ${skill.required ? "yes" : "no"}`,
-    `Source path: ${skill.path}`,
-    `Content SHA256: ${skill.content_sha256}`,
-    "",
-    skill.content.trim(),
+    `- ${skill.name}`,
+    `  Description: ${skill.description || "No description provided."}`,
+    `  Required: ${skill.required ? "yes" : "no"}`,
+    `  Source path: ${skill.path}`,
+    `  Content SHA256: ${skill.content_sha256}`,
   ].join("\n"));
   return [
     task.prompt,
     "",
-    "# AGT-Routed Skill Bodies",
+    "# AGT-Routed Skills",
     "",
-    "The following skill bodies were selected by AGT for this stage. Treat these sections as the active stage skills. Do not invoke unrelated local skills unless the stage prompt explicitly asks for them.",
+    "The following skills were selected by AGT for this stage and installed into this run's isolated CODEX_HOME. Treat them as the active stage skills. Do not invoke unrelated local skills unless the stage prompt explicitly asks for them.",
     "",
     ...skillSections,
   ].join("\n");
+}
+
+export async function prepareCodexExecHome(
+  store: RuntimeStore,
+  agentRun: AgentRunRecord,
+  task: AgentTask,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<CodexExecHome> {
+  const sharedCodexHome = resolveSharedCodexHome(env);
+  const runRoot = path.join(store.stateRoot, "runs", agentRun.agent_run_id);
+  const codexHome = path.join(runRoot, "codex-home");
+  const skillsDir = path.join(codexHome, "skills");
+  const manifestPath = path.join(runRoot, "skill-manifest.json");
+
+  await mkdir(codexHome, { recursive: true });
+  await ensureDirSymlink(path.join(sharedCodexHome, "sessions"), path.join(codexHome, "sessions"));
+  await ensureFileSymlink(path.join(sharedCodexHome, "auth.json"), path.join(codexHome, "auth.json"));
+  await syncCodexConfigFile(path.join(sharedCodexHome, "config.json"), path.join(codexHome, "config.json"));
+  await syncCodexConfigFile(path.join(sharedCodexHome, "instructions.md"), path.join(codexHome, "instructions.md"));
+  await syncCodexConfigFile(path.join(sharedCodexHome, "config.toml"), path.join(codexHome, "config.toml"), stripSkillsConfigEntries);
+
+  await rm(skillsDir, { recursive: true, force: true });
+  await mkdir(skillsDir, { recursive: true });
+  const manifestSkills = await writeCodexExecSkills(skillsDir, task.skills ?? []);
+  const manifest = {
+    schema_version: 1,
+    agent_run_id: agentRun.agent_run_id,
+    session_id: task.sessionId,
+    role: task.role,
+    delivery: "codex_home",
+    codex_home: codexHome,
+    skills_dir: skillsDir,
+    shared_codex_home: sharedCodexHome,
+    allow_user_skills: false,
+    stripped_config_sections: ["[[skills.config]]"],
+    skills: manifestSkills,
+  };
+  await mkdir(runRoot, { recursive: true });
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  return { runRoot, codexHome, skillsDir, manifestPath, skills: manifestSkills, sharedCodexHome };
+}
+
+export function stripSkillsConfigEntries(content: string): string {
+  if (!content.includes("[[skills.config]]")) {
+    return content;
+  }
+  const lines = content.split("\n");
+  const out: string[] = [];
+  let inSkillsConfig = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("[")) {
+      if (trimmed === "[[skills.config]]") {
+        inSkillsConfig = true;
+        continue;
+      }
+      inSkillsConfig = false;
+      out.push(line);
+      continue;
+    }
+    if (!inSkillsConfig) {
+      out.push(line);
+    }
+  }
+  const stripped = out.join("\n").replace(/\n+$/, "");
+  return stripped ? `${stripped}\n` : "";
+}
+
+function resolveSharedCodexHome(env: NodeJS.ProcessEnv): string {
+  return path.resolve(
+    env.AGT_CODEX_SHARED_HOME?.trim()
+      || env.CODEX_HOME?.trim()
+      || path.join(homedir(), ".codex"),
+  );
+}
+
+async function ensureDirSymlink(src: string, dst: string): Promise<void> {
+  await mkdir(src, { recursive: true });
+  await replaceSymlink(src, dst, "dir");
+}
+
+async function ensureFileSymlink(src: string, dst: string): Promise<void> {
+  if (!existsSync(src)) {
+    await rm(dst, { force: true });
+    return;
+  }
+  await replaceSymlink(src, dst, "file");
+}
+
+async function replaceSymlink(src: string, dst: string, type: "dir" | "file"): Promise<void> {
+  await mkdir(path.dirname(dst), { recursive: true });
+  await rm(dst, { recursive: true, force: true });
+  try {
+    await symlink(src, dst, type);
+  } catch {
+    if (type === "file") {
+      const content = await readFile(src);
+      await writeFile(dst, content);
+    } else {
+      await mkdir(dst, { recursive: true });
+    }
+  }
+}
+
+async function syncCodexConfigFile(
+  src: string,
+  dst: string,
+  transform: (content: string) => string = (content) => content,
+): Promise<void> {
+  if (!existsSync(src)) {
+    await rm(dst, { force: true });
+    return;
+  }
+  const content = await readFile(src, "utf8");
+  await mkdir(path.dirname(dst), { recursive: true });
+  await writeFile(dst, transform(content), "utf8");
+}
+
+async function writeCodexExecSkills(skillsDir: string, skills: AgentTaskSkill[]): Promise<CodexExecSkillManifestEntry[]> {
+  const used = new Map<string, number>();
+  const entries: CodexExecSkillManifestEntry[] = [];
+  for (const skill of skills.filter((candidate) => candidate.content.trim())) {
+    const baseName = sanitizeSkillDirName(skill.name);
+    const count = used.get(baseName) ?? 0;
+    used.set(baseName, count + 1);
+    const dirName = count === 0 ? baseName : `${baseName}-${count + 1}`;
+    const installDir = path.join(skillsDir, dirName);
+    const installedPath = path.join(installDir, "SKILL.md");
+    await mkdir(installDir, { recursive: true });
+    await writeFile(installedPath, skill.content.trimEnd() + "\n", "utf8");
+    entries.push({
+      name: skill.name,
+      description: skill.description,
+      path: skill.path,
+      content_sha256: skill.content_sha256,
+      required: skill.required,
+      installed_path: installedPath,
+    });
+  }
+  return entries;
+}
+
+function sanitizeSkillDirName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    || "skill";
 }
 
 export function parseCodexExecJsonl(stdout: string): unknown[] {
