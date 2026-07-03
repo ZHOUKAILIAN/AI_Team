@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execa } from "execa";
@@ -15,12 +16,14 @@ import {
   hasOpenAIExecutorConfig,
   initRuntime,
   parseCodexExecJsonl,
+  prepareCodexExecHome,
   renderSkillInjection,
   resolveAgentExecutorPreference,
   resolveOpenAIExecutorConfig,
   resolveSkillRouting,
   sandboxWorkspacePermissions,
   skillsForExecutor,
+  stripSkillsConfigEntries,
   summarizeCodexExecUsage,
   summarizeOpenAIUsage,
   RuntimeStore,
@@ -220,7 +223,7 @@ describe("V2 runtime defaults", () => {
     }
   });
 
-  it("builds a codex exec prompt with AGT-controlled skill bodies", () => {
+  it("builds a codex exec prompt with AGT-controlled skill names but not private bodies", () => {
     const prompt = buildCodexExecPrompt({
       sessionId: "session",
       role: "dev",
@@ -237,9 +240,87 @@ describe("V2 runtime defaults", () => {
     });
 
     expect(prompt).toContain("Base stage prompt.");
-    expect(prompt).toContain("# AGT-Routed Skill Bodies");
-    expect(prompt).toContain("## Skill: backend-verification");
-    expect(prompt).toContain("Run API checks.");
+    expect(prompt).toContain("# AGT-Routed Skills");
+    expect(prompt).toContain("- backend-verification");
+    expect(prompt).toContain("Content SHA256: abc123");
+    expect(prompt).not.toContain("Run API checks.");
+  });
+
+  it("prepares an isolated codex exec home with only routed skills", async () => {
+    const stateRoot = await mkdtemp(path.join(tmpdir(), "agt2-codex-exec-home-"));
+    const sharedCodexHome = await mkdtemp(path.join(tmpdir(), "agt2-shared-codex-home-"));
+    await mkdir(path.join(sharedCodexHome, "skills", "global-only"), { recursive: true });
+    await writeFile(path.join(sharedCodexHome, "skills", "global-only", "SKILL.md"), "# Global\n");
+    await writeFile(path.join(sharedCodexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: "sk-test" }));
+    await writeFile(path.join(sharedCodexHome, "config.toml"), [
+      'model = "gpt-5.5"',
+      "",
+      "[[skills.config]]",
+      'name = "global-only"',
+      'path = "/should/not/leak"',
+      "",
+      "[model_providers.example]",
+      'base_url = "https://example.invalid/v1"',
+      "",
+    ].join("\n"));
+
+    const store = new RuntimeStore(stateRoot);
+    const agentRun = await store.createAgentRun({
+      sessionId: "session",
+      role: "dev",
+      runner: "codex_exec",
+      input: "prompt",
+    });
+    const prepared = await prepareCodexExecHome(store, agentRun, {
+      sessionId: "session",
+      role: "dev",
+      repoRoot: "/repo",
+      prompt: "prompt",
+      skills: [{
+        name: "Backend Verification",
+        description: "Verify backend changes.",
+        content: "# Backend Verification\nRun API checks.",
+        path: "/skills/backend-verification/SKILL.md",
+        content_sha256: "abc123",
+        required: true,
+      }],
+    }, { AGT_CODEX_SHARED_HOME: sharedCodexHome });
+
+    const installedSkill = await readFile(path.join(prepared.skillsDir, "backend-verification", "SKILL.md"), "utf8");
+    const copiedConfig = await readFile(path.join(prepared.codexHome, "config.toml"), "utf8");
+    const manifest = JSON.parse(await readFile(prepared.manifestPath, "utf8")) as {
+      allow_user_skills: boolean;
+      skills: Array<{ name: string; installed_path: string }>;
+    };
+
+    expect(installedSkill).toContain("Run API checks.");
+    expect(copiedConfig).toContain('model = "gpt-5.5"');
+    expect(copiedConfig).not.toContain("[[skills.config]]");
+    expect(existsSync(path.join(prepared.skillsDir, "global-only", "SKILL.md"))).toBe(false);
+    expect(manifest.allow_user_skills).toBe(false);
+    expect(manifest.skills).toMatchObject([{
+      name: "Backend Verification",
+      installed_path: path.join(prepared.skillsDir, "backend-verification", "SKILL.md"),
+    }]);
+  });
+
+  it("strips codex desktop skills config entries while preserving other TOML", () => {
+    expect(stripSkillsConfigEntries([
+      'model = "gpt-5.5"',
+      "",
+      "[[skills.config]]",
+      'name = "plugin"',
+      "",
+      "[model_providers.proxy]",
+      'base_url = "https://example.invalid/v1"',
+      "",
+    ].join("\n"))).toBe([
+      'model = "gpt-5.5"',
+      "",
+      "[model_providers.proxy]",
+      'base_url = "https://example.invalid/v1"',
+      "",
+    ].join("\n"));
   });
 
   it("parses codex exec JSONL events into output, commands, usage, and retryable failures", () => {
