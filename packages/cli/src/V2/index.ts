@@ -72,11 +72,17 @@ program
   .option("--from-dir <path>", "read request context from all files under a directory")
   .option("--interactive", "prompt in the current terminal when waiting_human or blocked")
   .option("--no-interactive", "disable current-terminal prompts")
+  .option("--no-animations", "disable TTY-only CLI spinners")
   .option("--no-task-worktree", "run in the current repository instead of an isolated task worktree")
   .action(async (messageParts: string[], options: DeliverOptions) => {
-    let result = await startProductDevQaDelivery(messageParts, options, true);
+    const interactive = shouldUseInteractiveMode(options);
+    const motion = shouldUseCliMotion(options);
+    let result = await withCliSpinner(motion && interactive, "Starting product-dev-qa workflow", () => (
+      startProductDevQaDelivery(messageParts, options, true)
+    ));
     result = await runProductDevQaInteractiveLoop(result, {
-      enabled: shouldUseInteractiveMode(options),
+      enabled: interactive,
+      motion,
       sourceStateRoot: resolveSourceStateRoot(options),
     });
     printResult(result);
@@ -92,12 +98,18 @@ program
   .option("--from-dir <path>", "read request context from all files under a directory")
   .option("--interactive", "prompt in the current terminal when waiting_human or blocked")
   .option("--no-interactive", "disable current-terminal prompts")
+  .option("--no-animations", "disable TTY-only CLI spinners")
   .option("--task-worktree", "create an isolated git worktree for this run")
   .option("--no-task-worktree", "disable configured task worktree for this run")
   .action(async (messageParts: string[], options: DeliverOptions) => {
-    let result = await startProductDevQaDelivery(messageParts, options, false);
+    const interactive = shouldUseInteractiveMode(options);
+    const motion = shouldUseCliMotion(options);
+    let result = await withCliSpinner(motion && interactive, "Starting product-dev-qa workflow", () => (
+      startProductDevQaDelivery(messageParts, options, false)
+    ));
     result = await runProductDevQaInteractiveLoop(result, {
-      enabled: shouldUseInteractiveMode(options),
+      enabled: interactive,
+      motion,
       sourceStateRoot: resolveSourceStateRoot(options),
     });
     printResult(result);
@@ -215,11 +227,6 @@ program
     console.log(`server_url: ${url}`);
   });
 
-program.parseAsync().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
-});
-
 type InitOptions = {
   repoRoot: string;
   stateRoot?: string;
@@ -233,6 +240,7 @@ type DeliverOptions = {
   from?: string;
   fromDir?: string;
   interactive?: boolean;
+  animations?: boolean;
   taskWorktree?: boolean;
 };
 
@@ -522,6 +530,14 @@ function shouldUseInteractiveMode(options: Pick<DeliverOptions, "interactive">):
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
+function shouldUseCliMotion(options: Pick<DeliverOptions, "animations">): boolean {
+  return options.animations !== false
+    && Boolean(process.stdin.isTTY && process.stderr.isTTY)
+    && !process.env.CI
+    && !process.env.NO_COLOR
+    && process.env.TERM !== "dumb";
+}
+
 async function startProductDevQaRun(args: {
   sourceRepoRoot: string;
   sourceStateRoot: string;
@@ -604,7 +620,7 @@ async function retryProductDevQaStage(
 
 async function runProductDevQaInteractiveLoop(
   initial: RunResult,
-  options: { enabled: boolean; sourceStateRoot: string },
+  options: { enabled: boolean; motion: boolean; sourceStateRoot: string },
 ): Promise<RunResult> {
   if (!options.enabled) {
     return initial;
@@ -624,20 +640,20 @@ async function runProductDevQaInteractiveLoop(
         }
         const action = normalizeWaitingHumanInput(answer);
         if (action.kind === "approve") {
-          result = await recordProductDevQaHumanDecision({
+          result = await withCliSpinner(options.motion, "Approving gate and running next stage", () => recordProductDevQaHumanDecision({
             stateRoot: result.state_root,
             sessionId: result.session_id,
             decision: "go",
-          });
+          }));
           await mirrorSessionIndex(options.sourceStateRoot, result.state_root, result.session_id);
           continue;
         }
         if (action.kind === "rework") {
-          result = await reworkProductDevQaHumanGate({
+          result = await withCliSpinner(options.motion, "Reworking current gate", () => reworkProductDevQaHumanGate({
             stateRoot: result.state_root,
             sessionId: result.session_id,
             message: action.message,
-          });
+          }));
           await mirrorSessionIndex(options.sourceStateRoot, result.state_root, result.session_id);
           continue;
         }
@@ -649,21 +665,21 @@ async function runProductDevQaInteractiveLoop(
           }
           const message = (await askInteractive(rl, "Additional feedback (optional) > ") ?? "").trim();
           const reworkInput = await readRequestInput(message ? [message] : [], { from: filePath });
-          result = await reworkProductDevQaHumanGate({
+          result = await withCliSpinner(options.motion, "Reworking current gate", () => reworkProductDevQaHumanGate({
             stateRoot: result.state_root,
             sessionId: result.session_id,
             message: reworkInput.request,
             requestSources: reworkInput.sources,
-          });
+          }));
           await mirrorSessionIndex(options.sourceStateRoot, result.state_root, result.session_id);
           continue;
         }
         if (action.kind === "no-go") {
-          result = await recordProductDevQaHumanDecision({
+          result = await withCliSpinner(options.motion, "Recording no-go decision", () => recordProductDevQaHumanDecision({
             stateRoot: result.state_root,
             sessionId: result.session_id,
             decision: "no-go",
-          });
+          }));
           await mirrorSessionIndex(options.sourceStateRoot, result.state_root, result.session_id);
           return result;
         }
@@ -685,11 +701,11 @@ async function runProductDevQaInteractiveLoop(
       }
       const action = normalizeBlockedInput(answer);
       if (action.kind === "retry") {
-        result = await retryProductDevQaBlockedStage({
+        result = await withCliSpinner(options.motion, "Retrying blocked stage", () => retryProductDevQaBlockedStage({
           stateRoot: result.state_root,
           sessionId: result.session_id,
           message: action.message,
-        });
+        }));
         await mirrorSessionIndex(options.sourceStateRoot, result.state_root, result.session_id);
         continue;
       }
@@ -701,12 +717,12 @@ async function runProductDevQaInteractiveLoop(
         }
         const message = (await askInteractive(rl, "Retry message (optional) > ") ?? "").trim();
         const retryInput = await readRequestInput(message ? [message] : [], { from: filePath });
-        result = await retryProductDevQaBlockedStage({
+        result = await withCliSpinner(options.motion, "Retrying blocked stage", () => retryProductDevQaBlockedStage({
           stateRoot: result.state_root,
           sessionId: result.session_id,
           message: retryInput.request,
           requestSources: retryInput.sources,
-        });
+        }));
         await mirrorSessionIndex(options.sourceStateRoot, result.state_root, result.session_id);
         continue;
       }
@@ -722,6 +738,63 @@ async function runProductDevQaInteractiveLoop(
     return result;
   } finally {
     rl.close();
+  }
+}
+
+async function withCliSpinner<T>(enabled: boolean, label: string, work: () => Promise<T>): Promise<T> {
+  const spinner = new CliSpinner(label, enabled);
+  spinner.start();
+  try {
+    const result = await work();
+    spinner.succeed();
+    return result;
+  } catch (error) {
+    spinner.fail();
+    throw error;
+  }
+}
+
+class CliSpinner {
+  private readonly frames = ["-", "\\", "|", "/"];
+  private frameIndex = 0;
+  private timer: ReturnType<typeof setInterval> | undefined;
+
+  constructor(
+    private readonly label: string,
+    private readonly enabled: boolean,
+  ) {}
+
+  start(): void {
+    if (!this.enabled) {
+      return;
+    }
+    this.render();
+    this.timer = setInterval(() => this.render(), 80);
+  }
+
+  succeed(): void {
+    this.stop(`done: ${this.label}`);
+  }
+
+  fail(): void {
+    this.stop(`failed: ${this.label}`);
+  }
+
+  private render(): void {
+    const frame = this.frames[this.frameIndex % this.frames.length]!;
+    this.frameIndex += 1;
+    process.stderr.write(`\r\x1b[2K${frame} ${this.label}`);
+  }
+
+  private stop(message: string): void {
+    if (!this.enabled) {
+      return;
+    }
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = undefined;
+    }
+    process.stderr.write(`\r\x1b[2K${message}\n`);
   }
 }
 
@@ -1052,3 +1125,8 @@ function formatDuration(ms: number): string {
   const remainder = seconds % 60;
   return `${minutes}m${remainder}s`;
 }
+
+program.parseAsync().catch((error: unknown) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+});

@@ -157,7 +157,7 @@ agt2 approve
 
 `agt2 deliver` 是 V2 `product-dev-qa` 的简化入口，默认会为需求创建隔离 worktree。`agt2 run` 是 `deliver` 的别名，但遵守 `run` 的 worktree 语义：只有显式传 `--task-worktree` 或 V2 项目配置启用 task worktree 时才创建 worktree。`agt2 approve` 等价于对当前最新 V2 session 执行 `go` 决策。
 
-在终端里运行时，`agt2 deliver` 默认启用 CLI-style human gate：Product 合同或 Dev 技术方案完成后，当前终端会展示阶段摘要和关键 artifact 预览。直接回车表示批准并继续；输入一段反馈会把反馈写入 trace，重跑当前 Product / Dev plan 阶段；也可以用 `:status`、`:file`、`:no-go`、`:quit` 控制流程。非 TTY 或 `--no-interactive` 会保持原来的停在 `waiting_human`，再用 `agt2 approve` / `agt2 retry` 继续。
+在终端里运行时，`agt2 deliver` 默认启用 CLI-style human gate：Product 合同或 Dev 技术方案完成后，当前终端会展示阶段摘要和关键 artifact 预览。直接回车表示批准并继续；输入一段反馈会把反馈写入 trace，重跑当前 Product / Dev plan 阶段；也可以用 `:status`、`:file`、`:no-go`、`:quit` 控制流程。交互式 TTY 会在启动、批准、rework、retry 等等待阶段显示轻量 spinner；CI、管道输出、`NO_COLOR`、`TERM=dumb` 或 `--no-animations` 会保持纯文本。非 TTY 或 `--no-interactive` 会保持原来的停在 `waiting_human`，再用 `agt2 approve` / `agt2 retry` 继续。
 
 常用参数：
 
@@ -169,6 +169,7 @@ agt2 deliver --from docs/requirement.md
 agt2 deliver --interactive "实现一个需求"
 agt2 deliver "..." --no-task-worktree
 agt2 deliver "..." --no-interactive
+agt2 deliver "..." --no-animations
 agt2 status
 agt2 inspect <session_id>
 agt status
