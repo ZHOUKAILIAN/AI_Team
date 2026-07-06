@@ -12,6 +12,7 @@ import {
   PRODUCT_DEV_QA_WORKFLOW_ID,
   recordProductDevQaHumanDecision,
   readSessionStatus,
+  reworkProductDevQaHumanGate,
   retryProductDevQaBlockedStage,
   runProductDevQaWorkflow,
   RuntimeStore,
@@ -71,11 +72,17 @@ program
   .option("--from-dir <path>", "read request context from all files under a directory")
   .option("--interactive", "prompt in the current terminal when waiting_human or blocked")
   .option("--no-interactive", "disable current-terminal prompts")
+  .option("--no-animations", "disable TTY-only CLI spinners")
   .option("--no-task-worktree", "run in the current repository instead of an isolated task worktree")
   .action(async (messageParts: string[], options: DeliverOptions) => {
-    let result = await startProductDevQaDelivery(messageParts, options, true);
+    const interactive = shouldUseInteractiveMode(options);
+    const motion = shouldUseCliMotion(options);
+    let result = await withCliSpinner(motion && interactive, "Starting product-dev-qa workflow", () => (
+      startProductDevQaDelivery(messageParts, options, true)
+    ));
     result = await runProductDevQaInteractiveLoop(result, {
-      enabled: shouldUseInteractiveMode(options),
+      enabled: interactive,
+      motion,
       sourceStateRoot: resolveSourceStateRoot(options),
     });
     printResult(result);
@@ -91,12 +98,18 @@ program
   .option("--from-dir <path>", "read request context from all files under a directory")
   .option("--interactive", "prompt in the current terminal when waiting_human or blocked")
   .option("--no-interactive", "disable current-terminal prompts")
+  .option("--no-animations", "disable TTY-only CLI spinners")
   .option("--task-worktree", "create an isolated git worktree for this run")
   .option("--no-task-worktree", "disable configured task worktree for this run")
   .action(async (messageParts: string[], options: DeliverOptions) => {
-    let result = await startProductDevQaDelivery(messageParts, options, false);
+    const interactive = shouldUseInteractiveMode(options);
+    const motion = shouldUseCliMotion(options);
+    let result = await withCliSpinner(motion && interactive, "Starting product-dev-qa workflow", () => (
+      startProductDevQaDelivery(messageParts, options, false)
+    ));
     result = await runProductDevQaInteractiveLoop(result, {
-      enabled: shouldUseInteractiveMode(options),
+      enabled: interactive,
+      motion,
       sourceStateRoot: resolveSourceStateRoot(options),
     });
     printResult(result);
@@ -214,11 +227,6 @@ program
     console.log(`server_url: ${url}`);
   });
 
-program.parseAsync().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
-});
-
 type InitOptions = {
   repoRoot: string;
   stateRoot?: string;
@@ -232,6 +240,7 @@ type DeliverOptions = {
   from?: string;
   fromDir?: string;
   interactive?: boolean;
+  animations?: boolean;
   taskWorktree?: boolean;
 };
 
@@ -266,6 +275,24 @@ type SessionTarget = {
 };
 
 type RequestInput = { request: string; sources: RequestSourceRecord[] };
+
+type InteractiveGateContext = {
+  waitingOn: string;
+  lastStageSummary: string;
+  lastStageArtifacts: string[];
+  artifactPreviews: Array<{ name: string; preview: string }>;
+};
+
+type InteractiveInputAction =
+  | { kind: "approve" }
+  | { kind: "no-go" }
+  | { kind: "rework"; message: string }
+  | { kind: "rework-from-file" }
+  | { kind: "retry"; message: string }
+  | { kind: "retry-from-file" }
+  | { kind: "status" }
+  | { kind: "quit" }
+  | { kind: "unknown" };
 
 type SessionMeta = {
   session_id: string;
@@ -503,6 +530,14 @@ function shouldUseInteractiveMode(options: Pick<DeliverOptions, "interactive">):
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
+function shouldUseCliMotion(options: Pick<DeliverOptions, "animations">): boolean {
+  return options.animations !== false
+    && Boolean(process.stdin.isTTY && process.stderr.isTTY)
+    && !process.env.CI
+    && !process.env.NO_COLOR
+    && process.env.TERM !== "dumb";
+}
+
 async function startProductDevQaRun(args: {
   sourceRepoRoot: string;
   sourceStateRoot: string;
@@ -585,7 +620,7 @@ async function retryProductDevQaStage(
 
 async function runProductDevQaInteractiveLoop(
   initial: RunResult,
-  options: { enabled: boolean; sourceStateRoot: string },
+  options: { enabled: boolean; motion: boolean; sourceStateRoot: string },
 ): Promise<RunResult> {
   if (!options.enabled) {
     return initial;
@@ -596,78 +631,170 @@ async function runProductDevQaInteractiveLoop(
     while (result.status === "waiting_human" || result.status === "blocked") {
       const store = new RuntimeStore(result.state_root);
       const snapshot = await readSessionStatus(store, result.session_id);
-      printInteractiveSummary(snapshot);
       if (result.status === "waiting_human") {
-        const action = normalizeInteractiveAction(await rl.question("[a] approve  [n] no-go  [i] status  [q] quit > "));
-        if (action === "approve") {
-          result = await recordProductDevQaHumanDecision({
+        const gate = await loadInteractiveGateContext(store, result.session_id);
+        printInteractiveGate(snapshot, gate);
+        const answer = await askInteractive(rl, "Press Enter to approve, or type feedback to rework > ");
+        if (answer === null) {
+          return result;
+        }
+        const action = normalizeWaitingHumanInput(answer);
+        if (action.kind === "approve") {
+          result = await withCliSpinner(options.motion, "Approving gate and running next stage", () => recordProductDevQaHumanDecision({
             stateRoot: result.state_root,
             sessionId: result.session_id,
             decision: "go",
-          });
+          }));
           await mirrorSessionIndex(options.sourceStateRoot, result.state_root, result.session_id);
           continue;
         }
-        if (action === "no-go") {
-          result = await recordProductDevQaHumanDecision({
+        if (action.kind === "rework") {
+          result = await withCliSpinner(options.motion, "Reworking current gate", () => reworkProductDevQaHumanGate({
+            stateRoot: result.state_root,
+            sessionId: result.session_id,
+            message: action.message,
+          }));
+          await mirrorSessionIndex(options.sourceStateRoot, result.state_root, result.session_id);
+          continue;
+        }
+        if (action.kind === "rework-from-file") {
+          const filePath = (await askInteractive(rl, "Feedback file path > ") ?? "").trim();
+          if (!filePath) {
+            console.log("File path is required for feedback from file.");
+            continue;
+          }
+          const message = (await askInteractive(rl, "Additional feedback (optional) > ") ?? "").trim();
+          const reworkInput = await readRequestInput(message ? [message] : [], { from: filePath });
+          result = await withCliSpinner(options.motion, "Reworking current gate", () => reworkProductDevQaHumanGate({
+            stateRoot: result.state_root,
+            sessionId: result.session_id,
+            message: reworkInput.request,
+            requestSources: reworkInput.sources,
+          }));
+          await mirrorSessionIndex(options.sourceStateRoot, result.state_root, result.session_id);
+          continue;
+        }
+        if (action.kind === "no-go") {
+          result = await withCliSpinner(options.motion, "Recording no-go decision", () => recordProductDevQaHumanDecision({
             stateRoot: result.state_root,
             sessionId: result.session_id,
             decision: "no-go",
-          });
+          }));
           await mirrorSessionIndex(options.sourceStateRoot, result.state_root, result.session_id);
           return result;
         }
-        if (action === "status") {
+        if (action.kind === "status") {
           printStatus(snapshot);
           continue;
         }
-        if (action === "quit") {
+        if (action.kind === "quit") {
           return result;
         }
-        console.log("Unknown action. Use a, n, i, or q.");
+        console.log("Unknown action. Press Enter to approve, type feedback to rework, or use :status, :file, :no-go, :quit.");
         continue;
       }
 
-      const action = normalizeInteractiveAction(await rl.question("[r] retry  [f] retry from file  [i] status  [q] quit > "));
-      if (action === "retry") {
-        const message = (await rl.question("Retry message (optional) > ")).trim();
-        result = await retryProductDevQaBlockedStage({
+      printInteractiveBlocked(snapshot);
+      const answer = await askInteractive(rl, "Press Enter to retry, or type retry context > ");
+      if (answer === null) {
+        return result;
+      }
+      const action = normalizeBlockedInput(answer);
+      if (action.kind === "retry") {
+        result = await withCliSpinner(options.motion, "Retrying blocked stage", () => retryProductDevQaBlockedStage({
           stateRoot: result.state_root,
           sessionId: result.session_id,
-          message,
-        });
+          message: action.message,
+        }));
         await mirrorSessionIndex(options.sourceStateRoot, result.state_root, result.session_id);
         continue;
       }
-      if (action === "retry-from-file") {
-        const filePath = (await rl.question("Retry context file path > ")).trim();
+      if (action.kind === "retry-from-file") {
+        const filePath = (await askInteractive(rl, "Retry context file path > ") ?? "").trim();
         if (!filePath) {
           console.log("File path is required for retry from file.");
           continue;
         }
-        const message = (await rl.question("Retry message (optional) > ")).trim();
+        const message = (await askInteractive(rl, "Retry message (optional) > ") ?? "").trim();
         const retryInput = await readRequestInput(message ? [message] : [], { from: filePath });
-        result = await retryProductDevQaBlockedStage({
+        result = await withCliSpinner(options.motion, "Retrying blocked stage", () => retryProductDevQaBlockedStage({
           stateRoot: result.state_root,
           sessionId: result.session_id,
           message: retryInput.request,
           requestSources: retryInput.sources,
-        });
+        }));
         await mirrorSessionIndex(options.sourceStateRoot, result.state_root, result.session_id);
         continue;
       }
-      if (action === "status") {
+      if (action.kind === "status") {
         printStatus(snapshot);
         continue;
       }
-      if (action === "quit") {
+      if (action.kind === "quit") {
         return result;
       }
-      console.log("Unknown action. Use r, f, i, or q.");
+      console.log("Unknown action. Press Enter to retry, type retry context, or use :status, :file, :quit.");
     }
     return result;
   } finally {
     rl.close();
+  }
+}
+
+async function withCliSpinner<T>(enabled: boolean, label: string, work: () => Promise<T>): Promise<T> {
+  const spinner = new CliSpinner(label, enabled);
+  spinner.start();
+  try {
+    const result = await work();
+    spinner.succeed();
+    return result;
+  } catch (error) {
+    spinner.fail();
+    throw error;
+  }
+}
+
+class CliSpinner {
+  private readonly frames = ["-", "\\", "|", "/"];
+  private frameIndex = 0;
+  private timer: ReturnType<typeof setInterval> | undefined;
+
+  constructor(
+    private readonly label: string,
+    private readonly enabled: boolean,
+  ) {}
+
+  start(): void {
+    if (!this.enabled) {
+      return;
+    }
+    this.render();
+    this.timer = setInterval(() => this.render(), 80);
+  }
+
+  succeed(): void {
+    this.stop(`done: ${this.label}`);
+  }
+
+  fail(): void {
+    this.stop(`failed: ${this.label}`);
+  }
+
+  private render(): void {
+    const frame = this.frames[this.frameIndex % this.frames.length]!;
+    this.frameIndex += 1;
+    process.stderr.write(`\r\x1b[2K${frame} ${this.label}`);
+  }
+
+  private stop(message: string): void {
+    if (!this.enabled) {
+      return;
+    }
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = undefined;
+    }
+    process.stderr.write(`\r\x1b[2K${message}\n`);
   }
 }
 
@@ -682,27 +809,125 @@ function printInteractiveSummary(snapshot: SessionStatusSnapshot): void {
   console.log(`summary: ${snapshot.summary}`);
 }
 
-function normalizeInteractiveAction(value: string): "approve" | "no-go" | "retry" | "retry-from-file" | "status" | "quit" | "unknown" {
+async function askInteractive(
+  rl: ReturnType<typeof createInterface>,
+  question: string,
+): Promise<string | null> {
+  try {
+    return await rl.question(question);
+  } catch (error) {
+    if (error instanceof Error && /readline was closed/i.test(error.message)) {
+      console.log("Input closed; leaving session at the current state.");
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function loadInteractiveGateContext(store: RuntimeStore, sessionId: string): Promise<InteractiveGateContext> {
+  const workflow = await store.loadProductDevQaWorkflow(sessionId);
+  const lastStageArtifacts = workflow.last_stage_artifacts ?? [];
+  const artifactPreviews = [];
+  for (const name of lastStageArtifacts.slice(0, 2)) {
+    const preview = await store.readArtifactContent(sessionId, name)
+      .then((result) => summarizeInteractivePreview(result.content))
+      .catch(() => "");
+    artifactPreviews.push({ name, preview });
+  }
+  return {
+    waitingOn: workflow.waiting_on ?? "",
+    lastStageSummary: workflow.last_stage_summary,
+    lastStageArtifacts,
+    artifactPreviews,
+  };
+}
+
+function printInteractiveGate(snapshot: SessionStatusSnapshot, gate: InteractiveGateContext): void {
+  printInteractiveSummary(snapshot);
+  console.log(`waiting_on: ${humanGateLabel(gate.waitingOn)}`);
+  if (gate.lastStageSummary) {
+    printIndentedValue("stage_summary", gate.lastStageSummary, "  ");
+  }
+  if (gate.lastStageArtifacts.length) {
+    console.log(`artifacts: ${gate.lastStageArtifacts.join(", ")}`);
+  }
+  for (const artifact of gate.artifactPreviews) {
+    if (!artifact.preview) {
+      continue;
+    }
+    console.log("");
+    console.log(`--- ${artifact.name} preview ---`);
+    console.log(artifact.preview);
+  }
+  console.log("");
+  console.log("Enter: approve and continue");
+  console.log("Feedback text: rework this gate with your feedback");
+  console.log("Commands: :status, :file, :no-go, :quit");
+}
+
+function printInteractiveBlocked(snapshot: SessionStatusSnapshot): void {
+  printInteractiveSummary(snapshot);
+  console.log("");
+  console.log("Enter: retry with no extra context");
+  console.log("Retry context text: retry after injecting that context");
+  console.log("Commands: :status, :file, :quit");
+}
+
+function summarizeInteractivePreview(content: string): string {
+  const lines = content
+    .trim()
+    .split(/\r?\n/)
+    .filter((line) => line.trim())
+    .slice(0, 12);
+  const preview = lines.join("\n");
+  return preview.length > 1600 ? `${preview.slice(0, 1600)}\n...` : preview;
+}
+
+function humanGateLabel(waitingOn: string): string {
+  if (waitingOn === "product_check") {
+    return "Product contract check";
+  }
+  if (waitingOn === "dev_plan_check") {
+    return "Dev technical plan check";
+  }
+  return waitingOn || "human decision";
+}
+
+function normalizeWaitingHumanInput(value: string): InteractiveInputAction {
   const normalized = value.trim().toLowerCase();
-  if (normalized === "a" || normalized === "approve" || normalized === "go") {
-    return "approve";
+  if (!normalized || normalized === "a" || normalized === "approve" || normalized === "go" || normalized === "yes" || normalized === "y") {
+    return { kind: "approve" };
   }
-  if (normalized === "n" || normalized === "no-go" || normalized === "no" || normalized === "reject") {
-    return "no-go";
+  if (normalized === "n" || normalized === "no-go" || normalized === "no" || normalized === "reject" || normalized === ":no-go" || normalized === "/no-go") {
+    return { kind: "no-go" };
   }
-  if (normalized === "r" || normalized === "retry") {
-    return "retry";
+  if (normalized === "f" || normalized === "file" || normalized === "from-file" || normalized === "rework-from-file" || normalized === ":file" || normalized === "/file") {
+    return { kind: "rework-from-file" };
   }
-  if (normalized === "f" || normalized === "file" || normalized === "from-file" || normalized === "retry-from-file") {
-    return "retry-from-file";
+  if (normalized === "i" || normalized === "inspect" || normalized === "status" || normalized === ":status" || normalized === "/status") {
+    return { kind: "status" };
   }
-  if (normalized === "i" || normalized === "inspect" || normalized === "status") {
-    return "status";
+  if (normalized === "q" || normalized === "quit" || normalized === "exit" || normalized === ":quit" || normalized === "/quit") {
+    return { kind: "quit" };
   }
-  if (normalized === "q" || normalized === "quit" || normalized === "exit") {
-    return "quit";
+  if (value.trim()) {
+    return { kind: "rework", message: value.trim() };
   }
-  return "unknown";
+  return { kind: "unknown" };
+}
+
+function normalizeBlockedInput(value: string): InteractiveInputAction {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "f" || normalized === "file" || normalized === "from-file" || normalized === "retry-from-file" || normalized === ":file" || normalized === "/file") {
+    return { kind: "retry-from-file" };
+  }
+  if (normalized === "i" || normalized === "inspect" || normalized === "status" || normalized === ":status" || normalized === "/status") {
+    return { kind: "status" };
+  }
+  if (normalized === "q" || normalized === "quit" || normalized === "exit" || normalized === ":quit" || normalized === "/quit") {
+    return { kind: "quit" };
+  }
+  return { kind: "retry", message: value.trim() };
 }
 
 async function assertProductDevQaSession(target: SessionTarget): Promise<void> {
@@ -900,3 +1125,8 @@ function formatDuration(ms: number): string {
   const remainder = seconds % 60;
   return `${minutes}m${remainder}s`;
 }
+
+program.parseAsync().catch((error: unknown) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+});

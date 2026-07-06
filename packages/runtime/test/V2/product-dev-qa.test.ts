@@ -9,6 +9,7 @@ import {
   type AgentTaskResult,
   emptyTokenUsage,
   recordProductDevQaHumanDecision,
+  reworkProductDevQaHumanGate,
   retryProductDevQaBlockedStage,
   runProductDevQaWorkflow,
   RuntimeStore,
@@ -295,6 +296,47 @@ describe("product-dev-qa workflow", () => {
     expect(implementationAmbiguities.content).toContain("\"schema_version\": 1");
     const verificationEvidence = await store.readArtifactContent(first.session_id, "verification-evidence.json");
     expect(verificationEvidence.content).toContain("\"stage\": \"qa\"");
+  });
+
+  it("reworks a human gate with feedback and retries the same stage", async () => {
+    const repoRoot = await mkdtemp(path.join(tmpdir(), "agt-p0-"));
+    const stateRoot = path.join(repoRoot, ".agt-test");
+    const runner = new ProductDevQaRunner();
+    const first = await runProductDevQaWorkflow({
+      repoRoot,
+      stateRoot,
+      request: "exercise interactive product rework",
+      runner,
+    });
+    expect(first.status).toBe("waiting_human");
+    expect(first.current_stage).toBe("product");
+
+    const reworked = await reworkProductDevQaHumanGate({
+      stateRoot,
+      sessionId: first.session_id,
+      message: "Narrow the product contract to a read-only spike and do not implement code yet.",
+      runner,
+    });
+    expect(reworked.session_id).toBe(first.session_id);
+    expect(reworked.status).toBe("waiting_human");
+    expect(reworked.current_stage).toBe("product");
+
+    const store = new RuntimeStore(stateRoot);
+    const workflow = await store.loadProductDevQaWorkflow(first.session_id);
+    expect(workflow.stage_attempt_counts.product).toBe(2);
+    expect(workflow.retry_context).toBeNull();
+    const eventKinds = (await store.readEvents(first.session_id)).map((event) => event.kind);
+    expect(eventKinds).toContain("human_rework_requested");
+
+    const retryPrompt = await readFile(
+      path.join(stateRoot, "sessions", first.session_id, "stages", "product", "attempt-002", "prompt.md"),
+      "utf8",
+    );
+    expect(retryPrompt).toContain("## Human Retry Context");
+    expect(retryPrompt).toContain("Narrow the product contract");
+
+    const artifacts = await store.readArtifacts(first.session_id);
+    expect(artifacts.some((artifact) => artifact.name.startsWith("retry-context-product-"))).toBe(true);
   });
 
   it("loops qa failure back to dev implementation with a second audited attempt", async () => {

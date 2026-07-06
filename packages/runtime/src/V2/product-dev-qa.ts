@@ -123,6 +123,16 @@ export type RetryProductDevQaBlockedStageOptions = {
   maxStageRetries?: number;
 };
 
+export type ReworkProductDevQaHumanGateOptions = {
+  stateRoot: string;
+  sessionId: string;
+  message: string;
+  requestSources?: RequestSourceRecord[];
+  runner?: AgentRunner;
+  maxQaFailureLoops?: number;
+  maxStageRetries?: number;
+};
+
 const STAGES: Record<StageKey, ProductDevQaStagePlan> = {
   intake_summary: {
     key: "intake_summary",
@@ -432,6 +442,66 @@ export async function retryProductDevQaBlockedStage(
   await writeRetryContextArtifact(store, options.sessionId, stage, retryContext);
   await resetExecutionFromStage(store, retrying, stage.key);
   await writeAndSyncWorkflow(store, retrying);
+  return runProductDevQaWorkflow({
+    repoRoot: session.repo_root,
+    projectRoot: session.project_root,
+    stateRoot: store.stateRoot,
+    sessionId: options.sessionId,
+    runner: options.runner,
+    maxQaFailureLoops: options.maxQaFailureLoops,
+    maxStageRetries: options.maxStageRetries,
+  });
+}
+
+export async function reworkProductDevQaHumanGate(
+  options: ReworkProductDevQaHumanGateOptions,
+): Promise<RunResult> {
+  const store = new RuntimeStore(options.stateRoot);
+  const session = await store.loadSession(options.sessionId);
+  const workflow = await store.loadProductDevQaWorkflow(options.sessionId);
+  if (workflow.workflow_id !== PRODUCT_DEV_QA_WORKFLOW_ID) {
+    throw new Error(`Session is not a ${PRODUCT_DEV_QA_WORKFLOW_ID} workflow: ${options.sessionId}`);
+  }
+  if (workflow.status !== "waiting_human" || !workflow.waiting_on) {
+    throw new Error(`Session is not waiting for a Product/Dev plan decision: ${options.sessionId}`);
+  }
+
+  const stage = stageForGate(workflow.waiting_on);
+  const now = nowIso();
+  const retryContext: ProductDevQaRetryContext = {
+    message: options.message.trim(),
+    sources: options.requestSources ?? [],
+    created_at: now,
+    blocked_reason: `Human requested rework at ${workflow.waiting_on}.`,
+  };
+  const reworking = setWorkflowStage({
+    ...workflow,
+    status: "running",
+    waiting_on: null,
+    blocked_reason: "",
+    summary: `Human requested rework for ${stage.currentStage}.`,
+    retry_context: retryContext,
+    updated_at: now,
+  }, stage);
+
+  await store.appendEvent({
+    at: now,
+    session_id: options.sessionId,
+    kind: "human_rework_requested",
+    role: stage.role,
+    status: "running",
+    message: retryContext.message || `Human requested rework for ${stage.currentStage}.`,
+    details: {
+      workflow_id: PRODUCT_DEV_QA_WORKFLOW_ID,
+      workflow_run_id: workflow.workflow_run_id,
+      waiting_on: workflow.waiting_on,
+      stage: stage.key,
+      source_paths: retryContext.sources.map((source) => source.path),
+    },
+  });
+  await writeRetryContextArtifact(store, options.sessionId, stage, retryContext);
+  await resetExecutionFromStage(store, reworking, stage.key);
+  await writeAndSyncWorkflow(store, reworking);
   return runProductDevQaWorkflow({
     repoRoot: session.repo_root,
     projectRoot: session.project_root,
@@ -1549,6 +1619,10 @@ function parseQaVerdict(output: string): StageVerdict {
 
 function nextStageAfterGate(gate: HumanGate): StageKey {
   return gate === "product_check" ? "dev.technical_plan" : "dev.implementation";
+}
+
+function stageForGate(gate: HumanGate): ProductDevQaStagePlan {
+  return gate === "product_check" ? STAGES.product : STAGES["dev.technical_plan"];
 }
 
 async function setExecutionStageStatus(
