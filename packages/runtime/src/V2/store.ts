@@ -30,7 +30,8 @@ import {
   type ToolCallRecord,
   ToolCallSchema,
   type WorktreeRecord,
-  nowIso,
+  compareTimestamps,
+  nowReadableDateTime,
 } from "./schema.js";
 import { createArtifactId, createPromptTraceId, createRunId, createSessionId, sha256Hex } from "./ids.js";
 import { createInitialDeliveryWorkflow, projectDeliveryWorkflow } from "./delivery-projector.js";
@@ -94,7 +95,7 @@ export class RuntimeStore {
   async createSession(options: CreateSessionOptions): Promise<SessionRecord> {
     await this.ensureLayout();
     const sessionId = createSessionId(options.request);
-    const createdAt = nowIso();
+    const createdAt = nowReadableDateTime();
     const session: SessionRecord = {
       schema_version: 1,
       session_id: sessionId,
@@ -236,7 +237,7 @@ export class RuntimeStore {
       runner: args.runner,
       input: args.input,
       output: "",
-      started_at: nowIso(),
+      started_at: nowReadableDateTime(),
       last_heartbeat_at: undefined,
       heartbeat_count: 0,
       error: "",
@@ -257,7 +258,7 @@ export class RuntimeStore {
 
   async completeAgentRun(record: AgentRunRecord, patch: Partial<AgentRunRecord>): Promise<AgentRunRecord> {
     const current = await this.readAgentRun(record.session_id, record.agent_run_id).catch(() => record);
-    const completedAt = patch.completed_at ?? nowIso();
+    const completedAt = patch.completed_at ?? nowReadableDateTime();
     const completed = AgentRunSchema.parse({
       ...current,
       ...patch,
@@ -272,7 +273,7 @@ export class RuntimeStore {
     });
     await this.writeAgentRun(completed);
     await this.appendEvent({
-      at: completed.completed_at ?? nowIso(),
+      at: completed.completed_at ?? nowReadableDateTime(),
       session_id: completed.session_id,
       kind: "agent_run_completed",
       role: completed.role,
@@ -291,7 +292,7 @@ export class RuntimeStore {
     if (existing.status !== "running") {
       return existing;
     }
-    const heartbeatAt = nowIso();
+    const heartbeatAt = nowReadableDateTime();
     const updated = AgentRunSchema.parse({
       ...existing,
       last_heartbeat_at: heartbeatAt,
@@ -343,7 +344,7 @@ export class RuntimeStore {
       }
       sessions.push(SessionSchema.parse(await readJson(file)));
     }
-    return sessions.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    return sessions.sort((a, b) => compareTimestamps(b.updated_at, a.updated_at));
   }
 
   async readEvents(sessionId: string): Promise<RuntimeEvent[]> {
@@ -371,7 +372,7 @@ export class RuntimeStore {
       }
       runs.push(AgentRunSchema.parse(await readJson(path.join(root, entry.name))));
     }
-    return runs.sort((a, b) => a.started_at.localeCompare(b.started_at));
+    return runs.sort((a, b) => compareTimestamps(a.started_at, b.started_at));
   }
 
   async recordPromptTrace(args: {
@@ -383,7 +384,7 @@ export class RuntimeStore {
     metadata?: Record<string, unknown>;
   }): Promise<PromptTraceRecord> {
     await this.ensureLayout();
-    const createdAt = nowIso();
+    const createdAt = nowReadableDateTime();
     const promptId = createPromptTraceId(args.role, args.prompt);
     const dir = this.promptTraceDir(promptId);
     const promptPath = path.join(dir, "prompt.md");
@@ -435,7 +436,7 @@ export class RuntimeStore {
     content: string;
     metadata?: Record<string, unknown>;
   }): Promise<ArtifactRecord> {
-    const createdAt = nowIso();
+    const createdAt = nowReadableDateTime();
     const safeName = path.basename(args.name);
     const filePath = path.join(this.artifactsDir(args.sessionId), safeName);
     await mkdir(path.dirname(filePath), { recursive: true });
@@ -538,7 +539,7 @@ export class RuntimeStore {
     } else {
       index.sessions.push(entry);
     }
-    index.sessions.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    index.sessions.sort((a, b) => compareTimestamps(b.updated_at, a.updated_at));
     await this.writeSessionIndex(index);
   }
 

@@ -65,6 +65,29 @@ export function applyOpenAIExecutorEnv(config: OpenAIExecutorConfig, env: NodeJS
   }
 }
 
+export function shouldEnableOpenAITracing(config: OpenAIExecutorConfig): boolean {
+  if (!config.baseUrl) {
+    return true;
+  }
+  return isOfficialOpenAIBaseUrl(config.baseUrl);
+}
+
+export function shouldEnableOpenAISandboxApplyPatch(config: OpenAIExecutorConfig): boolean {
+  if (!config.baseUrl) {
+    return true;
+  }
+  return isOfficialOpenAIBaseUrl(config.baseUrl);
+}
+
+function isOfficialOpenAIBaseUrl(value: string): boolean {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    return host === "api.openai.com";
+  } catch {
+    return false;
+  }
+}
+
 function loadCodexConfig(codexHome = path.join(homedir(), ".codex")): CodexConfig & { apiKey?: string } {
   return {
     ...loadCodexRuntimeConfig(path.join(codexHome, "config.toml")),

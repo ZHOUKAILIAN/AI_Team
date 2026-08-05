@@ -181,7 +181,7 @@ export const AgentRunSchema = z.object({
   agent_run_id: z.string(),
   role: AgentRoleSchema,
   status: z.enum(["running", "completed", "blocked", "failed"]),
-  runner: z.enum(["openai_sandbox", "local_fallback"]),
+  runner: z.enum(["openai_sandbox", "codex_exec", "pi_exec", "local_fallback"]),
   input: z.string(),
   output: z.string().default(""),
   started_at: z.string(),
@@ -199,7 +199,7 @@ export const PromptTraceSchema = z.object({
   session_id: z.string(),
   role: AgentRoleSchema,
   kind: z.enum(["stage", "runtime"]).default("stage"),
-  runner: z.enum(["openai_sandbox", "local_fallback"]).optional(),
+  runner: z.enum(["openai_sandbox", "codex_exec", "pi_exec", "local_fallback"]).optional(),
   source: z.string(),
   path: z.string(),
   sha256: z.string(),
@@ -392,6 +392,47 @@ export const SessionIndexSchema = z.object({
 });
 export type SessionIndex = z.infer<typeof SessionIndexSchema>;
 
-export function nowIso(): string {
-  return new Date().toISOString();
+export function formatReadableDateTime(value: string | number | Date): string {
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) {
+    return typeof value === "string" ? value : "";
+  }
+  const year = date.getFullYear();
+  const month = padDatePart(date.getMonth() + 1);
+  const day = padDatePart(date.getDate());
+  const hour = padDatePart(date.getHours());
+  const minute = padDatePart(date.getMinutes());
+  const second = padDatePart(date.getSeconds());
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+}
+
+export function nowReadableDateTime(): string {
+  return formatReadableDateTime(new Date());
+}
+
+export const nowIso = nowReadableDateTime;
+
+export function compareTimestamps(left: string | undefined, right: string | undefined): number {
+  const leftTime = timestampMs(left);
+  const rightTime = timestampMs(right);
+  if (leftTime !== undefined && rightTime !== undefined) {
+    return leftTime - rightTime;
+  }
+  return (left ?? "").localeCompare(right ?? "");
+}
+
+export function latestTimestamp(values: string[]): string | undefined {
+  return values.sort((left, right) => compareTimestamps(right, left))[0];
+}
+
+function timestampMs(value: string | undefined): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function padDatePart(value: number): string {
+  return String(value).padStart(2, "0");
 }

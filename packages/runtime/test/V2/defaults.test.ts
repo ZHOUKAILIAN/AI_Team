@@ -6,18 +6,43 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyOpenAIExecutorEnv,
+  buildAgentRunner,
+  buildCodexExecPrompt,
+  buildPiExecPrompt,
+  commandsFromCodexExecEvents,
+  commandsFromPiExecEvents,
   createTaskWorktree,
+  finalMessageFromCodexExecEvents,
+  finalMessageFromPiExecEvents,
   hasOpenAIExecutorConfig,
   initRuntime,
+  materializePiSkills,
+  parseCodexExecJsonl,
+  parsePiExecJsonl,
   renderSkillInjection,
+  resolveAgentExecutorPreference,
   resolveOpenAIExecutorConfig,
   resolveSkillRouting,
   sandboxWorkspacePermissions,
+  shouldEnableOpenAISandboxApplyPatch,
+  shouldEnableOpenAITracing,
   skillsForExecutor,
+  summarizeCodexExecUsage,
   summarizeOpenAIUsage,
+  summarizePiExecUsage,
+  RuntimeStore,
 } from "../../src/V2/index.js";
+import { createSessionId } from "../../src/V2/ids.js";
 
 describe("V2 runtime defaults", () => {
+  it("keeps session ids compact", () => {
+    const sessionId = createSessionId("Source: /Users/zhoukailian/Desktop/work/group_pals/.worktrees/agtv2-debug-20260623/test.md");
+
+    expect(sessionId).toMatch(/^\d{8}T\d{9}-[a-f0-9]{8}$/);
+    expect(sessionId).not.toContain("source-users");
+    expect(sessionId.length).toBe(27);
+  });
+
   it("uses .agt2 for the source runtime and task worktrees", async () => {
     const repoRoot = await mkdtemp(path.join(tmpdir(), "agt2-defaults-"));
     await execa("git", ["init"], { cwd: repoRoot });
@@ -154,6 +179,52 @@ describe("V2 runtime defaults", () => {
     });
   });
 
+  it("disables SDK tracing for custom OpenAI-compatible base URLs", () => {
+    expect(shouldEnableOpenAITracing({
+      apiKey: "sk-test",
+      apiKeySource: "env",
+      baseUrlSource: "unset",
+      modelSource: "runtime_default",
+    })).toBe(true);
+    expect(shouldEnableOpenAITracing({
+      apiKey: "sk-test",
+      baseUrl: "https://api.openai.com/v1",
+      apiKeySource: "env",
+      baseUrlSource: "env",
+      modelSource: "runtime_default",
+    })).toBe(true);
+    expect(shouldEnableOpenAITracing({
+      apiKey: "sk-test",
+      baseUrl: "https://example.invalid/v1",
+      apiKeySource: "env",
+      baseUrlSource: "env",
+      modelSource: "runtime_default",
+    })).toBe(false);
+  });
+
+  it("disables SDK apply_patch for custom OpenAI-compatible base URLs", () => {
+    expect(shouldEnableOpenAISandboxApplyPatch({
+      apiKey: "sk-test",
+      apiKeySource: "env",
+      baseUrlSource: "unset",
+      modelSource: "runtime_default",
+    })).toBe(true);
+    expect(shouldEnableOpenAISandboxApplyPatch({
+      apiKey: "sk-test",
+      baseUrl: "https://api.openai.com/v1",
+      apiKeySource: "env",
+      baseUrlSource: "env",
+      modelSource: "runtime_default",
+    })).toBe(true);
+    expect(shouldEnableOpenAISandboxApplyPatch({
+      apiKey: "sk-test",
+      baseUrl: "https://example.invalid/v1",
+      apiKeySource: "env",
+      baseUrlSource: "env",
+      modelSource: "runtime_default",
+    })).toBe(false);
+  });
+
   it("respects CODEX_HOME when falling back to Codex OpenAI config", async () => {
     const codexHome = await mkdtemp(path.join(tmpdir(), "agt2-codex-home-"));
     await writeFile(path.join(codexHome, "config.toml"), [
@@ -188,6 +259,206 @@ describe("V2 runtime defaults", () => {
   it("uses SDK-cleanup-safe numeric sandbox permissions", () => {
     expect(sandboxWorkspacePermissions(false)).toBe(0o755);
     expect(sandboxWorkspacePermissions(true)).toBe(0o755);
+  });
+
+  it("can select codex exec as the V2 executor without changing the default auto path", async () => {
+    expect(resolveAgentExecutorPreference({})).toBe("auto");
+    expect(resolveAgentExecutorPreference({ AGT_EXECUTOR: "codex" })).toBe("codex_exec");
+    expect(resolveAgentExecutorPreference({ AGT_V2_EXECUTOR: "codex-exec" })).toBe("codex_exec");
+    expect(resolveAgentExecutorPreference({ AGT_EXECUTOR: "openai-sdk" })).toBe("openai_sandbox");
+
+    const stateRoot = await mkdtemp(path.join(tmpdir(), "agt2-runner-select-"));
+    const store = new RuntimeStore(stateRoot);
+    const previous = process.env.AGT_EXECUTOR;
+    process.env.AGT_EXECUTOR = "codex_exec";
+    try {
+      expect(buildAgentRunner(store).name).toBe("codex_exec");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AGT_EXECUTOR;
+      } else {
+        process.env.AGT_EXECUTOR = previous;
+      }
+    }
+  });
+
+  it("builds a codex exec prompt with AGT-controlled skill bodies", () => {
+    const prompt = buildCodexExecPrompt({
+      sessionId: "session",
+      role: "dev",
+      repoRoot: "/repo",
+      prompt: "Base stage prompt.",
+      skills: [{
+        name: "backend-verification",
+        description: "Verify backend changes.",
+        content: "# Backend Verification\nRun API checks.",
+        path: "/skills/backend-verification/SKILL.md",
+        content_sha256: "abc123",
+        required: true,
+      }],
+    });
+
+    expect(prompt).toContain("Base stage prompt.");
+    expect(prompt).toContain("# AGT-Routed Skill Bodies");
+    expect(prompt).toContain("## Skill: backend-verification");
+    expect(prompt).toContain("Run API checks.");
+  });
+
+  it("parses codex exec JSONL events into output, commands, and usage", () => {
+    const events = parseCodexExecJsonl([
+      JSON.stringify({ type: "thread.started", thread_id: "thread" }),
+      JSON.stringify({ type: "item.completed", item: { type: "command_execution", command: "npm test", status: "completed" } }),
+      JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "done" } }),
+      JSON.stringify({
+        type: "turn.completed",
+        usage: {
+          input_tokens: 10,
+          cached_input_tokens: 4,
+          output_tokens: 3,
+          reasoning_output_tokens: 2,
+        },
+      }),
+    ].join("\n"));
+
+    expect(commandsFromCodexExecEvents(events)).toEqual(["npm test"]);
+    expect(finalMessageFromCodexExecEvents(events)).toBe("done");
+    expect(summarizeCodexExecUsage(events)).toMatchObject({
+      input_tokens: 10,
+      output_tokens: 3,
+      total_tokens: 13,
+      reasoning_tokens: 2,
+    });
+  });
+
+  it("can select pi as the V2 executor without changing the default auto path", async () => {
+    expect(resolveAgentExecutorPreference({ AGT_EXECUTOR: "pi" })).toBe("pi_exec");
+    expect(resolveAgentExecutorPreference({ AGT_V2_EXECUTOR: "pi-exec" })).toBe("pi_exec");
+    expect(resolveAgentExecutorPreference({ AGT_EXECUTOR: "pi_exec" })).toBe("pi_exec");
+
+    const stateRoot = await mkdtemp(path.join(tmpdir(), "agt2-pi-runner-select-"));
+    const store = new RuntimeStore(stateRoot);
+    const previous = process.env.AGT_EXECUTOR;
+    process.env.AGT_EXECUTOR = "pi_exec";
+    try {
+      expect(buildAgentRunner(store).name).toBe("pi_exec");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AGT_EXECUTOR;
+      } else {
+        process.env.AGT_EXECUTOR = previous;
+      }
+    }
+  });
+
+  it("materializes stage skills into per-stage pi skill folders", async () => {
+    const repoRoot = await mkdtemp(path.join(tmpdir(), "agt2-pi-skills-repo-"));
+    const skillsRoot = await mkdtemp(path.join(tmpdir(), "agt2-pi-skills-root-"));
+    const materialized = await materializePiSkills({
+      sessionId: "session",
+      role: "dev",
+      repoRoot,
+      prompt: "Base stage prompt.",
+      stage: "dev.implementation",
+      skills: [{
+        name: "implementation-skill",
+        description: "Implement changes.",
+        content: "# Implementation Skill\nFollow the plan.",
+        path: path.join(skillsRoot, "implementation-skill", "SKILL.md"),
+        content_sha256: "def456",
+        required: true,
+      }],
+    }, skillsRoot);
+
+    expect(materialized.skillDirs).toHaveLength(1);
+    expect(materialized.skillDirs[0]).toContain(path.join("dev.implementation", "implementation-skill"));
+    expect(materialized.index[0]).toMatchObject({
+      name: "implementation-skill",
+      content_sha256: "def456",
+      required: true,
+    });
+    const skillMd = await readFile(path.join(materialized.skillDirs[0], "SKILL.md"), "utf8");
+    expect(skillMd).toContain("Follow the plan.");
+  });
+
+  it("builds a pi exec prompt that references materialized skill folders instead of inlining bodies", () => {
+    const prompt = buildPiExecPrompt({
+      sessionId: "session",
+      role: "dev",
+      repoRoot: "/repo",
+      prompt: "Base stage prompt.",
+      stage: "dev.implementation",
+      skills: [{
+        name: "implementation-skill",
+        description: "Implement changes.",
+        content: "# Implementation Skill\nFollow the plan.",
+        path: "/skills/implementation-skill/SKILL.md",
+        content_sha256: "def456",
+        required: true,
+      }],
+    }, {
+      skillDirs: ["/repo/.agt2/pi-skills/dev.implementation/implementation-skill"],
+      index: [{
+        name: "implementation-skill",
+        path: "/repo/.agt2/pi-skills/dev.implementation/implementation-skill",
+        relative_path: ".agt2/pi-skills/dev.implementation/implementation-skill",
+        content_sha256: "def456",
+        required: true,
+      }],
+    });
+
+    expect(prompt).toContain("Base stage prompt.");
+    expect(prompt).toContain("# AGT Stage Skills");
+    expect(prompt).toContain("Path (relative to repo root): .agt2/pi-skills/dev.implementation/implementation-skill");
+    expect(prompt).not.toContain("Follow the plan.");
+    expect(prompt).not.toContain("# AGT-Routed Skill Bodies");
+  });
+
+  it("parses pi exec JSONL events into output, commands, and usage", () => {
+    const events = parsePiExecJsonl([
+      JSON.stringify({ type: "session", version: 3, id: "s1", timestamp: "t", cwd: "/repo" }),
+      JSON.stringify({ type: "agent_start" }),
+      JSON.stringify({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "first draft" }, { type: "thinking", thinking: "hidden" }],
+          responseId: "r1",
+          usage: { input: 10, output: 2, cacheRead: 3, cacheWrite: 1, reasoning: 1, cost: { total: 0 } },
+        },
+      }),
+      JSON.stringify({
+        type: "tool_execution_start",
+        toolCallId: "c1",
+        toolName: "bash",
+        args: { command: "npm test" },
+      }),
+      JSON.stringify({
+        type: "tool_execution_end",
+        toolCallId: "c1",
+        toolName: "bash",
+        result: { content: [{ type: "text", text: "ok" }] },
+        isError: false,
+      }),
+      JSON.stringify({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "final answer" }],
+          responseId: "r2",
+          usage: { input: 20, output: 5, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } },
+        },
+      }),
+      JSON.stringify({ type: "agent_end" }),
+    ].join("\n"));
+
+    expect(commandsFromPiExecEvents(events)).toEqual(["npm test"]);
+    expect(finalMessageFromPiExecEvents(events)).toBe("final answer");
+    expect(summarizePiExecUsage(events)).toMatchObject({
+      input_tokens: 30,
+      output_tokens: 7,
+      total_tokens: 41,
+      reasoning_tokens: 1,
+    });
   });
 
   it("routes V2 skills by concrete stage without broad role bleed-through", async () => {

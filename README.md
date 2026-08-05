@@ -56,6 +56,8 @@ AGT 的产品定义如下：
 
 AGT 的稳定边界是：它负责把需求交付过程协议化、状态化和证据化；它不承诺替代某个 coding agent 的阶段内执行能力。
 
+Executor 协议不能成为 AGT 的产品边界。OpenAI Agents SDK 的 sandbox tool、Codex CLI、OpenCode 或其他执行器都只是阶段执行实现；AGT 必须保留自己的 workflow state、skill routing、context packet、artifact 和 evidence。已知问题是部分 OpenAI-compatible `base_url` 只支持模型请求或普通工具调用，不支持 Agents SDK 原生 `apply_patch` tool type；这类兼容性问题应通过可替换 executor 解决，而不是把 `skill` 或状态机下沉到某个执行器。
+
 ## 当前能力
 
 下面这一节描述的是当前仓库已经实现的 runtime 能力。V1 和 V2 在代码目录和 CLI 入口上都分开：`agt` 对应 V1，`agt2`/`agtv2` 对应 V2。
@@ -174,7 +176,7 @@ agt inspect <session_id>
 
 如果启用 task worktree，`agt run --continue`、`agt status`、`agt inspect` 和 `agt decision` 会先读主状态目录的 `session-index.json`，再跳到对应 worktree 的 `state_root` 读取真实 session。因此从主项目目录也能继续或检查 worktree 里的任务。
 
-## OpenAI SDK 执行
+## Executor 执行
 
 当存在 `OPENAI_API_KEY` 或 `OPENAI_BASE_URL` 时，runtime 会使用 OpenAI Agents SDK：
 
@@ -206,6 +208,41 @@ V1 的默认模型和每个 profile 的最大 turns 可以写在 `.agt/config.js
 ```
 
 V2 executor 优先读取 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`AGT_OPENAI_MODEL` / `OPENAI_MODEL`。如果这些环境变量没有设置，会尝试读取 `~/.codex/config.toml` 的 `model` / `model_provider` / provider `base_url`，以及 `~/.codex/auth.json` 的 `OPENAI_API_KEY`。环境变量和 Codex 配置都不可用时，runtime 才会走 `local_fallback`，只执行确定性的本地检查并写入同样的状态文件。这样 `npm test`、CLI smoke 和迁移验证不依赖外部模型。
+
+V2 也可以显式改用 Codex CLI 作为阶段 executor，让 Codex 负责 shell / patch / file change 的工具闭环，AGT 仍负责组装 prompt、选择 skills、记录 state 和 evidence：
+
+```bash
+AGT_EXECUTOR=codex_exec agt2 deliver --from docs/requirement.md
+AGT_EXECUTOR=codex_exec node packages/cli/dist/V2/index.js deliver --from test.md --no-task-worktree
+```
+
+`codex_exec` runner 调用 `codex exec --json`，只把 AGT 当前 stage 选中的 skill body inline 到最终执行 prompt，不依赖 Codex 本地 skills 选择。每次 Codex run 会记录 `<agent_run_id>-codex-exec-prompt.md`、`<agent_run_id>-codex-exec-events.jsonl`、agent run metadata、tool call 摘要、commands、changed files 和 token usage。
+
+V2 也可以用 pi coding agent 作为阶段 executor，并通过文件夹实现 stage 级 skill 隔离：
+
+```bash
+AGT_EXECUTOR=pi_exec agt2 deliver --from docs/requirement.md
+AGT_EXECUTOR=pi_exec node packages/cli/dist/V2/index.js deliver --from test.md --no-task-worktree
+```
+
+`pi_exec` runner 以 `pi --mode json` 调用 pi，把 AGT 组装的阶段 prompt 通过 stdin 传入。skill 隔离方式与 codex（prompt inline）和 SDK（sandbox sdk skill）不同：AGT 把当前 stage 路由选中的 skill **物化到按 stage 隔离的文件夹** `<stateRoot>/pi-skills/<stage>/<skill-name>/`（保留 SKILL.md 与同目录脚本/资源），然后以 `--no-skills --skill <dir>...` 精确加载这些文件夹，其它本地/全局 skill 一律不进入阶段上下文。每次 Pi run 会记录 `<agent_run_id>-pi-exec-prompt.md`、`<agent_run_id>-pi-exec-events.jsonl`（pi json 事件流，含 tool execution 与 usage）、`<agent_run_id>-pi-skills.json`（物化 skill 索引与 sha256）、tool call 摘要、commands、changed files 和 token usage。
+
+`pi_exec` 支持以下环境变量：
+
+| 变量 | 说明 | 默认 |
+|------|------|------|
+| `AGT_PI_BIN` | pi 可执行文件路径 | `pi` |
+| `AGT_PI_MODEL` | 模型 pattern（如 `anthropic/claude-sonnet-4-5`） | pi 默认模型 |
+| `AGT_PI_PROVIDER` | provider 名 | pi 默认 provider |
+| `AGT_PI_THINKING` | thinking level（`off`/`low`/`medium`/`high`/`xhigh`/`max`） | pi 默认 |
+| `AGT_PI_SKILLS_ROOT` | skill 物化根目录 | `<stateRoot>/pi-skills` |
+| `AGT_PI_TIMEOUT_MS` | 单阶段墙钟超时（pi 没有 max-turns CLI 参数，用超时兜底） | `1800000`（30 分钟） |
+| `AGT_PI_CONTEXT_FILES` | 设为 `1` 时允许 pi 加载 `AGENTS.md`/`CLAUDE.md` 上下文文件 | 关闭（AGT prompt 是唯一事实源） |
+
+注意 pi 与 codex 的两点行为差异：
+
+- pi 没有 `--sandbox`，只读阶段的写入约束靠阶段 prompt 约束 + 运行后 git diff 审计（`files_changed`），不是硬隔离；写入约束过强时请使用 task worktree 隔离。
+- pi 的 skill 是渐进式披露（system prompt 只有描述，模型按需 `read` SKILL.md），`buildPiExecPrompt` 会在阶段 prompt 末尾列出每个 stage skill 的路径并指示先 `read`，不要依赖“body 必然在上下文里”。
 
 ## 状态目录
 
