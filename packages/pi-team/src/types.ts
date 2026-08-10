@@ -9,6 +9,7 @@ export type RoleExecutionResult = {
   events: unknown[];
   filesChanged: string[];
   commandsRun: string[];
+  skills?: Array<{ name: string; filePath: string }>;
   usage?: Record<string, unknown>;
 };
 
@@ -21,6 +22,8 @@ export type RoleExecutionInput = {
   workspaceRoot: string;
   signal?: AbortSignal;
   onEvent?: (event: unknown) => void;
+  skillNames?: string[];
+  requiredSkillNames?: string[];
 };
 
 export interface RoleExecutor {

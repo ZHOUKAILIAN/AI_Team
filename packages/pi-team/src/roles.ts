@@ -7,6 +7,8 @@ export type RoleDefinition = {
   description: string;
   model?: string;
   tools?: string[];
+  skills?: string[];
+  requiredSkills?: string[];
   systemPrompt: string;
   filePath: string;
 };
@@ -28,15 +30,14 @@ export async function loadRoleDefinition(options: {
       const parsed = parseFrontmatter<Record<string, string>>(content);
       const name = parsed.frontmatter.name?.trim() || options.role;
       const description = parsed.frontmatter.description?.trim() || "";
-      const tools = parsed.frontmatter.tools
-        ?.split(",")
-        .map((tool) => tool.trim())
-        .filter(Boolean);
+      const tools = parseCommaList(parsed.frontmatter.tools);
       return {
         name,
         description,
         model: parsed.frontmatter.model?.trim() || undefined,
         tools,
+        skills: parseCommaList(parsed.frontmatter.skills),
+        requiredSkills: parseCommaList(parsed.frontmatter.required_skills ?? parsed.frontmatter["required-skills"]),
         systemPrompt: parsed.body.trim(),
         filePath,
       };
@@ -45,4 +46,9 @@ export async function loadRoleDefinition(options: {
     }
   }
   throw new Error(`Pi agent definition not found: ${options.role}`);
+}
+
+function parseCommaList(value: string | undefined): string[] | undefined {
+  const values = value?.split(",").map((item) => item.trim()).filter(Boolean);
+  return values?.length ? values : undefined;
 }

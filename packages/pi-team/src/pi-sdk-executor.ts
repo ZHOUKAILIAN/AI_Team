@@ -32,10 +32,22 @@ export class PiSdkExecutor implements RoleExecutor {
     const agentDir = this.options.agentDir ?? getAgentDir();
     const modelRuntime = this.options.modelRuntime ?? await ModelRuntime.create({});
     const roleModel = role.model ? resolveRoleModel(modelRuntime, role.model) : undefined;
+    const selectedSkills: Array<{ name: string; filePath: string }> = [];
+    const requestedSkills = input.skillNames ?? role.skills ?? [];
+    const requiredSkills = new Set(input.requiredSkillNames ?? role.requiredSkills ?? []);
+    const allowedSkills = new Set([...requestedSkills, ...requiredSkills]);
     const loader = new DefaultResourceLoader({
       cwd: input.repoRoot,
       agentDir,
       systemPromptOverride: () => role.systemPrompt,
+      skillsOverride: (base) => {
+        const skills = base.skills.filter((skill) => allowedSkills.has(skill.name));
+        selectedSkills.splice(0, selectedSkills.length, ...skills.map((skill) => ({ name: skill.name, filePath: skill.filePath })));
+        const loadedNames = new Set(skills.map((skill) => skill.name));
+        const missing = [...requiredSkills].filter((name) => !loadedNames.has(name));
+        if (missing.length > 0) throw new Error(`Required pi skills not found for ${input.stage}/${input.role}: ${missing.join(", ")}`);
+        return { skills, diagnostics: base.diagnostics };
+      },
     });
     await loader.reload();
     const { session } = await createAgentSession({
@@ -61,6 +73,7 @@ export class PiSdkExecutor implements RoleExecutor {
         events,
         filesChanged: [],
         commandsRun: collectCommands(events),
+        skills: selectedSkills,
       };
     } finally {
       unsubscribe();
