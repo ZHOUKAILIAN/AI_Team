@@ -712,6 +712,16 @@ PiAgentTeam
 
 第一版暂不接入具体的外部记忆服务、Feishu、Issue、代码图谱或向量数据库，但必须保留 `ContextProvider`、`ContextAssembler`、`MemoryProvider` 和 `WorkflowHook` 的扩展位置。
 
+第一版暂不引入：
+
+- sandbox / 容器隔离；
+- 网络权限沙箱；
+- 复杂进程资源限制；
+- 分布式执行；
+- 多用户权限系统。
+
+当前默认信任本地开发环境和仓库执行范围。后续如果接入不可信仓库、远程共享执行、生产相关操作或更严格的团队权限要求，再单独引入 sandbox、process isolation 和 permission policy。
+
 ### 阶段 2：快路径和可恢复
 
 - quick / standard / full workflow profile；
