@@ -183,26 +183,126 @@ repo-local agent 定义是团队可共享的事实来源；个人全局 agent �
 
 ### 5.3 workflow 流程
 
-标准流程：
+标准流程不是一次性直通，而是包含需求对齐、技术方案确认、执行、评审和验证的受控流程：
 
-```text
-原始需求
-  -> Intake / 需求摘要
-  -> Product：范围、规则、验收标准
-  -> 人工 Check
-  -> Dev：技术方案、代码实现、自测
-  -> 人工 Check
-  -> QA：独立验证、边界检查、最终 verdict
-  -> 交付结论
+```mermaid
+flowchart TD
+  A[用户输入原始需求] --> B[创建 Team Run]
+  B --> C[加载 repo-local agents / skills / context]
+  C --> D[需求对齐\nproduct_aligner]
+  D --> D1{需求是否需要用户决策?}
+  D1 -->|是| D2[展示目标、范围、验收标准、待定问题]
+  D2 --> DG{人工确认}
+  DG -->|修改/补充| D
+  DG -->|重新对齐| D
+  DG -->|暂停| P[waiting_for_human\n保存当前 run]
+  DG -->|停止| X[stopped\n保留现场]
+  D1 -->|否| D3[生成需求合同]
+  D3 --> DG2{需求合同确认}
+  DG2 -->|修改/补充| D
+  DG2 -->|确认| T[技术方案\nproduct_aligner]
+  T --> TG[展示方案、改动范围、风险、测试计划]
+  TG --> TC{人工确认技术方案}
+  TC -->|修改| T
+  TC -->|重跑| T
+  TC -->|暂停| P
+  TC -->|停止| X
+  TC -->|确认| I[执行实现\nimplementer]
+  I --> IC{实现是否正常完成?}
+  IC -->|失败/阻塞| IF[记录失败证据]
+  IF -->|需要重新对齐| D
+  IF -->|可重试| I
+  IC -->|完成| ID[展示 diff、自测命令、结果、未完成项]
+  ID --> IG{人工交付确认}
+  IG -->|补充要求| T
+  IG -->|重试实现| I
+  IG -->|暂停| P
+  IG -->|停止| X
+  IG -->|确认| R[代码评审\ncode_reviewer]
+  R --> R1[Standards 轴评审]
+  R --> R2[Spec 轴评审]
+  R1 --> RR[汇总评审结果]
+  R2 --> RR
+  RR --> RC{是否有 P0/P1 问题?}
+  RC -->|是| IF2[回到对齐/执行修正]
+  IF2 -->|需求冲突| D
+  IF2 -->|实现问题| I
+  RC -->|否| V[独立验证\nverifier]
+  V --> VC{验证结果}
+  VC -->|passed| DONE[完成\n交付结论 + 全部证据]
+  VC -->|failed| VF[记录失败项和复现证据]
+  VF --> I
+  VC -->|blocked| VB[记录阻塞原因]
+  VB --> P
+  P --> PR{用户恢复决策}
+  PR -->|approve/继续| D4[读取 run.json\n从原阶段继续]
+  PR -->|修改| D
+  PR -->|retry| D5[重试当前阶段]
+  PR -->|stop| X
+  D4 --> D
+  D5 --> D
+
+  subgraph Pi[pi Agent Engine]
+    PE[AgentSession]
+    PT[model / provider]
+    PO[coding tools]
+    PS[skills / extensions]
+    PV[streaming events]
+  end
+
+  D -.每阶段调用.-> PE
+  T -.每阶段调用.-> PE
+  I -.每阶段调用.-> PE
+  R -.每阶段调用.-> PE
+  V -.每阶段调用.-> PE
+  PT --> PE
+  PO --> PE
+  PS --> PE
+  PE --> PV
+
+  subgraph Shared[Team Layer 共享内容]
+    W[Run Workspace\nrequest / contracts / reports]
+    CP[ContextProvider / ContextAssembler]
+    HO[WorkflowHook]
+    EV[EvidenceRecorder]
+  end
+
+  CP --> W
+  W --> D
+  W --> T
+  W --> I
+  W --> R
+  W --> V
+  HO --> D
+  HO --> T
+  HO --> I
+  HO --> R
+  HO --> V
+  PV --> EV
+  EV --> W
 ```
+
+其中：
+
+- **Team Layer** 负责阶段顺序、人工确认、暂停恢复、内容交接和状态判断；
+- **pi Agent Engine** 负责 agent session、模型、工具、skills 和实时事件；
+- **Run Workspace** 是阶段之间共享的内容介质；
+- **EvidenceRecorder** 保存 prompt、事件、tool call、命令、diff、状态和人工决策；
+- Product 和技术方案未确认时，Implementer 不允许启动；
+- Review 的 Standards / Spec 任一轴发现 P0/P1，都不能直接进入验证；
+- QA failed 回到实现，QA blocked 回到人工等待；
+- 用户暂停后从同一个 `runId` 恢复，不销毁并重开整个会话。
 
 第一阶段只验证单线流程，不先做并行 Dev。后续可以扩展为：
 
-```text
-Product
-  -> Dev Plan
-  -> Dev-A / Dev-B 并行
-  -> QA
+```mermaid
+flowchart LR
+  P[Product / 技术方案确认] --> A[Dev-A]
+  P --> B[Dev-B]
+  P --> C[Dev-C]
+  A --> Q[QA]
+  B --> Q
+  C --> Q
 ```
 
 阶段推进由代码和结构化状态控制，不能只依赖模型在 prompt 中自行决定是否跳过阶段。
