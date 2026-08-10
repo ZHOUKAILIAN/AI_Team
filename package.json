@@ -15,10 +15,10 @@
   ],
   "scripts": {
     "build": "npm run build:packages && npm run build:web",
-    "build:packages": "tsc -b packages/runtime packages/migrator packages/server packages/cli",
+    "build:packages": "tsc -b packages/runtime packages/migrator packages/server packages/cli packages/pi-team",
     "build:web": "npm --workspace @agent-team-runtime/web run build",
     "dev:web": "npm --workspace @agent-team-runtime/web run dev",
-    "typecheck": "tsc -b packages/runtime packages/migrator packages/server packages/cli && npm --workspace @agent-team-runtime/web run typecheck",
+    "typecheck": "tsc -b packages/runtime packages/migrator packages/server packages/cli packages/pi-team && npm --workspace @agent-team-runtime/web run typecheck",
     "test": "npm --workspaces --if-present run test --include-workspace-root=false"
   },
   "engines": {

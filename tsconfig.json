@@ -4,6 +4,7 @@
     { "path": "packages/runtime" },
     { "path": "packages/migrator" },
     { "path": "packages/server" },
-    { "path": "packages/cli" }
+    { "path": "packages/cli" },
+    { "path": "packages/pi-team" }
   ]
 }
